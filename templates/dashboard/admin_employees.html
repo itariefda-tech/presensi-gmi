@@ -1,0 +1,29 @@
+{% extends "dashboard/base.html" %}
+{% set active = "employees" %}
+{% set heading = "Daftar Pegawai Outsource" %}
+{% set subtitle = "Satpam, cleaning service, operator, supir, dll" %}
+
+{% block body %}
+<div class="card">
+  <table class="table" aria-label="Daftar pegawai outsource">
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Nama</th>
+        <th>Posisi</th>
+        <th>Client</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for e in employees %}
+      <tr>
+        <td>{{ e.id }}</td>
+        <td>{{ e.name }}</td>
+        <td>{{ e.role }}</td>
+        <td>{{ e.client }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

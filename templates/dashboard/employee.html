@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Pegawai GMI</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/employee_mobile.css') }}" />
+</head>
+<body class="employee-body" data-email="{{ user.email }}">
+  <div class="employee-shell">
+    <header class="employee-header">
+      <div class="header-top">
+        <div class="header-col header-left">
+          <div class="profile-name">  Pegawai GMI</div>
+          <div class="profile-email">  {{ user.email }}</div>
+          <div class="site-subtitle">  PT. Papertech (Subang)</div>
+        </div>
+        <div class="header-col header-center">
+          <div class="clock-circle" aria-hidden="true"></div>
+          <img id="profilePhoto" class="profile-photo" src="{% if user.selfie_path %}{{ url_for('static', filename=user.selfie_path) }}{% else %}{{ url_for('static', filename='img/arief.jpg') }}{% endif %}" alt="" />
+        </div>
+        <div class="header-col header-right">
+          <div class="header-right-stack">
+          <div class="theme-toggle" role="group" aria-label="Tema">
+            <button class="theme-btn active" data-theme="dark" type="button" aria-label="Tema gelap">
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M12 2a9 9 0 1 0 9 9c0-.34-.02-.68-.06-1.01A7 7 0 1 1 13.01 2.06C12.68 2.02 12.34 2 12 2z"/>
+              </svg>
+              <span class="sr-only">Gelap</span>
+            </button>
+            <button class="theme-btn" data-theme="light" type="button" aria-label="Tema terang">
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M12 4a1 1 0 0 1 1 1v1.5a1 1 0 0 1-2 0V5a1 1 0 0 1 1-1zm0 12.5a1 1 0 0 1 1 1V19a1 1 0 0 1-2 0v-1.5a1 1 0 0 1 1-1zM5.64 6.64a1 1 0 0 1 1.41 0l1.06 1.06a1 1 0 1 1-1.41 1.41L5.64 8.05a1 1 0 0 1 0-1.41zm10.24 10.24a1 1 0 0 1 1.41 0l1.06 1.06a1 1 0 0 1-1.41 1.41l-1.06-1.06a1 1 0 0 1 0-1.41zM4 11a1 1 0 0 1 1-1h1.5a1 1 0 1 1 0 2H5a1 1 0 0 1-1-1zm12.5 0a1 1 0 0 1 1-1H19a1 1 0 1 1 0 2h-1.5a1 1 0 0 1-1-1zM6.64 18.36a1 1 0 0 1 0-1.41l1.06-1.06a1 1 0 1 1 1.41 1.41l-1.06 1.06a1 1 0 0 1-1.41 0zm10.24-10.24a1 1 0 0 1 0-1.41l1.06-1.06a1 1 0 1 1 1.41 1.41l-1.06 1.06a1 1 0 0 1-1.41 0zM12 8a4 4 0 1 1-4 4 4 4 0 0 1 4-4z"/>
+              </svg>
+              <span class="sr-only">Terang</span>
+            </button>
+          </div>
+            <div class="clock-site-row" aria-label="Jam digital">
+              <div class="clock-row" aria-label="Jam digital">
+                <span id="clockHH">00</span><span id="clockColon" class="clock-colon">:</span><span id="clockMM">00</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    
+
+    <div class="swipe-viewport">
+      <div class="swipe-track" id="swipeTrack">
+        <section class="swipe-pane" data-pane="0" aria-label="Presensi">
+          <div class="card mobile-card presence-card">
+            <div class="presence-status">
+              <div class="status-left">
+                <span class="status-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" role="img" aria-hidden="true">
+                    <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5A2.5 2.5 0 1 1 12 6a2.5 2.5 0 0 1 0 5.5z"/>
+                  </svg>
+                </span>
+                <div class="status-text">
+                  <div class="status-title">Siap presensi</div>
+                  <div class="status-sub">Lokasi aktif</div>
+                </div>
+              </div>
+              <div class="status-badge online" id="netStatus">Online</div>
+            </div>
+
+            <div class="presence-actions">
+              <button class="btn-presence btn-checkin" id="btnCheckin" type="button">
+                <span class="btn-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" role="img" aria-hidden="true">
+                    <path d="M12 2a7 7 0 1 0 7 7 7 7 0 0 0-7-7zm1 7V5h-2v6h6V9z"/>
+                  </svg>
+                </span>
+                <span class="btn-label">Masuk</span>
+                <span class="btn-spinner" aria-hidden="true"></span>
+              </button>
+              <button class="btn-presence btn-checkout" id="btnCheckout" type="button">
+                <span class="btn-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" role="img" aria-hidden="true">
+                    <path d="M12 2a7 7 0 1 0 7 7 7 7 0 0 0-7-7zm-1 11h2v6h-2zm0-8h2v6h-2z"/>
+                  </svg>
+                </span>
+                <span class="btn-label">Pulang</span>
+                <span class="btn-spinner" aria-hidden="true"></span>
+              </button>
+            </div>
+
+            <div class="presence-last">
+              <span class="last-label">Terakhir:</span>
+              <span id="lastActionTime">--:--</span>
+              <span id="lastActionBadge" class="last-badge">-</span>
+            </div>
+
+            <div class="mode-chips" role="group" aria-label="Metode presensi">
+              <button class="chip active" data-mode="gps_selfie" type="button">GPS+Selfie</button>
+              <button class="chip" data-mode="gps" type="button">GPS</button>
+              <button class="chip" data-mode="qr" type="button">QR</button>
+            </div>
+
+            <button class="help-btn" id="btnHelp" type="button">Butuh Bantuan?</button>
+
+            <div class="presence-tools">
+              <select id="attMethod" class="input hidden">
+                <option value="gps_selfie">GPS + Selfie</option>
+                <option value="gps">GPS saja</option>
+                <option value="qr">QR / Barcode</option>
+              </select>
+
+              <div class="tool-row">
+                <button class="btn secondary full btn-location" id="btnLocation" type="button">Ambil Lokasi</button>
+                <div class="muted" id="locStatus">Belum ada lokasi.</div>
+                <input type="hidden" id="lat" />
+                <input type="hidden" id="lon" />
+              </div>
+
+              <div class="tool-row tool-selfie">
+                <label class="label">Selfie</label>
+                <input type="file" id="selfieFile" class="input" accept="image/*" capture="user" />
+                <img id="selfiePreview" class="preview" alt="" />
+              </div>
+
+              <div class="tool-row tool-qr">
+                <label class="label">QR / Barcode</label>
+                <button class="btn secondary full" id="btnScan" type="button">Mulai Scan</button>
+                <div class="muted" id="qrStatus">Belum scan.</div>
+                <video id="qrVideo" class="preview" autoplay muted playsinline></video>
+                <input type="text" id="qrData" class="input" placeholder="Hasil scan QR" />
+              </div>
+            </div>
+
+            <div class="presence-toast" id="attToast" role="status" aria-live="polite"></div>
+            <div class="sr-only" id="checkinStatus">Check-in: -</div>
+            <div class="sr-only" id="checkoutStatus">Check-out: -</div>
+          </div>
+
+          <div class="help-modal" id="helpModal" aria-hidden="true">
+            <div class="help-card" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
+              <div class="help-title" id="helpTitle">Panduan singkat</div>
+              <div class="help-text">Tekan Masuk untuk mulai kerja, tekan Pulang saat selesai.</div>
+              <button class="btn primary full" id="btnHelpClose" type="button">Tutup</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="swipe-pane" data-pane="1" aria-label="Izin dan Story">
+          <div class="card mobile-card">
+            <div class="leave-header">
+              <h4>Ajukan</h4>
+              <div class="leave-summary">
+                <span id="leavePendingCount">Menunggu: 0</span>
+                <button class="icon-btn" id="btnLeaveRefresh" type="button" aria-label="Refresh">?Y3</button>
+              </div>
+            </div>
+            <div class="leave-quick-actions">
+              <button class="leave-action-btn" data-type="izin" type="button">
+                <span class="action-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" role="img" aria-hidden="true">
+                    <path d="M7 2h7l5 5v15a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm7 1.5V8h4.5"/>
+                  </svg>
+                </span>
+                <span>Izin</span>
+              </button>
+              <button class="leave-action-btn" data-type="sakit" type="button">
+                <span class="action-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" role="img" aria-hidden="true">
+                    <path d="M11 4h2v16h-2zM4 11h16v2H4z"/>
+                  </svg>
+                </span>
+                <span>Sakit</span>
+              </button>
+              <button class="leave-action-btn" data-type="absen" type="button">
+                <span class="action-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" role="img" aria-hidden="true">
+                    <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/>
+                  </svg>
+                </span>
+                <span>Absen</span>
+              </button>
+            </div>
+
+            <div class="leave-sheet" id="leaveSheet" aria-hidden="true">
+              <div class="leave-sheet-panel" aria-labelledby="leaveSheetTitle">
+                <div class="leave-sheet-title" id="leaveSheetTitle">Ajukan <span id="leaveTypeLabel">Izin</span></div>
+                <select id="leaveType" class="input hidden">
+                  <option value="izin">Izin</option>
+                  <option value="sakit">Sakit</option>
+                  <option value="absen">Absen</option>
+                </select>
+                <div class="field-group">
+                  <label class="label">Tanggal</label>
+                  <input type="date" id="leaveFrom" class="input" />
+                  <input type="date" id="leaveTo" class="input" />
+                </div>
+                <div class="field-group">
+                  <label class="label">Alasan</label>
+                  <textarea id="leaveReason" class="input" rows="3" placeholder="Tulis singkat"></textarea>
+                </div>
+                <div class="field-group">
+                  <label class="label">Lampiran (opsional)</label>
+                  <input type="file" id="leaveAttachment" class="input" accept="image/*" />
+                </div>
+                <button class="btn primary full" id="btnLeave" type="button">Kirim</button>
+                <button class="btn secondary full" id="leaveSheetClose" type="button">Tutup</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="card mobile-card">
+            <div class="leave-story-header">
+              <h4>Story</h4>
+              <div class="muted">Riwayat singkat</div>
+            </div>
+            <div id="leaveStory" class="story-list">
+              <div class="muted">Memuat data...</div>
+            </div>
+          </div>
+
+          <div class="leave-detail" id="leaveDetailModal" aria-hidden="true">
+            <div class="leave-detail-card" role="dialog" aria-modal="true" aria-labelledby="leaveDetailTitle">
+              <div class="leave-detail-title" id="leaveDetailTitle">Detail</div>
+              <div class="leave-detail-meta">
+                <span id="leaveDetailType" class="badge">-</span>
+                <span id="leaveDetailRange" class="muted">-</span>
+              </div>
+              <div class="leave-detail-body">
+                <div class="muted">Alasan</div>
+                <div id="leaveDetailReason">-</div>
+                <div class="muted leave-detail-note-label">Catatan</div>
+                <div id="leaveDetailNote">-</div>
+              </div>
+              <button class="btn primary full" id="leaveDetailClose" type="button">Tutup</button>
+            </div>
+          </div>
+
+          <div class="leave-toast" id="leaveToast" role="status" aria-live="polite"></div>
+        </section>
+
+        <section class="swipe-pane" data-pane="2" aria-label="Laporan">
+          <div class="card mobile-card">
+            <h4>Ringkasan Bulan Ini</h4>
+            <div class="report-grid">
+              <div class="report-item"><span>Hadir</span><strong>18</strong></div>
+              <div class="report-item"><span>Telat</span><strong>2</strong></div>
+              <div class="report-item"><span>Izin</span><strong>1</strong></div>
+              <div class="report-item"><span>Sakit</span><strong>0</strong></div>
+            </div>
+          </div>
+          <div class="card mobile-card">
+            <h4>Laporan Harian (Mock)</h4>
+            <table class="table compact">
+              <thead>
+                <tr>
+                  <th>Tanggal</th>
+                  <th>Status</th>
+                  <th>Metode</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td>20/12</td><td>Hadir</td><td>GPS</td></tr>
+                <tr><td>19/12</td><td>Hadir</td><td>QR</td></tr>
+                <tr><td>18/12</td><td>Telat</td><td>GPS</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <div class="floating-nav bottom-nav-floating" id="floatingNav">
+      <div class="drag-handle" id="navHandle" aria-hidden="true">??</div>
+      <button class="nav-btn active" data-tab="0" type="button">Presensi</button>
+      <button class="nav-btn" data-tab="1" type="button">Izin</button>
+      <button class="nav-btn" data-tab="2" type="button">Laporan</button>
+      <a class="nav-btn nav-logout" href="/logout">Keluar</a>
+    </div>
+  </div>
+
+  <script src="{{ url_for('static', filename='js/dashboard_employee_mobile.js') }}"></script>
+</body>
+</html>

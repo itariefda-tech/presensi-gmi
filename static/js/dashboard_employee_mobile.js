@@ -1,0 +1,721 @@
+const themeButtons = Array.from(document.querySelectorAll(".theme-btn"));
+const clockHH = document.getElementById("clockHH");
+const clockMM = document.getElementById("clockMM");
+const clockColon = document.getElementById("clockColon");
+const bodyEl = document.body;
+
+const swipeTrack = document.getElementById("swipeTrack");
+const swipeViewport = document.querySelector(".swipe-viewport");
+const navButtons = Array.from(document.querySelectorAll(".nav-btn"));
+const floatingNav = document.getElementById("floatingNav");
+const navHandle = document.getElementById("navHandle");
+
+const attMethod = document.getElementById("attMethod");
+const modeChips = Array.from(document.querySelectorAll(".chip"));
+const btnLocation = document.getElementById("btnLocation");
+const locStatus = document.getElementById("locStatus");
+const latEl = document.getElementById("lat");
+const lonEl = document.getElementById("lon");
+const selfieFile = document.getElementById("selfieFile");
+const selfiePreview = document.getElementById("selfiePreview");
+const selfieBlock = document.querySelector(".tool-selfie");
+const btnScan = document.getElementById("btnScan");
+const qrStatus = document.getElementById("qrStatus");
+const qrVideo = document.getElementById("qrVideo");
+const qrData = document.getElementById("qrData");
+const qrBlock = document.querySelector(".tool-qr");
+const btnCheckin = document.getElementById("btnCheckin");
+const btnCheckout = document.getElementById("btnCheckout");
+const checkinStatus = document.getElementById("checkinStatus");
+const checkoutStatus = document.getElementById("checkoutStatus");
+const attToast = document.getElementById("attToast");
+const lastActionTime = document.getElementById("lastActionTime");
+const lastActionBadge = document.getElementById("lastActionBadge");
+const netStatus = document.getElementById("netStatus");
+const helpModal = document.getElementById("helpModal");
+const btnHelp = document.getElementById("btnHelp");
+const btnHelpClose = document.getElementById("btnHelpClose");
+
+const leaveType = document.getElementById("leaveType");
+const leaveFrom = document.getElementById("leaveFrom");
+const leaveTo = document.getElementById("leaveTo");
+const leaveReason = document.getElementById("leaveReason");
+const leaveAttachment = document.getElementById("leaveAttachment");
+const btnLeave = document.getElementById("btnLeave");
+const leaveToast = document.getElementById("leaveToast");
+const leaveStory = document.getElementById("leaveStory");
+const leaveActionButtons = Array.from(document.querySelectorAll(".leave-action-btn"));
+const leaveSheet = document.getElementById("leaveSheet");
+const leaveTypeLabel = document.getElementById("leaveTypeLabel");
+const leavePendingCount = document.getElementById("leavePendingCount");
+const btnLeaveRefresh = document.getElementById("btnLeaveRefresh");
+const leaveSheetClose = document.getElementById("leaveSheetClose");
+const leaveDetailModal = document.getElementById("leaveDetailModal");
+const leaveDetailClose = document.getElementById("leaveDetailClose");
+const leaveDetailType = document.getElementById("leaveDetailType");
+const leaveDetailRange = document.getElementById("leaveDetailRange");
+const leaveDetailReason = document.getElementById("leaveDetailReason");
+const leaveDetailNote = document.getElementById("leaveDetailNote");
+
+let qrStream = null;
+let qrDetector = null;
+let qrActive = false;
+let qrLastValue = "";
+let swipeIndex = 0;
+let toastTimer = null;
+let leaveToastTimer = null;
+let leaveAttachmentData = "";
+let lastAccuracy = "";
+let lastDeviceTime = "";
+
+function pad2(n){
+  return String(n).padStart(2, "0");
+}
+
+function setTheme(theme){
+  document.documentElement.setAttribute("data-theme", theme);
+  localStorage.setItem("gmi_theme", theme);
+  themeButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.theme === theme));
+}
+
+function initTheme(){
+  const saved = localStorage.getItem("gmi_theme") || "dark";
+  setTheme(saved);
+}
+
+themeButtons.forEach((btn) => {
+  btn.addEventListener("click", () => setTheme(btn.dataset.theme));
+});
+
+function tickClock(){
+  const d = new Date();
+  clockHH.textContent = pad2(d.getHours());
+  clockMM.textContent = pad2(d.getMinutes());
+  clockColon.classList.toggle("is-blink-off");
+}
+
+function initProfile(){
+  const email = bodyEl.dataset.email || "";
+  const key = `gmi_profile_${email.toLowerCase()}`;
+  const stored = localStorage.getItem(key);
+  const img = document.getElementById("profilePhoto");
+  if (!img) return;
+  if (img.getAttribute("src")) return;
+  if (stored) {
+    img.src = stored;
+    return;
+  }
+  const svg = encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80">
+      <rect width="80" height="80" rx="40" fill="#1f2937"/>
+      <circle cx="40" cy="30" r="14" fill="#9fb2d0"/>
+      <path d="M16 68c6-12 17-18 24-18s18 6 24 18" fill="#9fb2d0"/>
+    </svg>`
+  );
+  img.src = `data:image/svg+xml,${svg}`;
+}
+
+function showToast(msg, type = "ok"){
+  if (!attToast) return;
+  attToast.textContent = msg;
+  attToast.classList.remove("ok", "error", "show");
+  attToast.classList.add(type === "error" ? "error" : "ok", "show");
+  if (toastTimer) window.clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => {
+    attToast.classList.remove("show");
+  }, 2400);
+}
+
+function showLeaveToast(msg, type = "ok"){
+  if (!leaveToast) return;
+  leaveToast.textContent = msg;
+  leaveToast.classList.remove("ok", "error", "show");
+  leaveToast.classList.add(type === "error" ? "error" : "ok", "show");
+  if (leaveToastTimer) window.clearTimeout(leaveToastTimer);
+  leaveToastTimer = window.setTimeout(() => {
+    leaveToast.classList.remove("show");
+  }, 2400);
+}
+
+function go(index){
+  const max = 2;
+  swipeIndex = Math.max(0, Math.min(max, index));
+  const offset = swipeIndex * 100;
+  swipeTrack.style.transform = `translateX(-${offset}%)`;
+  navButtons.forEach((btn) => {
+    const tab = parseInt(btn.dataset.tab, 10);
+    if (Number.isNaN(tab)) return;
+    btn.classList.toggle("active", tab === swipeIndex);
+  });
+  if (swipeIndex !== 1) {
+    closeLeaveSheet();
+    closeLeaveDetail();
+  }
+}
+
+navButtons.forEach((btn) => {
+  if (!btn.dataset.tab) return;
+  btn.addEventListener("click", () => go(parseInt(btn.dataset.tab, 10)));
+});
+
+function initSwipe(){
+  if (!swipeViewport) return;
+  let startX = 0;
+  let startY = 0;
+  let moved = false;
+
+  swipeViewport.addEventListener("touchstart", (e) => {
+    const touch = e.touches[0];
+    startX = touch.clientX;
+    startY = touch.clientY;
+    moved = false;
+  }, { passive: true });
+
+  swipeViewport.addEventListener("touchmove", (e) => {
+    const touch = e.touches[0];
+    const dx = touch.clientX - startX;
+    const dy = touch.clientY - startY;
+    if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 10) {
+      moved = true;
+      e.preventDefault();
+    }
+  }, { passive: false });
+
+  swipeViewport.addEventListener("touchend", (e) => {
+    if (!moved) return;
+    const touch = e.changedTouches[0];
+    const dx = touch.clientX - startX;
+    const dy = touch.clientY - startY;
+    if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 50) {
+      if (dx < 0) go(swipeIndex + 1);
+      if (dx > 0) go(swipeIndex - 1);
+    }
+  });
+}
+
+function initNavPosition(){
+  if (!floatingNav) return;
+  if (floatingNav.classList.contains("bottom-nav-floating")) return;
+  floatingNav.style.left = "0";
+  floatingNav.style.top = "0";
+  floatingNav.style.bottom = "auto";
+  const navRect = floatingNav.getBoundingClientRect();
+  const x = Math.round((window.innerWidth - navRect.width) / 2);
+  const y = Math.round(window.innerHeight - navRect.height - 16);
+  floatingNav.style.transform = `translate3d(${x}px, ${y}px, 0)`;
+  floatingNav.dataset.x = x;
+  floatingNav.dataset.y = y;
+}
+
+function initNavDrag(){
+  if (!floatingNav || !navHandle) return;
+  if (floatingNav.classList.contains("bottom-nav-floating")) return;
+  let startX = 0;
+  let startY = 0;
+  let originX = 0;
+  let originY = 0;
+  let dragging = false;
+
+  navHandle.addEventListener("pointerdown", (e) => {
+    dragging = true;
+    navHandle.setPointerCapture(e.pointerId);
+    startX = e.clientX;
+    startY = e.clientY;
+    originX = parseFloat(floatingNav.dataset.x || "0");
+    originY = parseFloat(floatingNav.dataset.y || "0");
+  });
+
+  navHandle.addEventListener("pointermove", (e) => {
+    if (!dragging) return;
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    const navRect = floatingNav.getBoundingClientRect();
+    const maxX = window.innerWidth - navRect.width;
+    const maxY = window.innerHeight - navRect.height;
+    let nextX = Math.min(Math.max(originX + dx, 0), maxX);
+    let nextY = Math.min(Math.max(originY + dy, 0), maxY);
+    floatingNav.style.transform = `translate3d(${nextX}px, ${nextY}px, 0)`;
+    floatingNav.dataset.x = nextX;
+    floatingNav.dataset.y = nextY;
+  });
+
+  navHandle.addEventListener("pointerup", () => {
+    dragging = false;
+  });
+}
+
+function getLocation(){
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) {
+      reject(new Error("Browser tidak mendukung GPS."));
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => resolve(pos),
+      (err) => reject(err),
+      { enableHighAccuracy: true, timeout: 12000 }
+    );
+  });
+}
+
+function validateQrPayload(value){
+  const payload = (value || "").trim();
+  if (!payload) return { ok: false, message: "QR code wajib di-scan." };
+  if (payload.length < 6 || payload.length > 120) {
+    return { ok: false, message: "QR tidak valid (demo)." };
+  }
+  if (!payload.toUpperCase().startsWith("GMI-")) {
+    return { ok: false, message: "QR tidak dikenali (demo)." };
+  }
+  return { ok: true, message: "ok" };
+}
+
+btnLocation?.addEventListener("click", async () => {
+  try {
+    locStatus.textContent = "Mengambil lokasi...";
+    const pos = await getLocation();
+    latEl.value = pos.coords.latitude.toFixed(6);
+    lonEl.value = pos.coords.longitude.toFixed(6);
+    lastAccuracy = String(pos.coords.accuracy || "");
+    lastDeviceTime = new Date().toISOString();
+    locStatus.textContent = `${latEl.value}, ${lonEl.value}`;
+    locStatus.classList.add("loc-centered");
+  } catch (err) {
+    locStatus.textContent = "Gagal ambil lokasi.";
+    locStatus.classList.remove("loc-centered");
+  }
+});
+
+selfieFile?.addEventListener("change", (e) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    selfiePreview.src = reader.result || "";
+    selfiePreview.style.display = "block";
+  };
+  reader.readAsDataURL(file);
+});
+
+async function startScan(){
+  if (!("mediaDevices" in navigator) || !navigator.mediaDevices.getUserMedia) {
+    qrStatus.textContent = "Kamera tidak tersedia.";
+    return;
+  }
+  if (!("BarcodeDetector" in window)) {
+    qrStatus.textContent = "Browser tidak mendukung scan QR.";
+    return;
+  }
+  try {
+    qrDetector = new BarcodeDetector({ formats: ["qr_code", "code_128", "code_39"] });
+    qrStatus.textContent = "Memulai kamera...";
+    qrStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+    qrVideo.srcObject = qrStream;
+    qrVideo.style.display = "block";
+    await qrVideo.play();
+    qrActive = true;
+    scanLoop();
+  } catch (err) {
+    qrStatus.textContent = "Gagal akses kamera.";
+    stopScan();
+  }
+}
+
+async function scanLoop(){
+  if (!qrActive || !qrDetector) return;
+  try {
+    const barcodes = await qrDetector.detect(qrVideo);
+    if (barcodes.length) {
+      const rawValue = barcodes[0].rawValue || "";
+      if (rawValue === qrLastValue) {
+        requestAnimationFrame(scanLoop);
+        return;
+      }
+      qrLastValue = rawValue;
+      const validation = validateQrPayload(rawValue);
+      if (!validation.ok) {
+        qrStatus.textContent = validation.message;
+        requestAnimationFrame(scanLoop);
+        return;
+      }
+      qrData.value = rawValue;
+      qrStatus.textContent = "QR terdeteksi.";
+      stopScan();
+      return;
+    }
+  } catch (err) {
+    qrStatus.textContent = "Gagal scan QR.";
+  }
+  requestAnimationFrame(scanLoop);
+}
+
+function stopScan(){
+  qrActive = false;
+  qrLastValue = "";
+  if (qrStream) {
+    qrStream.getTracks().forEach((t) => t.stop());
+    qrStream = null;
+  }
+}
+
+btnScan?.addEventListener("click", () => {
+  if (qrActive) {
+    stopScan();
+    qrStatus.textContent = "Scan dihentikan.";
+    return;
+  }
+  startScan();
+});
+
+leaveAttachment?.addEventListener("change", (e) => {
+  const file = e.target.files?.[0];
+  leaveAttachmentData = "";
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    leaveAttachmentData = reader.result || "";
+  };
+  reader.readAsDataURL(file);
+});
+
+function setPresenceLoading(activeBtn, isLoading){
+  [btnCheckin, btnCheckout].forEach((btn) => {
+    if (!btn) return;
+    btn.disabled = isLoading;
+    btn.classList.toggle("is-loading", isLoading && btn === activeBtn);
+    btn.setAttribute("aria-busy", isLoading && btn === activeBtn ? "true" : "false");
+  });
+}
+
+function updateLastAction(badgeText){
+  const now = new Date();
+  if (lastActionTime) {
+    lastActionTime.textContent = `${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
+  }
+  if (lastActionBadge) {
+    lastActionBadge.textContent = badgeText;
+    lastActionBadge.classList.toggle("in", badgeText === "IN");
+    lastActionBadge.classList.toggle("out", badgeText === "OUT");
+  }
+}
+
+async function ensureLocation(){
+  const lat = latEl.value;
+  const lon = lonEl.value;
+  if (lat && lon) {
+    return { lat, lon, accuracy: lastAccuracy, deviceTime: lastDeviceTime };
+  }
+  const pos = await getLocation();
+  const nextLat = pos.coords.latitude.toFixed(6);
+  const nextLon = pos.coords.longitude.toFixed(6);
+  latEl.value = nextLat;
+  lonEl.value = nextLon;
+  lastAccuracy = String(pos.coords.accuracy || "");
+  lastDeviceTime = new Date().toISOString();
+  locStatus.textContent = `${nextLat}, ${nextLon}`;
+  locStatus.classList.add("loc-centered");
+  return { lat: nextLat, lon: nextLon, accuracy: lastAccuracy, deviceTime: lastDeviceTime };
+}
+
+async function submitAttendance(url, labelEl){
+  let locationData = null;
+  try {
+    locationData = await ensureLocation();
+  } catch (err) {
+    showToast("Lokasi GPS wajib diisi.", "error");
+    return { ok: false };
+  }
+
+  const method = attMethod?.value || "gps_selfie";
+  const file = selfieFile?.files?.[0];
+  if (method === "gps_selfie" && !file) {
+    showToast("Selfie wajib untuk presensi.", "error");
+    return { ok: false };
+  }
+  if (method === "qr" && !qrData?.value?.trim()) {
+    showToast("QR code wajib di-scan.", "error");
+    return { ok: false };
+  }
+  if (method === "qr") {
+    const validation = validateQrPayload(qrData?.value || "");
+    if (!validation.ok) {
+      showToast(validation.message, "error");
+      return { ok: false };
+    }
+  }
+
+  const formData = new FormData();
+  formData.append("method", method);
+  formData.append("lat", locationData.lat);
+  formData.append("lng", locationData.lon);
+  formData.append("accuracy", locationData.accuracy || "");
+  formData.append("device_time", locationData.deviceTime || new Date().toISOString());
+  if (file) {
+    formData.append("selfie", file);
+  }
+  if (qrData?.value?.trim()) {
+    formData.append("qr_data", qrData.value.trim());
+  }
+
+  let res = null;
+  let data = {};
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      body: formData,
+    });
+    data = await res.json();
+  } catch (err) {
+    showToast("Gagal terhubung.", "error");
+    return { ok: false };
+  }
+  showToast(data.message || (res.ok ? "Selesai." : "Gagal."), res.ok ? "ok" : "error");
+  if (res.ok && labelEl) {
+    const now = new Date();
+    labelEl.textContent = `${labelEl.dataset.label}: ${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
+  }
+  return { ok: res.ok };
+}
+
+async function handleAttendance(action){
+  const isCheckin = action === "checkin";
+  const url = isCheckin ? "/api/attendance/checkin" : "/api/attendance/checkout";
+  const labelEl = isCheckin ? checkinStatus : checkoutStatus;
+  const activeBtn = isCheckin ? btnCheckin : btnCheckout;
+  const badgeText = isCheckin ? "IN" : "OUT";
+  if (!activeBtn) return;
+  if (!isCheckin) {
+    const confirmText = window.prompt('Ketik "yes" untuk konfirmasi pulang');
+    if (!confirmText || confirmText.trim().toLowerCase() !== "yes") {
+      showToast("Konfirmasi dibatalkan.", "error");
+      return;
+    }
+  }
+  const start = Date.now();
+  setPresenceLoading(activeBtn, true);
+  const result = await submitAttendance(url, labelEl);
+  const elapsed = Date.now() - start;
+  if (elapsed < 2000) {
+    await new Promise((resolve) => setTimeout(resolve, 2000 - elapsed));
+  }
+  setPresenceLoading(activeBtn, false);
+  if (result.ok) {
+    updateLastAction(badgeText);
+  }
+}
+
+btnCheckin?.addEventListener("click", () => handleAttendance("checkin"));
+btnCheckout?.addEventListener("click", () => handleAttendance("checkout"));
+
+async function loadLeaveStory(){
+  if (!leaveStory) return;
+  try {
+    const res = await fetch("/api/leave/my");
+    const data = await res.json();
+    const rows = data.data || [];
+    const pendingCount = rows.filter((r) => r.status === "pending").length;
+    if (leavePendingCount) {
+      leavePendingCount.textContent = `Menunggu: ${pendingCount}`;
+    }
+    leaveStory.innerHTML = "";
+    if (!rows.length) {
+      const empty = document.createElement("div");
+      empty.className = "muted";
+      empty.textContent = "Belum ada pengajuan.";
+      leaveStory.appendChild(empty);
+      return;
+    }
+    rows.forEach((r) => {
+      const range = `${r.date_from} s/d ${r.date_to}`;
+      const typeLabel = (r.type || "").toUpperCase();
+      const status = (r.status || "pending").toLowerCase();
+      const statusClass = status === "approved" ? "badge-approved" : status === "rejected" ? "badge-rejected" : "badge-pending";
+
+      const item = document.createElement("div");
+      item.className = "story-item";
+      item.dataset.reason = r.reason || "-";
+      item.dataset.note = r.note || "-";
+      item.dataset.type = typeLabel || "-";
+      item.dataset.range = range;
+
+      const rowTop = document.createElement("div");
+      rowTop.className = "story-row";
+      const typeBadge = document.createElement("span");
+      typeBadge.className = "badge";
+      typeBadge.textContent = typeLabel || "-";
+      const dateSpan = document.createElement("span");
+      dateSpan.className = "story-date";
+      dateSpan.textContent = range;
+      rowTop.append(typeBadge, dateSpan);
+
+      const rowBottom = document.createElement("div");
+      rowBottom.className = "story-row";
+      const statusBadge = document.createElement("span");
+      statusBadge.className = `badge ${statusClass}`;
+      statusBadge.textContent = status;
+      const meta = document.createElement("span");
+      meta.className = "meta";
+      meta.textContent = "Tap untuk detail";
+      rowBottom.append(statusBadge, meta);
+
+      item.append(rowTop, rowBottom);
+      leaveStory.appendChild(item);
+    });
+  } catch (err) {
+    showLeaveToast("Gagal memuat data", "error");
+  }
+}
+
+btnLeave?.addEventListener("click", async () => {
+  const payload = {
+    type: leaveType.value,
+    date_from: leaveFrom.value,
+    date_to: leaveTo.value,
+    reason: leaveReason.value.trim(),
+    attachment: leaveAttachment.files?.[0]?.name || "",
+    attachment_base64: leaveAttachmentData || "",
+  };
+  const res = await fetch("/api/leave/request", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json();
+  showLeaveToast(data.message || (res.ok ? "Pengajuan dikirim." : "Gagal mengirim, coba lagi"), res.ok ? "ok" : "error");
+  if (res.ok) {
+    leaveReason.value = "";
+    leaveAttachment.value = "";
+    leaveAttachmentData = "";
+    closeLeaveSheet();
+    loadLeaveStory();
+  }
+});
+
+function initStatusLabels(){
+  if (checkinStatus) checkinStatus.dataset.label = "Check-in";
+  if (checkoutStatus) checkoutStatus.dataset.label = "Check-out";
+}
+
+function setMethod(value){
+  if (!attMethod) return;
+  attMethod.value = value;
+  modeChips.forEach((chip) => chip.classList.toggle("active", chip.dataset.mode === value));
+  if (selfieBlock) selfieBlock.classList.toggle("is-hidden", value !== "gps_selfie");
+  if (qrBlock) qrBlock.classList.toggle("is-hidden", value !== "qr");
+  if (value !== "qr") {
+    stopScan();
+    if (qrVideo) qrVideo.style.display = "none";
+  }
+}
+
+function initMethodChips(){
+  if (!attMethod || !modeChips.length) return;
+  setMethod(attMethod.value || "gps_selfie");
+  modeChips.forEach((chip) => {
+    chip.addEventListener("click", () => setMethod(chip.dataset.mode));
+  });
+  attMethod.addEventListener("change", () => setMethod(attMethod.value));
+}
+
+function updateOnlineStatus(){
+  if (!netStatus) return;
+  const online = navigator.onLine;
+  netStatus.textContent = online ? "Online" : "Offline";
+  netStatus.classList.toggle("online", online);
+  netStatus.classList.toggle("offline", !online);
+}
+
+function initHelpModal(){
+  if (!helpModal || !btnHelp || !btnHelpClose) return;
+  btnHelp.addEventListener("click", () => {
+    helpModal.classList.add("active");
+    helpModal.setAttribute("aria-hidden", "false");
+  });
+  btnHelpClose.addEventListener("click", () => {
+    helpModal.classList.remove("active");
+    helpModal.setAttribute("aria-hidden", "true");
+  });
+  helpModal.addEventListener("click", (e) => {
+    if (e.target === helpModal) {
+      helpModal.classList.remove("active");
+      helpModal.setAttribute("aria-hidden", "true");
+    }
+  });
+}
+
+function openLeaveSheet(type){
+  if (!leaveSheet || !leaveType) return;
+  leaveType.value = type;
+  if (leaveTypeLabel) {
+    leaveTypeLabel.textContent = type.charAt(0).toUpperCase() + type.slice(1);
+  }
+  leaveSheet.classList.add("leave-sheet-open");
+  leaveSheet.setAttribute("aria-hidden", "false");
+  leaveSheet.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function closeLeaveSheet(){
+  if (!leaveSheet) return;
+  leaveSheet.classList.remove("leave-sheet-open");
+  leaveSheet.setAttribute("aria-hidden", "true");
+}
+
+function initLeaveActions(){
+  leaveActionButtons.forEach((btn) => {
+    btn.addEventListener("click", () => openLeaveSheet(btn.dataset.type || "izin"));
+  });
+  btnLeaveRefresh?.addEventListener("click", () => loadLeaveStory());
+  leaveSheetClose?.addEventListener("click", () => closeLeaveSheet());
+}
+
+function openLeaveDetail(item){
+  if (!leaveDetailModal) return;
+  if (leaveDetailType) leaveDetailType.textContent = item.dataset.type || "-";
+  if (leaveDetailRange) leaveDetailRange.textContent = item.dataset.range || "-";
+  if (leaveDetailReason) leaveDetailReason.textContent = item.dataset.reason || "-";
+  if (leaveDetailNote) leaveDetailNote.textContent = item.dataset.note || "-";
+  leaveDetailModal.classList.add("active");
+  leaveDetailModal.setAttribute("aria-hidden", "false");
+}
+
+function closeLeaveDetail(){
+  if (!leaveDetailModal) return;
+  leaveDetailModal.classList.remove("active");
+  leaveDetailModal.setAttribute("aria-hidden", "true");
+}
+
+function initLeaveDetail(){
+  leaveStory?.addEventListener("click", (e) => {
+    const target = e.target.closest(".story-item");
+    if (!target) return;
+    openLeaveDetail(target);
+  });
+  leaveDetailClose?.addEventListener("click", closeLeaveDetail);
+  leaveDetailModal?.addEventListener("click", (e) => {
+    if (e.target === leaveDetailModal) closeLeaveDetail();
+  });
+}
+
+initTheme();
+initProfile();
+tickClock();
+setInterval(tickClock, 500);
+initSwipe();
+initNavPosition();
+initNavDrag();
+initStatusLabels();
+initMethodChips();
+initHelpModal();
+updateOnlineStatus();
+initLeaveActions();
+initLeaveDetail();
+loadLeaveStory();
+go(0);
+
+window.addEventListener("resize", initNavPosition);
+window.addEventListener("online", updateOnlineStatus);
+window.addEventListener("offline", updateOnlineStatus);
+window.addEventListener("pagehide", stopScan);
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) stopScan();
+});

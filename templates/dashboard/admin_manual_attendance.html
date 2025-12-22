@@ -1,0 +1,75 @@
+{% extends "dashboard/base.html" %}
+{% set active = "manual_admin" %}
+{% set heading = "Manual Attendance" %}
+{% set subtitle = "Review pengajuan manual attendance" %}
+
+{% block body %}
+<div class="card">
+  <div class="tabs">
+    <a class="tab-btn {% if status == 'pending' %}active{% endif %}" href="{{ url_for('admin.manual_attendance_admin', status='pending') }}">Pending</a>
+    <a class="tab-btn {% if status == 'approved' %}active{% endif %}" href="{{ url_for('admin.manual_attendance_admin', status='approved') }}">Approved</a>
+    <a class="tab-btn {% if status == 'rejected' %}active{% endif %}" href="{{ url_for('admin.manual_attendance_admin', status='rejected') }}">Rejected</a>
+  </div>
+
+  {% for msg in get_flashed_messages() %}
+  <div class="alert info">{{ msg }}</div>
+  {% endfor %}
+
+  <div class="table-wrap">
+    <table class="table" aria-label="Manual attendance">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Pegawai</th>
+          <th>Tanggal</th>
+          <th>Waktu</th>
+          <th>Tipe</th>
+          <th>Alasan</th>
+          <th>Diajukan Oleh</th>
+          <th>Diajukan</th>
+          <th>Status</th>
+          {% if status == 'pending' %}<th>Aksi</th>{% endif %}
+        </tr>
+      </thead>
+      <tbody>
+        {% if not items %}
+        <tr><td colspan="{% if status == 'pending' %}10{% else %}9{% endif %}" class="muted">Belum ada data.</td></tr>
+        {% endif %}
+        {% for r in items %}
+        <tr>
+          <td>{{ r.id }}</td>
+          <td>
+            <div>{{ r.employee_name or r.employee_email }}</div>
+            <div class="muted">{{ r.employee_email }}</div>
+          </td>
+          <td>{{ r.date }}</td>
+          <td>{{ r.time }}</td>
+          <td><span class="badge">{{ r.action }}</span></td>
+          <td>{{ r.reason }}</td>
+          <td>
+            <div>{{ r.created_by_user_id }}</div>
+            <div class="muted">{{ r.created_by_role|title }}</div>
+          </td>
+          <td>{{ r.created_at }}</td>
+          <td><span class="badge {{ r.status|lower }}">{{ r.status }}</span></td>
+          {% if status == 'pending' %}
+          <td>
+            <div class="inline">
+              <form method="post" action="{{ url_for('admin.manual_attendance_approve', request_id=r.id) }}">
+                <input class="input" type="text" name="note" placeholder="Catatan (opsional)" />
+                <button class="btn primary" type="submit">Approve</button>
+              </form>
+              <form method="post" action="{{ url_for('admin.manual_attendance_reject', request_id=r.id) }}">
+                <input class="input" type="text" name="note" placeholder="Alasan tolak" required />
+                <button class="btn secondary" type="submit">Reject</button>
+              </form>
+            </div>
+          </td>
+          {% endif %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

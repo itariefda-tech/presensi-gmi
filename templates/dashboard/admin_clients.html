@@ -1,0 +1,29 @@
+{% extends "dashboard/base.html" %}
+{% set active = "clients" %}
+{% set heading = "Daftar Client" %}
+{% set subtitle = "Kelola perusahaan pengguna jasa" %}
+
+{% block body %}
+<div class="card">
+  <table class="table" aria-label="Daftar client">
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Nama</th>
+        <th>Sektor</th>
+        <th>Sejak</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for c in clients %}
+      <tr>
+        <td>{{ c.id }}</td>
+        <td>{{ c.name }}</td>
+        <td>{{ c.sector }}</td>
+        <td>{{ c.since }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

@@ -1,0 +1,57 @@
+{% extends "dashboard/base.html" %}
+{% set active = "manual_attendance" %}
+{% set heading = "Manual Attendance" %}
+{% set subtitle = "Pengajuan manual untuk Supervisor/Koordinator" %}
+
+{% block body %}
+<div class="card">
+  <h3 style="margin-top:0;">Form Manual Attendance</h3>
+  <p class="muted" style="margin-top:4px;">Alasan wajib diisi. Status otomatis PENDING.</p>
+
+  {% if error %}
+  <div class="alert error">{{ error }}</div>
+  {% endif %}
+  {% if success %}
+  <div class="alert success">{{ success }}</div>
+  {% endif %}
+
+  <form method="post">
+    <div class="form-grid">
+      <div class="field-group">
+        <label class="label">Pegawai</label>
+        <select class="input" name="employee_id" required>
+          <option value="">Pilih pegawai</option>
+          {% for e in employees %}
+          <option value="{{ e.id }}" {% if form.employee_id|int == e.id %}selected{% endif %}>
+            {{ e.name }} - {{ e.client }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field-group">
+        <label class="label">Tanggal</label>
+        <input class="input" type="date" name="date" value="{{ form.date or '' }}" required />
+      </div>
+      <div class="field-group">
+        <label class="label">Waktu</label>
+        <input class="input" type="time" name="time" value="{{ form.time or '' }}" required />
+      </div>
+      <div class="field-group">
+        <label class="label">Tipe</label>
+        <select class="input" name="action" required>
+          <option value="">Pilih tipe</option>
+          <option value="IN" {% if form.action == "IN" %}selected{% endif %}>IN</option>
+          <option value="OUT" {% if form.action == "OUT" %}selected{% endif %}>OUT</option>
+        </select>
+      </div>
+      <div class="field-group" style="grid-column:1/-1;">
+        <label class="label">Alasan</label>
+        <textarea class="input" name="reason" rows="3" placeholder="Jelaskan alasan pengajuan manual" required>{{ form.reason or '' }}</textarea>
+      </div>
+    </div>
+    <div class="actions">
+      <button class="btn primary" type="submit">Kirim Pengajuan</button>
+    </div>
+  </form>
+</div>
+{% endblock %}

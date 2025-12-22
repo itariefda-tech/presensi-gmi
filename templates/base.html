@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="id" data-theme="{{ theme|default('dark') }}">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>GroupMitraIndonesia - Absensi</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}" />
+  {% block head_extra %}{% endblock %}
+</head>
+<body>
+  {% block body %}{% endblock %}
+  <script>
+    window.__GMI_INITIAL_THEME = "{{ theme|default('dark') }}";
+  </script>
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>

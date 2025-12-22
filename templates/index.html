@@ -1,0 +1,236 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="shell">
+  <main class="auth" aria-label="Authentication">
+    <div class="decor-circles" aria-hidden="true">
+      <span class="circle c1"></span>
+    </div>
+
+    <!-- LEFT PANEL (desktop only by CSS) -->
+    <section class="brand" aria-label="Brand panel">
+      <div>        
+        <div class="headline">
+          <h2>Presensi pegawai</h2>
+          <p>
+            Presensi butuh <b>GPS</b> dan <b>foto selfie</b>.
+            Admin tersedia khusus desktop untuk HR, Supervisor, Koordinator, dan Client Admin
+          </p>
+        </div>
+
+        <ul class="features">
+          <li><div class="dot"></div><div><b>GPS + Selfie</b><span>Bukti presensi lebih kuat daripada "pak, sinyalnya hilang".</span></div></li>
+          <li><div class="dot"></div><div><b>Multi-role Admin</b><span>HR, Supervisor, Koordinator, dan Client Admin.</span></div></li>
+          <li><div class="dot"></div><div><b>Daftar pakai Kode Undangan</b><span>Registrasi rapi, bukan pasar malam akun.</span></div></li>
+        </ul>
+      </div>
+
+      <div class="brandActions">
+        <div class="mini">.</div>
+      </div>
+    </section>
+
+    <!-- RIGHT CARD -->
+    <section class="card" aria-label="Form panel">
+
+      <!-- Topbar: Clock + Theme -->
+      <div class="topbar">
+        <div class="logo">
+          <div class="mark" aria-hidden="true">
+            <img src="/static/img/gmi_logo.gif" alt="" />
+          </div>
+          <div>
+            <h1>GroupMitraIndonesia</h1>
+            <div class="clock" aria-label="Jam digital">
+              <div class="hhmm">
+                <span id="hh">00</span><span class="blink">:</span><span id="mm">00</span>
+              </div>
+            <div class="date" id="dateText">-</div>
+        </div>            
+          </div>
+        </div>
+        
+
+        <div class="themePick" aria-label="Theme picker">
+          <div class="themeLabel"></div>
+          <div class="seg" role="group" aria-label="Pilih tema">
+            <button type="button" class="themeBtn active" data-theme="dark">Gelap</button>
+            <button type="button" class="themeBtn" data-theme="light">Terang</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Slider -->
+      <div class="viewport">
+        <div class="track" id="track">
+
+          <!-- 0) LOGIN (default, untuk pegawai & admin) -->
+          <section class="pane" aria-label="Login Pegawai atau Admin">
+            <div class="title">
+              <div>
+                <h3>Login</h3>
+                
+              </div>
+              <div class="badge">Masuk</div>
+            </div>
+
+            <form id="form-emp" class="tall-fields" novalidate autocomplete="off">
+              <input type="hidden" name="theme" id="themeEmp" value="{{ theme|default('dark') }}" />
+              <div class="autofill-trap" aria-hidden="true">
+                <input type="text" name="fakeuser" autocomplete="username" tabindex="-1" />
+                <input type="password" name="fakepass" autocomplete="current-password" tabindex="-1" />
+              </div>
+
+              <div>
+                <label for="empEmail">Email</label>
+                <div class="field">
+                  <svg class="icon" viewBox="0 0 24 24" fill="none">
+                    <path d="M20 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2Zm0 4-8 5L4 8V6l8 5 8-5Z" fill="currentColor" opacity=".85"/>
+                  </svg>
+                  <input id="empEmail" name="email" type="email" placeholder="nama@contoh.com" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" required />
+                </div>
+              </div>
+
+              <div>
+                <label for="empPass">Password</label>
+                <div class="field has-toggle">
+                  <svg class="icon" viewBox="0 0 24 24" fill="none">
+                    <path d="M17 9h-1V7a4 4 0 0 0-8 0v2H7a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2Zm-7-2a2 2 0 0 1 4 0v2h-4Z" fill="currentColor" opacity=".85"/>
+                  </svg>
+                  <input id="empPass" name="password" type="password" placeholder="********" autocomplete="off" required />
+                  <button class="btn secondary toggleBtn" type="button" id="toggleEmpPass" aria-label="Lihat password"></button>
+                </div>
+              </div>
+
+              <div class="links">
+                <a class="link" href="#" data-go="1">Daftar</a>
+                <a class="link" href="#" data-go="2">Lupa password?</a>
+              </div>
+
+              <button class="btn" type="submit">Masuk</button>
+
+              <div class="toast" id="toast-emp" aria-live="polite" data-marquee="Assalamulaikum, selamat beraktifitas, jadikan hari ini hari yang lebik baik dari hari sebelumnya"></div>             
+            </form>
+          </section>
+
+          <!-- 1) SIGNUP (invite code) -->
+          <section class="pane" aria-label="Daftar Akun">
+            <div class="title">
+              <div>
+                <h3>Daftar Akun</h3>                
+              </div>
+              <div class="badge">Sign Up</div>
+            </div>
+
+            <form id="form-signup" novalidate autocomplete="off">
+              <input type="hidden" name="theme" id="themeSignup" value="{{ theme|default('dark') }}" />
+              <div class="autofill-trap" aria-hidden="true">
+                <input type="text" name="fakeuser" autocomplete="username" tabindex="-1" />
+                <input type="password" name="fakepass" autocomplete="new-password" tabindex="-1" />
+              </div>
+
+              <div>
+                <div class="field">
+                  <svg class="icon" viewBox="0 0 24 24" fill="none">
+                    <path d="M20 12v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-8h16Zm0-2H4V6a2 2 0 0 1 2-2h3a3 3 0 0 1 6 0h3a2 2 0 0 1 2 2v4Zm-9-6a1 1 0 0 0-2 0h2Z" fill="currentColor" opacity=".85"/>
+                  </svg>
+                  <input id="inviteCode" name="invite_code" placeholder="Kode undangan, mis. gmi26-01003" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" required />
+                </div>
+              </div>
+
+              <div>
+                <div class="field">
+                  <svg class="icon" viewBox="0 0 24 24" fill="none">
+                    <path d="M20 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2Zm0 4-8 5L4 8V6l8 5 8-5Z" fill="currentColor" opacity=".85"/>
+                  </svg>
+                  <input id="suEmail" name="email" type="email" placeholder="Email, mis. pegawai@contoh.com" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" required />
+                </div>
+              </div>
+
+              <div>
+                <div class="field">
+                  <svg class="icon" viewBox="0 0 24 24" fill="none">
+                    <path d="M17 9h-1V7a4 4 0 0 0-8 0v2H7a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2Zm-7-2a2 2 0 0 1 4 0v2h-4Z" fill="currentColor" opacity=".85"/>
+                  </svg>
+                  <input id="suPass" name="password" type="password" placeholder="Password, minimal 6 karakter" autocomplete="off" required />
+                </div>
+              </div>
+
+              <div>
+                <div class="field">
+                  <svg class="icon" viewBox="0 0 24 24" fill="none">
+                    <path d="M17 9h-1V7a4 4 0 0 0-8 0v2H7a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2Zm-7-2a2 2 0 0 1 4 0v2h-4Z" fill="currentColor" opacity=".85"/>
+                  </svg>
+                  <input id="suPass2" name="password2" type="password" placeholder="Ulangi password, harus sama" autocomplete="off" required />
+                </div>
+              </div>
+
+              <div>
+                <label for="suSelfie">Foto Selfie (untuk profil)</label>
+                <div class="field">
+                  <svg class="icon" viewBox="0 0 24 24" fill="none">
+                    <path d="M3 7a2 2 0 0 1 2-2h3l1-2h6l1 2h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Zm9 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z" fill="currentColor" opacity=".85"/>
+                  </svg>
+                  <input id="suSelfie" name="selfie" type="file" accept="image/*" capture="user" />
+                </div>
+              </div>
+
+              <button class="btn" type="submit">Buat Akun</button>
+              <button class="btn secondary" type="button" data-go="0">Kembali</button>
+
+              <div class="toast" id="toast-signup" aria-live="polite" data-marquee="Assalamulaikum, selamat beraktifitas, jadikan hari ini hari yang lebik baik dari hari sebelumnya"></div>
+            </form>
+          </section>
+
+          <!-- 2) FORGOT (WA OTP or Email) -->
+          <section class="pane" aria-label="Lupa Password">
+            <div class="title">
+              <div>
+                <h3>Lupa Password</h3>
+                <p>Reset via WhatsApp OTP atau Email.</p>
+              </div>
+              <div class="badge">Recovery</div>
+            </div>
+
+            <form id="form-forgot" class="tall-fields" novalidate autocomplete="off">
+              <input type="hidden" name="theme" id="themeForgot" value="{{ theme|default('dark') }}" />
+              <div class="autofill-trap" aria-hidden="true">
+                <input type="text" name="fakeuser" autocomplete="username" tabindex="-1" />
+                <input type="password" name="fakepass" autocomplete="current-password" tabindex="-1" />
+              </div>
+
+              <div>
+                <label for="fpEmail">Email Akun</label>
+                <div class="field">
+                  <svg class="icon" viewBox="0 0 24 24" fill="none">
+                    <path d="M20 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2Zm0 4-8 5L4 8V6l8 5 8-5Z" fill="currentColor" opacity=".85"/>
+                  </svg>
+                  <input id="fpEmail" name="email" type="email" placeholder="nama@contoh.com" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" required />
+                </div>
+              </div>
+
+              <div>
+                <label for="fpMethod">Metode Reset</label>
+                <div class="field">
+                  <svg class="icon" viewBox="0 0 24 24" fill="none">
+                    <path d="M6 4h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm2 6h8v2H8v-2Zm0 4h5v2H8v-2Z" fill="currentColor" opacity=".85"/>
+                  </svg>
+                  <select id="fpMethod" name="method" autocomplete="off" required>
+                    <option value="whatsapp_otp">WhatsApp OTP</option>
+                    <option value="email_link">Email</option>
+                  </select>
+                </div>
+              </div>
+
+              <button class="btn" type="submit">Kirim Instruksi Reset</button>
+              <button class="btn secondary" type="button" data-go="0">Kembali</button>
+
+              <div class="toast" id="toast-forgot" aria-live="polite" data-marquee="Assalamulaikum, selamat beraktifitas, jadikan hari ini hari yang lebik baik dari hari sebelumnya"></div>
+            </form>
+          </section>
+
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+{% endblock %}

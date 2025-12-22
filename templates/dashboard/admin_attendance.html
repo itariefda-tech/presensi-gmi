@@ -1,0 +1,45 @@
+{% extends "dashboard/base.html" %}
+{% set active = "attendance" %}
+{% set heading = "Attendance" %}
+{% set subtitle = "Monitoring presensi GPS + selfie" %}
+
+{% block body %}
+<div class="card" style="margin-bottom:12px;">
+  <div class="inline" style="justify-content:space-between;">
+    <div>
+      <div style="font-weight:700;">Manual Attendance</div>
+      <div class="muted" style="font-size:12px;">Review pengajuan manual attendance pending.</div>
+    </div>
+    <a class="btn secondary" href="{{ url_for('admin.manual_attendance_admin', status='pending') }}">Lihat Manual Pending</a>
+  </div>
+</div>
+
+<div class="card">
+  <div class="table-wrap">
+    <table class="table" aria-label="Data attendance">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Nama</th>
+          <th>Client</th>
+          <th>Status</th>
+          <th>Waktu</th>
+          <th>Metode</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in records %}
+        <tr>
+          <td>{{ r.id }}</td>
+          <td>{{ r.name }}</td>
+          <td>{{ r.client }}</td>
+          <td class="status-{{ r.status }}">{{ r.status|title }}</td>
+          <td>{{ r.time }}</td>
+          <td>{{ r.method }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

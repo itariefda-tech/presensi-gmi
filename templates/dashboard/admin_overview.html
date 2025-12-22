@@ -1,0 +1,29 @@
+{% extends "dashboard/base.html" %}
+{% set active = "overview" %}
+{% set heading = "Overview" %}
+{% set subtitle = "Ringkasan cepat admin" %}
+
+{% block body %}
+<div class="card-grid">
+  <div class="card">
+    <h4>Client aktif</h4>
+    <div class="value">{{ stats.clients }}</div>
+  </div>
+  <div class="card">
+    <h4>Pegawai aktif</h4>
+    <div class="value">{{ stats.employees }}</div>
+  </div>
+  <div class="card">
+    <h4>Hadir hari ini</h4>
+    <div class="value">{{ stats.attendance_today }}</div>
+  </div>
+</div>
+
+<div class="card" style="margin-top:16px;">
+  <h4 style="margin-top:0;">Catatan</h4>
+  <p style="margin:8px 0; color:var(--muted); font-size:14px;">
+    Pembuatan akun admin hanya bisa dilakukan di dashboard ini (belum diimplementasi, siapkan endpoint nanti).
+    Halaman attendance adalah prioritas utama; daftar client dan pegawai disediakan untuk referensi cepat.
+  </p>
+</div>
+{% endblock %}

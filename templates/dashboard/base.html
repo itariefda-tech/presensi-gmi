@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>{{ title or "Dashboard Admin" }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}" />
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="dot" aria-hidden="true"></div>
+        <div>GMI Admin</div>
+      </div>
+      <nav class="nav">
+        <a href="{{ url_for('admin.overview') }}" class="{% if active == 'overview' %}active{% endif %}">Overview</a>
+        <a href="{{ url_for('admin.clients') }}" class="{% if active == 'clients' %}active{% endif %}">Daftar Client</a>
+        <a href="{{ url_for('admin.employees') }}" class="{% if active == 'employees' %}active{% endif %}">Daftar Pegawai</a>
+        <a href="{{ url_for('admin.attendance') }}" class="{% if active == 'attendance' %}active{% endif %}">Attendance</a>
+        <a href="{{ url_for('admin.manual_attendance_admin') }}" class="{% if active == 'manual_admin' %}active{% endif %}">Manual Requests</a>
+        {% if user.role in ["supervisor", "koordinator"] %}
+        <a href="{{ url_for('manual_attendance') }}" class="{% if active == 'manual_attendance' %}active{% endif %}">Manual Attendance</a>
+        {% endif %}
+        <a href="{{ url_for('admin.approvals') }}" class="{% if active == 'approvals' %}active{% endif %}">Approvals</a>
+      </nav>
+    </aside>
+
+    <main class="content">
+      <div class="topbar">
+        <div>
+          <h2 style="margin:0">{{ heading or "Dashboard" }}</h2>
+          {% if subtitle %}<div style="color:var(--muted); font-size:14px;">{{ subtitle }}</div>{% endif %}
+        </div>
+        <div class="user">
+          {{ user.email }} · {{ user.role|replace('_',' ')|title }}
+        </div>
+      </div>
+
+      {% block body %}{% endblock %}
+    </main>
+  </div>
+</body>
+</html>
