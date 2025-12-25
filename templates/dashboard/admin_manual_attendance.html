@@ -14,6 +14,7 @@
   {% for msg in get_flashed_messages() %}
   <div class="alert info">{{ msg }}</div>
   {% endfor %}
+  <div class="alert info">Manual attendance tersimpan di SQLite.</div>
 
   <div class="table-wrap">
     <table class="table" aria-label="Manual attendance">
@@ -28,12 +29,12 @@
           <th>Diajukan Oleh</th>
           <th>Diajukan</th>
           <th>Status</th>
-          {% if status == 'pending' %}<th>Aksi</th>{% endif %}
+          {% if status == 'pending' and can_approve_manual %}<th>Aksi</th>{% endif %}
         </tr>
       </thead>
       <tbody>
         {% if not items %}
-        <tr><td colspan="{% if status == 'pending' %}10{% else %}9{% endif %}" class="muted">Belum ada data.</td></tr>
+        <tr><td colspan="{% if status == 'pending' and can_approve_manual %}10{% else %}9{% endif %}" class="muted">Belum ada data.</td></tr>
         {% endif %}
         {% for r in items %}
         <tr>
@@ -52,7 +53,7 @@
           </td>
           <td>{{ r.created_at }}</td>
           <td><span class="badge {{ r.status|lower }}">{{ r.status }}</span></td>
-          {% if status == 'pending' %}
+          {% if status == 'pending' and can_approve_manual %}
           <td>
             <div class="inline">
               <form method="post" action="{{ url_for('admin.manual_attendance_approve', request_id=r.id) }}">

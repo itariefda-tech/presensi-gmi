@@ -7,6 +7,11 @@ __pycache__/
 .venv/
 venv/
 
+# Database & runtime
+presensi.db
+*.sqlite
+*.sqlite3
+
 # Uploads / runtime
 static/uploads/
 *.log
@@ -18,3 +23,6 @@ Thumbs.db
 # Editor
 .vscode/
 .idea/
+
+# Secrets
+.env

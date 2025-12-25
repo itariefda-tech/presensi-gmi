@@ -5,6 +5,9 @@
 
 {% block body %}
 <div class="card">
+  <div class="alert info">
+    Leave tersimpan di memori demo (hilang setelah restart). Manual attendance tersimpan di SQLite.
+  </div>
   <div class="tabs">
     <button class="tab-btn active" data-tab="leave">Leave Requests</button>
     <button class="tab-btn" data-tab="manual">Manual Attendance Pending</button>
@@ -22,11 +25,11 @@
             <th>Tanggal</th>
             <th>Alasan</th>
             <th>Status</th>
-            <th>Aksi</th>
+            {% if can_approve_leave %}<th>Aksi</th>{% endif %}
           </tr>
         </thead>
-        <tbody id="leaveRows">
-          <tr><td colspan="7" class="muted">Memuat data...</td></tr>
+        <tbody id="leaveRows" data-can-approve-leave="{{ '1' if can_approve_leave else '0' }}">
+          <tr><td colspan="{% if can_approve_leave %}7{% else %}6{% endif %}" class="muted">Memuat data...</td></tr>
         </tbody>
       </table>
     </div>
@@ -45,12 +48,12 @@
             <th>Alasan</th>
             <th>Role Pengaju</th>
             <th>Status</th>
-            {% if user.role in ["admin", "client_admin"] %}<th>Aksi</th>{% endif %}
+            {% if can_approve_manual %}<th>Aksi</th>{% endif %}
           </tr>
         </thead>
         <tbody>
           {% if not manual_items %}
-          <tr><td colspan="{% if user.role in ['admin', 'client_admin'] %}9{% else %}8{% endif %}" class="muted">Tidak ada pending.</td></tr>
+          <tr><td colspan="{% if can_approve_manual %}9{% else %}8{% endif %}" class="muted">Tidak ada pending.</td></tr>
           {% endif %}
           {% for r in manual_items %}
           <tr>
@@ -65,7 +68,7 @@
             <td>{{ r.reason }}</td>
             <td><span class="badge">{{ r.created_by_role|title }}</span></td>
             <td><span class="badge pending">PENDING</span></td>
-            {% if user.role in ["admin", "client_admin"] %}
+            {% if can_approve_manual %}
             <td>
               <div class="inline">
                 <form method="post" action="{{ url_for('admin.manual_attendance_approve', request_id=r.id) }}">

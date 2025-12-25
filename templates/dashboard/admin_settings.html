@@ -1,0 +1,190 @@
+{% extends "dashboard/base.html" %}
+{% set active = "settings" %}
+{% set heading = "HR Settings" %}
+{% set subtitle = "Kelola users, sites, dan shifts" %}
+
+{% block body %}
+<div class="card">
+  <div class="tabs">
+    <a class="tab-btn {% if tab == 'users' %}active{% endif %}" href="{{ url_for('admin.settings', tab='users') }}">Users</a>
+    <a class="tab-btn {% if tab == 'roles' %}active{% endif %}" href="{{ url_for('admin.settings', tab='roles') }}">Roles</a>
+  </div>
+
+  {% for msg in get_flashed_messages() %}
+  <div class="alert info">{{ msg }}</div>
+  {% endfor %}
+
+  {% if tab == 'users' %}
+  <div class="card" style="margin-bottom:12px;">
+    <div style="font-weight:700; margin-bottom:8px;">Add User</div>
+    <form class="inline" method="post" action="{{ url_for('admin.settings_users_create') }}">
+      <input class="input" type="text" name="name" placeholder="Nama" required />
+      <input class="input" type="email" name="email" placeholder="Email" required />
+      <select class="input" name="role">
+        {% for role in role_options %}
+        <option value="{{ role }}">{{ role|replace('_',' ')|title }}</option>
+        {% endfor %}
+      </select>
+      <input class="input" type="text" name="password" placeholder="Password awal (default {{ default_password }})" />
+      <button class="btn primary" type="submit">Tambah</button>
+    </form>
+  </div>
+
+  <div class="table-wrap">
+    <table class="table" aria-label="User list">
+      <thead>
+        <tr>
+          <th>Nama</th>
+          <th>Email</th>
+          <th>Role</th>
+          <th>Status</th>
+          <th>Dibuat</th>
+          <th>Aksi</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if not users %}
+        <tr><td colspan="6" class="muted">Belum ada user.</td></tr>
+        {% endif %}
+        {% for u in users %}
+        <tr>
+          <td>{{ u.name }}</td>
+          <td>{{ u.email }}</td>
+          <td>{{ u.role|replace('_',' ')|title }}</td>
+          <td>
+            <span class="badge">{% if u.is_active %}Active{% else %}Disabled{% endif %}</span>
+            {% if u.must_change_password %}<div class="muted">Must change</div>{% endif %}
+          </td>
+          <td>
+            {% set created_at = u.created_at or "" %}
+            {% if created_at and " " in created_at %}
+              {% set date_part = created_at.split(" ")[0] %}
+              {% set time_part = created_at.split(" ")[1] %}
+              {% set date_bits = date_part.split("-") %}
+              {% if date_bits|length == 3 %}
+                {{ date_bits[2] ~ "/" ~ date_bits[1] ~ "/" ~ date_bits[0][2:] }} | {{ time_part[:5] }}
+              {% else %}
+                {{ created_at }}
+              {% endif %}
+            {% else %}
+              -
+            {% endif %}
+          </td>
+          <td>
+            <div class="inline">
+              <button class="btn secondary" type="button" data-modal-open="user-edit-modal-{{ u.id }}">Edit</button>
+              <form method="post" action="{{ url_for('admin.settings_users_delete', user_id=u.id) }}" onsubmit="return confirm('Hapus user ini?');">
+                <button class="btn secondary" type="submit">Hapus</button>
+              </form>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% for u in users %}
+  <div class="modal" id="user-edit-modal-{{ u.id }}" aria-hidden="true">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="user-edit-title-{{ u.id }}">
+      <div class="modal-title" id="user-edit-title-{{ u.id }}">Edit User</div>
+      <div class="stack">
+        <form id="user-edit-form-{{ u.id }}" method="post" action="{{ url_for('admin.settings_users_update', user_id=u.id) }}">
+          <div class="form-row">
+            <label class="label" for="user-name-{{ u.id }}">Nama</label>
+            <input class="input" id="user-name-{{ u.id }}" type="text" name="name" value="{{ u.name }}" required />
+          </div>
+          <div class="form-row">
+            <label class="label" for="user-email-{{ u.id }}">Email</label>
+            <input class="input" id="user-email-{{ u.id }}" type="email" name="email" value="{{ u.email }}" required />
+          </div>
+          <div class="form-row">
+            <label class="label" for="user-role-{{ u.id }}">Role</label>
+            <select class="input" id="user-role-{{ u.id }}" name="role">
+              {% for role in role_options %}
+              <option value="{{ role }}" {% if u.role == role %}selected{% endif %}>{{ role|replace('_',' ')|title }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <input type="hidden" name="is_active" value="{{ 1 if u.is_active else 0 }}" />
+          <div class="btn-row">
+            <button class="btn primary" type="submit">Save</button>
+          </div>
+        </form>
+        <form class="btn-row" method="post" action="{{ url_for('admin.settings_users_toggle', user_id=u.id) }}">
+          <button class="btn secondary" type="submit">{% if u.is_active %}Disable{% else %}Enable{% endif %}</button>
+        </form>
+        <div class="divider"></div>
+        <form method="post" action="{{ url_for('admin.settings_users_reset_password', user_id=u.id) }}">
+          <div class="form-row single">
+            <div class="form-inline">
+              <input class="input" id="user-hr-pass-{{ u.id }}" type="password" name="hr_password" placeholder="Password HR" required />
+              <button class="btn secondary" type="submit">Reset Password</button>
+            </div>
+          </div>
+        </form>
+        {% if u.role == 'supervisor' %}
+        <details>
+          <summary>Assign Sites</summary>
+          <form method="post" action="{{ url_for('admin.settings_users_assign_sites', user_id=u.id) }}">
+            <div class="stack" style="margin-top:8px;">
+              {% for s in sites %}
+              <label class="inline">
+                <input type="checkbox" name="site_ids" value="{{ s.id }}" {% if supervisor_sites.get(u.id) and s.id in supervisor_sites.get(u.id) %}checked{% endif %} />
+                <span>{{ s.name }}</span>
+              </label>
+              {% endfor %}
+              <button class="btn primary" type="submit">Simpan</button>
+            </div>
+          </form>
+        </details>
+        {% endif %}
+        <div class="modal-footer">
+          <button class="btn secondary full" type="button" data-modal-close>Tutup</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+  {% endif %}
+
+  {% if tab == 'roles' %}
+  <div class="card">
+    <div style="font-weight:700; margin-bottom:8px;">Roles (Informational)</div>
+    <div class="muted">hr_superadmin, manager_operational, supervisor, admin_asistent, employee</div>
+  </div>
+  {% endif %}
+</div>
+{% if tab == 'users' %}
+<script>
+  (function(){
+    const openButtons = document.querySelectorAll("[data-modal-open]");
+    const closeButtons = document.querySelectorAll("[data-modal-close]");
+    openButtons.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const targetId = btn.getAttribute("data-modal-open");
+        const modal = document.getElementById(targetId);
+        if (!modal) return;
+        modal.setAttribute("aria-hidden", "false");
+        modal.classList.add("show");
+      });
+    });
+    closeButtons.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const modal = btn.closest(".modal");
+        if (!modal) return;
+        modal.setAttribute("aria-hidden", "true");
+        modal.classList.remove("show");
+      });
+    });
+    document.querySelectorAll(".modal").forEach((modal) => {
+      modal.addEventListener("click", (e) => {
+        if (e.target === modal) {
+          modal.setAttribute("aria-hidden", "true");
+          modal.classList.remove("show");
+        }
+      });
+    });
+  })();
+</script>
+{% endif %}
+{% endblock %}

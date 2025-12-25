@@ -115,26 +115,55 @@ function initProfile(){
   img.src = `data:image/svg+xml,${svg}`;
 }
 
-function showToast(msg, type = "ok"){
-  if (!attToast) return;
-  attToast.textContent = msg;
-  attToast.classList.remove("ok", "error", "show");
-  attToast.classList.add(type === "error" ? "error" : "ok", "show");
-  if (toastTimer) window.clearTimeout(toastTimer);
-  toastTimer = window.setTimeout(() => {
-    attToast.classList.remove("show");
-  }, 2400);
+function showPresenceToast(msg, type = "ok"){
+  showToast(type === "error" ? "error" : "success", msg, { target: attToast });
 }
 
 function showLeaveToast(msg, type = "ok"){
-  if (!leaveToast) return;
-  leaveToast.textContent = msg;
-  leaveToast.classList.remove("ok", "error", "show");
-  leaveToast.classList.add(type === "error" ? "error" : "ok", "show");
-  if (leaveToastTimer) window.clearTimeout(leaveToastTimer);
-  leaveToastTimer = window.setTimeout(() => {
-    leaveToast.classList.remove("show");
-  }, 2400);
+  showToast(type === "error" ? "error" : "success", msg, { target: leaveToast });
+}
+
+function showToast(type, message, opts = {}){
+  const target = opts.target || attToast;
+  if (!target) return;
+  const tone = type === "error" ? "error" : type === "info" ? "info" : "ok";
+  const timeoutMs = typeof opts.timeoutMs === "number" ? opts.timeoutMs : 3200;
+  target.textContent = message;
+  target.classList.remove("ok", "error", "info", "show");
+  target.classList.add(tone, "show");
+  if (target === leaveToast) {
+    if (leaveToastTimer) window.clearTimeout(leaveToastTimer);
+    if (!opts.persist) {
+      leaveToastTimer = window.setTimeout(() => {
+        target.classList.remove("show");
+      }, timeoutMs);
+    }
+    return;
+  }
+  if (toastTimer) window.clearTimeout(toastTimer);
+  if (!opts.persist) {
+    toastTimer = window.setTimeout(() => {
+      target.classList.remove("show");
+    }, timeoutMs);
+  }
+}
+
+async function safeFetch(url, options = {}){
+  let res = null;
+  try {
+    res = await fetch(url, options);
+  } catch (err) {
+    return { ok: false, data: null, message: "Koneksi bermasalah. Coba lagi." };
+  }
+  let data = null;
+  try {
+    data = await res.json();
+  } catch (err) {
+    data = null;
+  }
+  const ok = res.ok;
+  const message = data?.message || (ok ? "Berhasil." : "Permintaan gagal.");
+  return { ok, data, message, status: res.status };
 }
 
 function go(index){
@@ -381,6 +410,13 @@ leaveAttachment?.addEventListener("change", (e) => {
 function setPresenceLoading(activeBtn, isLoading){
   [btnCheckin, btnCheckout].forEach((btn) => {
     if (!btn) return;
+    const label = btn.querySelector(".btn-label");
+    if (label) {
+      if (!btn.dataset.label) {
+        btn.dataset.label = label.textContent || "";
+      }
+      label.textContent = isLoading && btn === activeBtn ? "Memproses..." : (btn.dataset.label || label.textContent);
+    }
     btn.disabled = isLoading;
     btn.classList.toggle("is-loading", isLoading && btn === activeBtn);
     btn.setAttribute("aria-busy", isLoading && btn === activeBtn ? "true" : "false");
@@ -422,24 +458,24 @@ async function submitAttendance(url, labelEl){
   try {
     locationData = await ensureLocation();
   } catch (err) {
-    showToast("Lokasi GPS wajib diisi.", "error");
+    showToast("error", "Lokasi GPS wajib diisi.", { target: attToast });
     return { ok: false };
   }
 
   const method = attMethod?.value || "gps_selfie";
   const file = selfieFile?.files?.[0];
   if (method === "gps_selfie" && !file) {
-    showToast("Selfie wajib untuk presensi.", "error");
+    showToast("error", "Selfie wajib untuk presensi.", { target: attToast });
     return { ok: false };
   }
   if (method === "qr" && !qrData?.value?.trim()) {
-    showToast("QR code wajib di-scan.", "error");
+    showToast("error", "QR code wajib di-scan.", { target: attToast });
     return { ok: false };
   }
   if (method === "qr") {
     const validation = validateQrPayload(qrData?.value || "");
     if (!validation.ok) {
-      showToast(validation.message, "error");
+      showToast("error", validation.message, { target: attToast });
       return { ok: false };
     }
   }
@@ -457,24 +493,13 @@ async function submitAttendance(url, labelEl){
     formData.append("qr_data", qrData.value.trim());
   }
 
-  let res = null;
-  let data = {};
-  try {
-    res = await fetch(url, {
-      method: "POST",
-      body: formData,
-    });
-    data = await res.json();
-  } catch (err) {
-    showToast("Gagal terhubung.", "error");
-    return { ok: false };
-  }
-  showToast(data.message || (res.ok ? "Selesai." : "Gagal."), res.ok ? "ok" : "error");
-  if (res.ok && labelEl) {
+  const result = await safeFetch(url, { method: "POST", body: formData });
+  showToast(result.ok ? "success" : "error", result.message || "Selesai.", { target: attToast });
+  if (result.ok && labelEl) {
     const now = new Date();
     labelEl.textContent = `${labelEl.dataset.label}: ${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
   }
-  return { ok: res.ok };
+  return { ok: result.ok };
 }
 
 async function handleAttendance(action){
@@ -487,7 +512,7 @@ async function handleAttendance(action){
   if (!isCheckin) {
     const confirmText = window.prompt('Ketik "yes" untuk konfirmasi pulang');
     if (!confirmText || confirmText.trim().toLowerCase() !== "yes") {
-      showToast("Konfirmasi dibatalkan.", "error");
+      showToast("error", "Konfirmasi dibatalkan.", { target: attToast });
       return;
     }
   }
@@ -510,9 +535,14 @@ btnCheckout?.addEventListener("click", () => handleAttendance("checkout"));
 async function loadLeaveStory(){
   if (!leaveStory) return;
   try {
-    const res = await fetch("/api/leave/my");
-    const data = await res.json();
-    const rows = data.data || [];
+    leaveStory.innerHTML = '<div class="muted">Memuat data...</div>';
+    const result = await safeFetch("/api/leave/my");
+    if (!result.ok) {
+      showToast("error", result.message || "Gagal memuat data", { target: leaveToast });
+      leaveStory.innerHTML = '<div class="muted">Gagal memuat data.</div>';
+      return;
+    }
+    const rows = result.data?.data || [];
     const pendingCount = rows.filter((r) => r.status === "pending").length;
     if (leavePendingCount) {
       leavePendingCount.textContent = `Menunggu: ${pendingCount}`;
@@ -562,11 +592,43 @@ async function loadLeaveStory(){
       leaveStory.appendChild(item);
     });
   } catch (err) {
-    showLeaveToast("Gagal memuat data", "error");
+    showToast("error", "Gagal memuat data", { target: leaveToast });
   }
 }
 
 btnLeave?.addEventListener("click", async () => {
+  if (!leaveFrom.value || !leaveTo.value) {
+    showToast("error", "Tanggal mulai dan akhir wajib diisi.", { target: leaveToast });
+    return;
+  }
+  const fromDate = new Date(leaveFrom.value);
+  const toDate = new Date(leaveTo.value);
+  if (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime())) {
+    showToast("error", "Tanggal tidak valid.", { target: leaveToast });
+    return;
+  }
+  if (toDate < fromDate) {
+    showToast("error", "Tanggal akhir harus setelah tanggal mulai.", { target: leaveToast });
+    return;
+  }
+  if (leaveReason.value.trim().length < 5) {
+    showToast("error", "Alasan minimal 5 karakter.", { target: leaveToast });
+    return;
+  }
+  const file = leaveAttachment?.files?.[0];
+  if (file) {
+    const maxSize = 2 * 1024 * 1024;
+    if (file.size > maxSize) {
+      showToast("error", "Lampiran maksimal 2MB.", { target: leaveToast });
+      return;
+    }
+    const isImage = file.type.startsWith("image/");
+    const isPdf = file.type === "application/pdf";
+    if (!isImage && !isPdf) {
+      showToast("error", "Lampiran harus gambar atau PDF.", { target: leaveToast });
+      return;
+    }
+  }
   const payload = {
     type: leaveType.value,
     date_from: leaveFrom.value,
@@ -575,14 +637,13 @@ btnLeave?.addEventListener("click", async () => {
     attachment: leaveAttachment.files?.[0]?.name || "",
     attachment_base64: leaveAttachmentData || "",
   };
-  const res = await fetch("/api/leave/request", {
+  const result = await safeFetch("/api/leave/request", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-  const data = await res.json();
-  showLeaveToast(data.message || (res.ok ? "Pengajuan dikirim." : "Gagal mengirim, coba lagi"), res.ok ? "ok" : "error");
-  if (res.ok) {
+  showToast(result.ok ? "success" : "error", result.message || "Selesai.", { target: leaveToast });
+  if (result.ok) {
     leaveReason.value = "";
     leaveAttachment.value = "";
     leaveAttachmentData = "";

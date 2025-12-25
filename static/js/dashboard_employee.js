@@ -27,11 +27,31 @@ let qrDetector = null;
 let qrActive = false;
 
 function setToast(el, msg, ok = true){
+  if (!el) return;
   el.textContent = msg;
   el.style.color = ok ? "#22c55e" : "#fb7185";
 }
 
+async function safeFetch(url, options = {}){
+  let res = null;
+  try {
+    res = await fetch(url, options);
+  } catch (err) {
+    return { ok: false, data: null, message: "Koneksi bermasalah. Coba lagi." };
+  }
+  let data = null;
+  try {
+    data = await res.json();
+  } catch (err) {
+    data = null;
+  }
+  const ok = res.ok;
+  const message = data?.message || (ok ? "Berhasil." : "Permintaan gagal.");
+  return { ok, data, message, status: res.status };
+}
+
 btnLocation?.addEventListener("click", () => {
+  if (!locStatus || !latEl || !lonEl) return;
   if (!navigator.geolocation) {
     locStatus.textContent = "Browser tidak mendukung GPS.";
     return;
@@ -63,6 +83,7 @@ selfieFile?.addEventListener("change", (e) => {
 });
 
 async function startScan(){
+  if (!qrStatus || !qrVideo || !qrData) return;
   if (!("mediaDevices" in navigator) || !navigator.mediaDevices.getUserMedia) {
     qrStatus.textContent = "Kamera tidak tersedia.";
     return;
@@ -81,6 +102,7 @@ async function startScan(){
 }
 
 async function scanLoop(){
+  if (!qrStatus || !qrVideo || !qrData) return;
   if (!qrActive || !qrDetector) return;
   try {
     const barcodes = await qrDetector.detect(qrVideo);
@@ -114,40 +136,48 @@ btnScan?.addEventListener("click", () => {
 });
 
 btnCheckin?.addEventListener("click", async () => {
+  if (!attMethod || !latEl || !lonEl || !attToast) return;
   const method = attMethod.value;
   const lat = latEl.value;
   const lon = lonEl.value;
-  const payload = { method, lat, lon };
 
   if (!lat || !lon) {
     setToast(attToast, "Lokasi GPS wajib diisi.", false);
     return;
   }
   if (method === "gps_selfie") {
-    if (!selfieData) {
+    const file = selfieFile?.files?.[0];
+    if (!file) {
       setToast(attToast, "Selfie wajib untuk GPS + selfie.", false);
       return;
     }
-    payload.selfie = selfieData;
   }
   if (method === "qr") {
     if (!qrData.value.trim()) {
       setToast(attToast, "QR code wajib di-scan.", false);
       return;
     }
-    payload.qr_data = qrData.value.trim();
   }
 
-  const res = await fetch("/api/attendance/checkin", {
+  const formData = new FormData();
+  formData.append("method", method);
+  formData.append("lat", lat);
+  formData.append("lng", lon);
+  if (method === "gps_selfie") {
+    formData.append("selfie", selfieFile.files[0]);
+  }
+  if (method === "qr") {
+    formData.append("qr_data", qrData.value.trim());
+  }
+  const result = await safeFetch("/api/attendance/checkin", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+    body: formData,
   });
-  const data = await res.json();
-  setToast(attToast, data.message || "Selesai.", res.ok);
+  setToast(attToast, result.message || "Selesai.", result.ok);
 });
 
 btnLeave?.addEventListener("click", async () => {
+  if (!leaveType || !leaveFrom || !leaveTo || !leaveReason || !leaveToast) return;
   const payload = {
     type: leaveType.value,
     date_from: leaveFrom.value,
@@ -155,14 +185,13 @@ btnLeave?.addEventListener("click", async () => {
     reason: leaveReason.value.trim(),
     attachment: leaveAttachment.files?.[0]?.name || "",
   };
-  const res = await fetch("/api/leave/request", {
+  const result = await safeFetch("/api/leave/request", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-  const data = await res.json();
-  setToast(leaveToast, data.message || "Selesai.", res.ok);
-  if (res.ok) {
+  setToast(leaveToast, result.message || "Selesai.", result.ok);
+  if (result.ok) {
     leaveReason.value = "";
     leaveAttachment.value = "";
     loadLeaveHistory();
@@ -170,9 +199,13 @@ btnLeave?.addEventListener("click", async () => {
 });
 
 async function loadLeaveHistory(){
-  const res = await fetch("/api/leave/my");
-  const data = await res.json();
-  const rows = data.data || [];
+  if (!leaveHistory) return;
+  const result = await safeFetch("/api/leave/my");
+  if (!result.ok) {
+    leaveHistory.innerHTML = '<tr><td colspan="5" class="muted">Gagal memuat data.</td></tr>';
+    return;
+  }
+  const rows = result.data?.data || [];
   if (!rows.length) {
     leaveHistory.innerHTML = '<tr><td colspan="5" class="muted">Belum ada pengajuan.</td></tr>';
     return;

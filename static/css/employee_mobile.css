@@ -2,6 +2,7 @@ html{
   box-sizing: border-box;
   width: 100%;
   max-width: 100%;
+  overflow-x: hidden;
 }
 html[data-theme="light"]{
   --bg: #f3f6fb;
@@ -17,6 +18,7 @@ body{
   width: 100%;
   max-width: 100%;
   margin: 0;
+  overflow-x: hidden;
 }
 .employee-body.debug-overflow *{
   outline: 1px solid rgba(255,0,0,.15);
@@ -28,6 +30,13 @@ img, svg, video, canvas{
 }
 input, button, select, textarea{
   max-width: 100%;
+}
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+button:focus-visible{
+  outline: 2px solid rgba(56,189,248,.6);
+  outline-offset: 2px;
 }
 
 .employee-body{
@@ -573,6 +582,9 @@ input, button, select, textarea{
 .presence-toast.error{
   border: 1px solid rgba(248,113,113,.5);
 }
+.presence-toast.info{
+  border: 1px solid rgba(56,189,248,.45);
+}
 .help-modal{
   position: fixed;
   inset: 0;
@@ -811,6 +823,9 @@ input, button, select, textarea{
 }
 .leave-toast.error{
   border: 1px solid rgba(248,113,113,.5);
+}
+.leave-toast.info{
+  border: 1px solid rgba(56,189,248,.45);
 }
 .badge{
   font-size: 11px;

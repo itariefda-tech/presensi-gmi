@@ -19,10 +19,13 @@
         <a href="{{ url_for('admin.employees') }}" class="{% if active == 'employees' %}active{% endif %}">Daftar Pegawai</a>
         <a href="{{ url_for('admin.attendance') }}" class="{% if active == 'attendance' %}active{% endif %}">Attendance</a>
         <a href="{{ url_for('admin.manual_attendance_admin') }}" class="{% if active == 'manual_admin' %}active{% endif %}">Manual Requests</a>
-        {% if user.role in ["supervisor", "koordinator"] %}
+        {% if user.role in ["supervisor", "manager_operational"] %}
         <a href="{{ url_for('manual_attendance') }}" class="{% if active == 'manual_attendance' %}active{% endif %}">Manual Attendance</a>
         {% endif %}
         <a href="{{ url_for('admin.approvals') }}" class="{% if active == 'approvals' %}active{% endif %}">Approvals</a>
+        {% if user.role == "hr_superadmin" %}
+        <a href="{{ url_for('admin.settings') }}" class="{% if active == 'settings' %}active{% endif %}">Settings</a>
+        {% endif %}
       </nav>
     </aside>
 
@@ -33,12 +36,42 @@
           {% if subtitle %}<div style="color:var(--muted); font-size:14px;">{{ subtitle }}</div>{% endif %}
         </div>
         <div class="user">
-          {{ user.email }} · {{ user.role|replace('_',' ')|title }}
+          {{ user.email }} - {{ user.role|replace('_',' ')|title }}
+          <button class="btn secondary" type="button" id="btnOpenChangePassword">Ganti Password</button>
+          {% if user.role == "hr_superadmin" %}
+          <a class="btn secondary settings-btn" href="{{ url_for('admin.settings') }}" aria-label="Settings">
+  <svg class="settings-gear" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <path d="M12 8.7a3.3 3.3 0 1 0 0 6.6 3.3 3.3 0 0 0 0-6.6Zm9 3.3c0-.4 0-.7-.1-1.1l2-1.6-2-3.5-2.4 1a8.5 8.5 0 0 0-1.8-1l-.4-2.6h-4l-.4 2.6a8.5 8.5 0 0 0-1.8 1l-2.4-1-2 3.5 2 1.6c0 .4-.1.7-.1 1.1 0 .4 0 .7.1 1.1l-2 1.6 2 3.5 2.4-1a8.5 8.5 0 0 0 1.8 1l.4 2.6h4l.4-2.6a8.5 8.5 0 0 0 1.8-1l2.4 1 2-3.5-2-1.6c.1-.4.1-.7.1-1.1Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+  </svg>
+</a>
+          {% endif %}
+          <a class="btn secondary" href="{{ url_for('logout') }}">Logout</a>
         </div>
       </div>
+
+      {% if user.must_change_password %}
+      <div class="alert info">Silakan ganti password sebelum melanjutkan aktivitas.</div>
+      {% endif %}
 
       {% block body %}{% endblock %}
     </main>
   </div>
+
+  <div class="modal" id="changePasswordModal" aria-hidden="true">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="changePasswordTitle">
+      <div class="modal-title" id="changePasswordTitle">Ganti Password</div>
+      <form id="changePasswordForm" class="stack">
+        <input class="input" type="password" name="current_password" placeholder="Password saat ini" required />
+        <input class="input" type="password" name="new_password" placeholder="Password baru" required />
+        <input class="input" type="password" name="new_password2" placeholder="Ulangi password baru" required />
+        <div class="inline">
+          <button class="btn primary" type="submit">Simpan</button>
+          <button class="btn secondary" type="button" id="btnCloseChangePassword">Batal</button>
+        </div>
+      </form>
+      <div class="alert info" id="changePasswordAlert" style="display:none;"></div>
+    </div>
+  </div>
+  <script src="{{ url_for('static', filename='js/change_password.js') }}"></script>
 </body>
 </html>

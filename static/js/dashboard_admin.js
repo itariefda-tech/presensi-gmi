@@ -1,6 +1,7 @@
 const tabButtons = Array.from(document.querySelectorAll(".tab-btn"));
 const tabPanels = Array.from(document.querySelectorAll(".tab-panel"));
 const leaveRows = document.getElementById("leaveRows");
+const canApproveLeave = leaveRows?.dataset?.canApproveLeave === "1";
 const approvalAlert = document.getElementById("approvalAlert");
 
 function setActiveTab(name){
@@ -12,25 +13,41 @@ tabButtons.forEach((btn) => {
   btn.addEventListener("click", () => setActiveTab(btn.dataset.tab));
 });
 
-async function fetchJSON(url){
-  const res = await fetch(url);
-  return res.json();
+async function safeFetch(url, options = {}){
+  let res = null;
+  try {
+    res = await fetch(url, options);
+  } catch (err) {
+    return { ok: false, data: null, message: "Koneksi bermasalah. Coba lagi." };
+  }
+  let data = null;
+  try {
+    data = await res.json();
+  } catch (err) {
+    data = null;
+  }
+  const ok = res.ok;
+  const message = data?.message || (ok ? "Berhasil." : "Permintaan gagal.");
+  return { ok, data, message, status: res.status };
 }
 
-function showAlert(type, message){
+function showToast(type, message, opts = {}){
   if (!approvalAlert) return;
   approvalAlert.textContent = message;
   approvalAlert.classList.remove("error", "success", "info");
   approvalAlert.classList.add(type);
   approvalAlert.style.display = "block";
-  window.setTimeout(() => {
-    approvalAlert.style.display = "none";
-  }, 2400);
+  if (!opts.persist) {
+    window.setTimeout(() => {
+      approvalAlert.style.display = "none";
+    }, opts.timeoutMs || 3200);
+  }
 }
 
 function renderLeave(rows){
   if (!rows.length) {
-    leaveRows.innerHTML = '<tr><td colspan="7" class="muted">Tidak ada pending.</td></tr>';
+    const colspan = canApproveLeave ? 7 : 6;
+    leaveRows.innerHTML = `<tr><td colspan="${colspan}" class="muted">Tidak ada pending.</td></tr>`;
     return;
   }
   leaveRows.innerHTML = rows.map((r) => {
@@ -44,50 +61,55 @@ function renderLeave(rows){
       <td>${range}</td>
       <td>${shortReason}</td>
       <td><span class="badge pending">pending</span></td>
-      <td>
+      ${canApproveLeave ? `<td>
         <div class="inline">
           <button class="btn primary" data-approve-leave="${r.id}">Approve</button>
           <button class="btn secondary" data-reject-leave="${r.id}">Reject</button>
         </div>
-      </td>
+      </td>` : ""}
     </tr>`;
   }).join("");
+  if (!canApproveLeave) return;
   leaveRows.querySelectorAll("[data-approve-leave]").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const note = window.prompt("Catatan approval (opsional):", "") || "";
-      const res = await fetch("/api/leave/approve", {
+      const result = await safeFetch("/api/leave/approve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: btn.dataset.approveLeave, action: "approve", note }),
       });
-      const data = await res.json();
-      showAlert(res.ok ? "success" : "error", data.message || "Selesai.");
-      if (res.ok) loadApprovals();
+      showToast(result.ok ? "success" : "error", result.message || "Selesai.");
+      if (result.ok) loadApprovals();
     });
   });
   leaveRows.querySelectorAll("[data-reject-leave]").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const note = window.prompt("Alasan penolakan (wajib):", "") || "";
       if (!note.trim()) {
-        showAlert("error", "Alasan penolakan wajib diisi.");
+        showToast("error", "Alasan penolakan wajib diisi.");
         return;
       }
-      const res = await fetch("/api/leave/approve", {
+      const result = await safeFetch("/api/leave/approve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: btn.dataset.rejectLeave, action: "reject", note }),
       });
-      const data = await res.json();
-      showAlert(res.ok ? "success" : "error", data.message || "Selesai.");
-      if (res.ok) loadApprovals();
+      showToast(result.ok ? "success" : "error", result.message || "Selesai.");
+      if (result.ok) loadApprovals();
     });
   });
 }
 
 async function loadApprovals(){
   if (!leaveRows) return;
-  const leave = await fetchJSON("/api/leave/pending");
-  renderLeave(leave.data || []);
+  const result = await safeFetch("/api/leave/pending");
+  if (!result.ok) {
+    showToast("error", result.message || "Gagal memuat data.");
+    const colspan = canApproveLeave ? 7 : 6;
+    leaveRows.innerHTML = `<tr><td colspan="${colspan}" class="muted">Gagal memuat data.</td></tr>`;
+    return;
+  }
+  renderLeave(result.data?.data || []);
 }
 
 if (leaveRows) {

@@ -26,4 +26,117 @@
     </tbody>
   </table>
 </div>
+<div class="card" id="sites" style="margin-top:12px;">
+  <div style="font-weight:700; margin-bottom:8px;">Sites (Lokasi Client)</div>
+  <div class="muted" style="margin-bottom:10px;">Kelola lokasi kantor utama/cabang per client (demo).</div>
+  <form class="inline" method="post" action="{{ url_for('admin.settings_sites_create') }}">
+    <select class="input" name="client_name" required>
+      <option value="" selected>Pilih client</option>
+      {% for c in clients %}
+      <option value="{{ c.name }}">{{ c.name }}</option>
+      {% endfor %}
+    </select>
+    <input class="input" type="text" name="name" placeholder="Nama site" required />
+    <input class="input" type="text" name="code" placeholder="Kode (opsional)" />
+    <input class="input" type="text" name="location" placeholder="Lokasi (opsional)" />
+    <input class="input" type="text" name="notes" placeholder="Catatan (opsional)" />
+    <button class="btn primary" type="submit">Tambah</button>
+  </form>
+  <div class="table-wrap">
+    <table class="table" aria-label="Site list">
+      <thead>
+        <tr>
+          <th>Client</th>
+          <th>Nama</th>
+          <th>Kode</th>
+          <th>Lokasi</th>
+          <th>Catatan</th>
+          <th>Status</th>
+          <th>Aksi</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if not sites %}
+        <tr><td colspan="7" class="muted">Belum ada site.</td></tr>
+        {% endif %}
+        {% for s in sites %}
+        <tr>
+          <td>
+            <select class="input" name="client_name" form="site-form-{{ s.id }}" required>
+              <option value="" {% if not s.client_name %}selected{% endif %}>Pilih client</option>
+              {% for c in clients %}
+              <option value="{{ c.name }}" {% if s.client_name == c.name %}selected{% endif %}>{{ c.name }}</option>
+              {% endfor %}
+            </select>
+          </td>
+          <td><input class="input" type="text" name="name" value="{{ s.name }}" form="site-form-{{ s.id }}" /></td>
+          <td><input class="input" type="text" name="code" value="{{ s.code or '' }}" form="site-form-{{ s.id }}" /></td>
+          <td><input class="input" type="text" name="location" value="{{ s.location or '' }}" form="site-form-{{ s.id }}" /></td>
+          <td><input class="input" type="text" name="notes" value="{{ s.notes or '' }}" form="site-form-{{ s.id }}" /></td>
+          <td>{% if s.is_active %}Active{% else %}Disabled{% endif %}</td>
+          <td>
+            <div class="stack">
+              <form id="site-form-{{ s.id }}" method="post" action="{{ url_for('admin.settings_sites_update', site_id=s.id) }}">
+                <button class="btn primary" type="submit">Save</button>
+              </form>
+              <form method="post" action="{{ url_for('admin.settings_sites_toggle', site_id=s.id) }}">
+                <button class="btn secondary" type="submit">{% if s.is_active %}Disable{% else %}Enable{% endif %}</button>
+              </form>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+<div class="card" id="shifts" style="margin-top:12px;">
+  <div style="font-weight:700; margin-bottom:8px;">Shifts (Jenis Perhitungan)</div>
+  <div class="muted" style="margin-bottom:10px;">Kelola variasi shift per client (demo).</div>
+  <form class="inline" method="post" action="{{ url_for('admin.settings_shifts_create') }}">
+    <input class="input" type="text" name="name" placeholder="Nama shift" required />
+    <input class="input" type="time" name="start_time" />
+    <input class="input" type="time" name="end_time" />
+    <input class="input" type="number" name="grace_minutes" placeholder="Grace (menit)" min="0" />
+    <button class="btn primary" type="submit">Tambah</button>
+  </form>
+  <div class="table-wrap">
+    <table class="table" aria-label="Shift list">
+      <thead>
+        <tr>
+          <th>Nama</th>
+          <th>Mulai</th>
+          <th>Selesai</th>
+          <th>Grace</th>
+          <th>Status</th>
+          <th>Aksi</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if not shifts %}
+        <tr><td colspan="6" class="muted">Belum ada shift.</td></tr>
+        {% endif %}
+        {% for s in shifts %}
+        <tr>
+          <td><input class="input" type="text" name="name" value="{{ s.name }}" form="shift-form-{{ s.id }}" /></td>
+          <td><input class="input" type="time" name="start_time" value="{{ s.start_time or '' }}" form="shift-form-{{ s.id }}" /></td>
+          <td><input class="input" type="time" name="end_time" value="{{ s.end_time or '' }}" form="shift-form-{{ s.id }}" /></td>
+          <td><input class="input" type="number" name="grace_minutes" value="{{ s.grace_minutes or 0 }}" min="0" form="shift-form-{{ s.id }}" /></td>
+          <td>{% if s.is_active %}Active{% else %}Disabled{% endif %}</td>
+          <td>
+            <div class="stack">
+              <form id="shift-form-{{ s.id }}" method="post" action="{{ url_for('admin.settings_shifts_update', shift_id=s.id) }}">
+                <button class="btn primary" type="submit">Save</button>
+              </form>
+              <form method="post" action="{{ url_for('admin.settings_shifts_toggle', shift_id=s.id) }}">
+                <button class="btn secondary" type="submit">{% if s.is_active %}Disable{% else %}Enable{% endif %}</button>
+              </form>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
 {% endblock %}

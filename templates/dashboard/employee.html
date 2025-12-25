@@ -46,6 +46,10 @@
       </div>
     </header>
 
+    {% if user.must_change_password %}
+    <div class="alert info">Silakan ganti password sebelum melanjutkan aktivitas.</div>
+    {% endif %}
+
     
 
     <div class="swipe-viewport">
@@ -265,6 +269,11 @@
               </tbody>
             </table>
           </div>
+          <div class="card mobile-card">
+            <h4>Keamanan Akun</h4>
+            <p class="muted">Ganti password secara berkala untuk keamanan.</p>
+            <button class="btn primary full" id="btnOpenChangePassword" type="button">Ganti Password</button>
+          </div>
         </section>
       </div>
     </div>
@@ -278,6 +287,23 @@
     </div>
   </div>
 
+  <div class="modal" id="changePasswordModal" aria-hidden="true">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="changePasswordTitle">
+      <div class="modal-title" id="changePasswordTitle">Ganti Password</div>
+      <form id="changePasswordForm" class="stack">
+        <input class="input" type="password" name="current_password" placeholder="Password saat ini" required />
+        <input class="input" type="password" name="new_password" placeholder="Password baru" required />
+        <input class="input" type="password" name="new_password2" placeholder="Ulangi password baru" required />
+        <div class="inline">
+          <button class="btn primary" type="submit">Simpan</button>
+          <button class="btn secondary" type="button" id="btnCloseChangePassword">Batal</button>
+        </div>
+      </form>
+      <div class="alert info" id="changePasswordAlert" style="display:none;"></div>
+    </div>
+  </div>
+
   <script src="{{ url_for('static', filename='js/dashboard_employee_mobile.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/change_password.js') }}"></script>
 </body>
 </html>
