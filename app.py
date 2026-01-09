@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import json
 import re
 import os
 import math
@@ -23,6 +25,23 @@ class AuthResult:
 def create_app() -> Flask:
     app = Flask(__name__)
     app.secret_key = os.environ.get("FLASK_SECRET", "dev-secret-change-me")
+    app.config.update(
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE="Lax",
+        SESSION_COOKIE_SECURE=os.environ.get("SESSION_COOKIE_SECURE", "").lower() in {"1", "true", "yes"},
+        MAX_CONTENT_LENGTH=4 * 1024 * 1024,
+    )
+
+    @app.after_request
+    def _security_headers(response):
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
+        response.headers.setdefault(
+            "Permissions-Policy",
+            "geolocation=(self), camera=(self), microphone=()",
+        )
+        return response
 
     app.register_blueprint(admin_bp())
     _init_db()
@@ -38,15 +57,29 @@ def create_app() -> Flask:
     def signup():
         data = request.form or {}
         invite = (data.get("invite_code") or "").strip()
-        email = (data.get("email") or "").strip()
+        login_type = (data.get("login_type") or "email").strip().lower()
+        identifier = (data.get("identifier") or data.get("email") or data.get("phone") or "").strip()
+        email = ""
         p1 = data.get("password", "")
         p2 = data.get("password2", "")
         selfie_file = request.files.get("selfie")
 
         if not invite:
             return jsonify(ok=False, message="Kode undangan wajib."), 400
-        if not _looks_like_email(email):
-            return jsonify(ok=False, message="Email tidak valid."), 400
+        if login_type == "phone":
+            phone = _normalize_phone(identifier)
+            if not phone:
+                return jsonify(ok=False, message="No telp wajib diisi."), 400
+            employee = _employee_by_phone(phone, only_active=False)
+            if not employee:
+                return jsonify(ok=False, message="No telp tidak ditemukan."), 400
+            email = (employee.get("email") or "").strip()
+            if not email:
+                return jsonify(ok=False, message="Email akun tidak ditemukan."), 400
+        else:
+            email = identifier
+            if not _looks_like_email(email):
+                return jsonify(ok=False, message="Email tidak valid."), 400
         if len(p1) < 6:
             return jsonify(ok=False, message="Password minimal 6 karakter."), 400
         if p1 != p2:
@@ -54,35 +87,99 @@ def create_app() -> Flask:
         if not selfie_file or not selfie_file.filename:
             return jsonify(ok=False, message="Selfie wajib untuk daftar."), 400
 
-        # Demo: pretend to accept any code with prefix GMI-
-        if not invite.upper().startswith("GMI-"):
-            return jsonify(ok=False, message="Kode undangan tidak dikenal (demo)."), 400
-
-        try:
-            selfie_path = _save_upload(selfie_file, "uploads/selfies", 2 * 1024 * 1024)
-        except ValueError as err:
-            return jsonify(ok=False, message=str(err)), 400
+        invite = invite.strip().upper()
+        normalized_invite = invite.replace(" ", "")
+        is_manual_code = normalized_invite == "SUDAHBYADMIN"
+        if is_manual_code:
+            if not _employee_by_email(email, only_active=False):
+                return jsonify(
+                    ok=False,
+                    message="Data master pegawai belum ada. Hubungi admin untuk input data.",
+                ), 400
+        else:
+            if not _looks_like_employee_invite(invite):
+                return jsonify(ok=False, message="Format kode undangan tidak valid."), 400
+            if _employee_by_email(email, only_active=False):
+                return jsonify(
+                    ok=False,
+                    message="Data master pegawai sudah ada. Gunakan kode SUDAHBYADMIN.",
+                ), 400
 
         if _get_user_by_email(email):
             return jsonify(ok=False, message="Email sudah terdaftar."), 400
 
-        _create_user(
-            name=email.split("@")[0],
-            email=email,
-            role="employee",
-            password=p1,
-            selfie_path=selfie_path,
-        )
+        try:
+            _validate_upload(selfie_file, 2 * 1024 * 1024)
+        except ValueError as err:
+            return jsonify(ok=False, message=str(err)), 400
+
+        conn = _db_connect()
+        selfie_path = None
+        committed = False
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            existing = conn.execute(
+                "SELECT 1 FROM users WHERE email = ?",
+                (email.lower(),),
+            ).fetchone()
+            if existing:
+                conn.rollback()
+                return jsonify(ok=False, message="Email sudah terdaftar."), 400
+            if not is_manual_code:
+                ok, message = _consume_employee_registration_code_with_conn(conn, invite)
+                if not ok:
+                    conn.rollback()
+                    return jsonify(ok=False, message=message), 400
+
+            user_id = _create_user_with_conn(
+                conn,
+                name=email.split("@")[0],
+                email=email,
+                role="employee",
+                password=p1,
+                selfie_path=None,
+            )
+            try:
+                selfie_path = _save_upload(selfie_file, "uploads/selfies", 2 * 1024 * 1024)
+            except ValueError as err:
+                conn.rollback()
+                return jsonify(ok=False, message=str(err)), 400
+            except Exception:
+                conn.rollback()
+                return jsonify(ok=False, message="Gagal menyimpan file selfie."), 400
+            _update_user_selfie_path_with_conn(conn, user_id, selfie_path)
+            if is_manual_code:
+                _set_employee_active_with_conn(conn, email, 1)
+            conn.commit()
+            committed = True
+        finally:
+            conn.close()
+            if not committed and selfie_path:
+                _delete_uploaded_file(selfie_path)
         return jsonify(ok=True, message="Signup berhasil (demo)."), 200
 
     @app.route("/api/auth/forgot", methods=["POST"])
     def forgot():
         data = _get_json()
-        email = data.get("email", "").strip()
+        login_type = (data.get("login_type") or "email").strip().lower()
+        identifier = (data.get("identifier") or data.get("email") or data.get("phone") or "").strip()
         method = data.get("method", "whatsapp_otp")
+        email = ""
 
-        if not _looks_like_email(email):
-            return jsonify(ok=False, message="Email wajib diisi."), 400
+        if login_type == "phone":
+            phone = _normalize_phone(identifier)
+            if not phone:
+                return jsonify(ok=False, message="No telp wajib diisi."), 400
+            employee = _employee_by_phone(phone, only_active=False)
+            if not employee:
+                return jsonify(ok=False, message="No telp tidak ditemukan."), 400
+            email = (employee.get("email") or "").strip()
+            if not email:
+                return jsonify(ok=False, message="Email akun tidak ditemukan."), 400
+        else:
+            email = identifier
+            if not _looks_like_email(email):
+                return jsonify(ok=False, message="Email wajib diisi."), 400
 
         route = "WhatsApp OTP" if method == "whatsapp_otp" else "Email"
         return jsonify(ok=True, message=f"Reset (demo) via {route}."), 200
@@ -112,6 +209,40 @@ def create_app() -> Flask:
         _persist_user(user)
         return jsonify(ok=True, message="Password berhasil diperbarui."), 200
 
+    @app.route("/api/user/profile_photo", methods=["POST"])
+    def update_profile_photo():
+        user = _current_user()
+        if not user:
+            return _json_forbidden()
+        avatar_file = request.files.get("avatar")
+        if not avatar_file or not avatar_file.filename:
+            return jsonify(ok=False, message="Foto profil wajib diunggah."), 400
+        try:
+            selfie_path = _save_upload(avatar_file, "uploads/profiles", 2 * 1024 * 1024)
+        except ValueError as err:
+            return jsonify(ok=False, message=str(err)), 400
+
+        _update_user_selfie_path(user.id, selfie_path)
+        user.selfie_path = selfie_path
+        _persist_user(user)
+        return jsonify(ok=True, message="Foto profil diperbarui.", path=url_for("static", filename=selfie_path)), 200
+
+    @app.route("/api/employee/profile", methods=["POST"])
+    def employee_profile_create():
+        user = _current_user()
+        forbidden = _require_api_role(user, EMPLOYEE_ROLES)
+        if forbidden:
+            return forbidden
+        payload, error = _parse_employee_form(request.form or {})
+        if error:
+            return jsonify(ok=False, message=error), 400
+        if user.email.lower() != payload["email"].lower():
+            return jsonify(ok=False, message="Email tidak sesuai akun."), 400
+        if _employee_by_email(user.email, only_active=False):
+            return jsonify(ok=False, message="Data master pegawai sudah terdaftar."), 400
+        _create_employee(**payload)
+        return jsonify(ok=True, message="Data pegawai berhasil disimpan."), 200
+
     @app.route("/health", methods=["GET"])
     def health():
         return jsonify(status="ok"), 200
@@ -124,7 +255,18 @@ def create_app() -> Flask:
     def dashboard_employee():
         user = _current_user()
         _require_role(user, EMPLOYEE_ROLES)
-        return render_template("dashboard/employee.html", user=user)
+        has_employee_record = bool(_employee_by_email(user.email, only_active=False))
+        assignment = _get_active_assignment(user.id) if user else None
+        site = _get_site_by_id(assignment.get("site_id") if assignment else None)
+        client = _get_client_by_id(site["client_id"]) if site and site["client_id"] else None
+        return render_template(
+            "dashboard/employee.html",
+            user=user,
+            has_employee_record=has_employee_record,
+            active_assignment=assignment,
+            active_site=site,
+            active_client=client,
+        )
 
     @app.route("/dashboard/manual_attendance", methods=["GET", "POST"])
     def manual_attendance():
@@ -188,6 +330,21 @@ def create_app() -> Flask:
         forbidden = _require_api_role(user, EMPLOYEE_ROLES)
         if forbidden:
             return forbidden
+        employee = _employee_by_email(user.email, only_active=False)
+        if not employee:
+            return jsonify(ok=False, message="Lengkapi data master pegawai terlebih dahulu."), 400
+        assignment = _get_active_assignment(user.id)
+        if not assignment:
+            return jsonify(ok=False, message="Belum ada penempatan aktif. Hubungi admin."), 400
+        site = _get_site_by_id(assignment.get("site_id"))
+        if not site:
+            return jsonify(ok=False, message="Site penempatan tidak ditemukan. Hubungi admin."), 400
+        if int(site["is_active"] or 0) != 1:
+            return jsonify(ok=False, message="Site penempatan sedang nonaktif."), 400
+        policy = _resolve_attendance_policy(
+            site["id"] if site else None,
+            site["client_id"] if site else None,
+        )
         data = request.form or {}
         method = (data.get("method") or "gps_selfie").strip()
         lat = (data.get("lat") or "").strip()
@@ -199,6 +356,12 @@ def create_app() -> Flask:
 
         if method not in {"gps_selfie", "gps", "qr"}:
             return jsonify(ok=False, message="Metode presensi tidak dikenal."), 400
+        if not policy.get("allow_gps", 1) and method in {"gps", "gps_selfie"}:
+            return jsonify(ok=False, message="Metode GPS tidak diizinkan."), 400
+        if not policy.get("allow_qr", 1) and method == "qr":
+            return jsonify(ok=False, message="Metode QR tidak diizinkan."), 400
+        if policy.get("require_selfie") and method != "gps_selfie":
+            return jsonify(ok=False, message="Selfie wajib sesuai kebijakan."), 400
         if not lat or not lng:
             return jsonify(ok=False, message="Lokasi GPS wajib diisi."), 400
         try:
@@ -206,8 +369,8 @@ def create_app() -> Flask:
             lng_f = float(lng)
         except ValueError:
             return jsonify(ok=False, message="Lokasi GPS tidak valid."), 400
-        if not _within_radius(lat_f, lng_f):
-            return jsonify(ok=False, message="Lokasi di luar radius 100m."), 400
+        if not _within_site_radius(lat_f, lng_f, site):
+            return jsonify(ok=False, message="Lokasi di luar radius site."), 400
         if method == "gps_selfie" and (not selfie_file or not selfie_file.filename):
             return jsonify(ok=False, message="Selfie wajib untuk presensi."), 400
         if method == "qr":
@@ -221,25 +384,15 @@ def create_app() -> Flask:
             except ValueError as err:
                 return jsonify(ok=False, message=str(err)), 400
 
-        record = {
-            "id": _next_id(DEMO_ATTENDANCE),
-            "employee_email": user.email,
-            "action": "checkin",
-            "method": "gps+selfie" if method == "gps_selfie" else method,
-            "lat": lat_f,
-            "lng": lng_f,
-            "accuracy": accuracy,
-            "device_time": device_time,
-            "selfie_path": selfie_path,
-            "qr_data": qr_data if method == "qr" else None,
-            "status": "submitted",
-            "created_at": _now_ts(),
-            "approver": None,
-            "approved_at": None,
-            "note": None,
-        }
-        DEMO_ATTENDANCE.append(record)
-        return jsonify(ok=True, message="Presensi tercatat (demo).", data=record), 200
+        record = _create_attendance_record(
+            employee=employee,
+            employee_email=user.email,
+            action="checkin",
+            method="gps+selfie" if method == "gps_selfie" else method,
+            device_time=device_time,
+            source="app",
+        )
+        return jsonify(ok=True, message="Presensi tercatat.", data=record), 200
 
     @app.route("/api/attendance/checkout", methods=["POST"])
     def attendance_checkout():
@@ -247,6 +400,21 @@ def create_app() -> Flask:
         forbidden = _require_api_role(user, EMPLOYEE_ROLES)
         if forbidden:
             return forbidden
+        employee = _employee_by_email(user.email, only_active=False)
+        if not employee:
+            return jsonify(ok=False, message="Lengkapi data master pegawai terlebih dahulu."), 400
+        assignment = _get_active_assignment(user.id)
+        if not assignment:
+            return jsonify(ok=False, message="Belum ada penempatan aktif. Hubungi admin."), 400
+        site = _get_site_by_id(assignment.get("site_id"))
+        if not site:
+            return jsonify(ok=False, message="Site penempatan tidak ditemukan. Hubungi admin."), 400
+        if int(site["is_active"] or 0) != 1:
+            return jsonify(ok=False, message="Site penempatan sedang nonaktif."), 400
+        policy = _resolve_attendance_policy(
+            site["id"] if site else None,
+            site["client_id"] if site else None,
+        )
         data = request.form or {}
         method = (data.get("method") or "gps_selfie").strip()
         lat = (data.get("lat") or "").strip()
@@ -258,6 +426,12 @@ def create_app() -> Flask:
 
         if method not in {"gps_selfie", "gps", "qr"}:
             return jsonify(ok=False, message="Metode presensi tidak dikenal."), 400
+        if not policy.get("allow_gps", 1) and method in {"gps", "gps_selfie"}:
+            return jsonify(ok=False, message="Metode GPS tidak diizinkan."), 400
+        if not policy.get("allow_qr", 1) and method == "qr":
+            return jsonify(ok=False, message="Metode QR tidak diizinkan."), 400
+        if policy.get("require_selfie") and method != "gps_selfie":
+            return jsonify(ok=False, message="Selfie wajib sesuai kebijakan."), 400
         if not lat or not lng:
             return jsonify(ok=False, message="Lokasi GPS wajib diisi."), 400
         try:
@@ -265,8 +439,8 @@ def create_app() -> Flask:
             lng_f = float(lng)
         except ValueError:
             return jsonify(ok=False, message="Lokasi GPS tidak valid."), 400
-        if not _within_radius(lat_f, lng_f):
-            return jsonify(ok=False, message="Lokasi di luar radius 100m."), 400
+        if not _within_site_radius(lat_f, lng_f, site):
+            return jsonify(ok=False, message="Lokasi di luar radius site."), 400
         if method == "gps_selfie" and (not selfie_file or not selfie_file.filename):
             return jsonify(ok=False, message="Selfie wajib untuk presensi."), 400
         if method == "qr":
@@ -280,25 +454,15 @@ def create_app() -> Flask:
             except ValueError as err:
                 return jsonify(ok=False, message=str(err)), 400
 
-        record = {
-            "id": _next_id(DEMO_ATTENDANCE),
-            "employee_email": user.email,
-            "action": "checkout",
-            "method": "gps+selfie" if method == "gps_selfie" else method,
-            "lat": lat_f,
-            "lng": lng_f,
-            "accuracy": accuracy,
-            "device_time": device_time,
-            "selfie_path": selfie_path,
-            "qr_data": qr_data if method == "qr" else None,
-            "status": "submitted",
-            "created_at": _now_ts(),
-            "approver": None,
-            "approved_at": None,
-            "note": None,
-        }
-        DEMO_ATTENDANCE.append(record)
-        return jsonify(ok=True, message="Check-out tercatat (demo).", data=record), 200
+        record = _create_attendance_record(
+            employee=employee,
+            employee_email=user.email,
+            action="checkout",
+            method="gps+selfie" if method == "gps_selfie" else method,
+            device_time=device_time,
+            source="app",
+        )
+        return jsonify(ok=True, message="Check-out tercatat.", data=record), 200
 
     @app.route("/api/attendance/today", methods=["GET"])
     def attendance_today():
@@ -307,70 +471,69 @@ def create_app() -> Flask:
         if forbidden:
             return forbidden
         today = _today_key()
-        records = [
-            r for r in DEMO_ATTENDANCE
-            if r.get("employee_email") == user.email and r.get("created_at", "").startswith(today)
-        ]
-        records = sorted(records, key=lambda r: r.get("created_at", ""), reverse=True)
-        return jsonify(ok=True, data=records[:10]), 200
+        records = _list_attendance_today(user.email, today, limit=10)
+        return jsonify(ok=True, data=records), 200
 
     @app.route("/api/attendance/manual", methods=["POST"])
     def attendance_manual():
-        # LEGACY / DEMO ONLY: Use /dashboard/manual_attendance + admin approvals (SQLite).
         user = _current_user()
         forbidden = _require_api_role(user, {"supervisor", "manager_operational"})
         if forbidden:
             return forbidden
         data = _get_json()
         employee_email = (data.get("employee_email") or "").strip()
+        action = (data.get("action") or "IN").strip().upper()
         reason = (data.get("reason") or "").strip()
-        lat = data.get("lat")
-        lon = data.get("lon")
+        date_value = (data.get("date") or "").strip()
+        time_value = (data.get("time") or "").strip()
 
         if not _looks_like_email(employee_email):
             return jsonify(ok=False, message="Email pegawai wajib diisi."), 400
+        if action not in {"IN", "OUT"}:
+            return jsonify(ok=False, message="Tipe presensi wajib dipilih."), 400
         if not reason:
             return jsonify(ok=False, message="Alasan wajib diisi."), 400
-
-        record = {
-            "id": _next_id(DEMO_ATTENDANCE),
-            "employee_email": employee_email,
-            "method": "manual",
-            "lat": lat,
-            "lon": lon,
-            "selfie": None,
-            "qr_data": None,
-            "status": "pending",
-            "created_at": _now_ts(),
-            "created_by": user.email,
-            "approver": None,
-            "approved_at": None,
-            "note": reason,
-        }
-        DEMO_ATTENDANCE.append(record)
-        return jsonify(
-            ok=True,
-            message="Endpoint legacy (demo). Gunakan flow /dashboard/manual_attendance + approvals admin.",
-            data=record,
-        ), 200
+        employee = _employee_by_email(employee_email, only_active=False)
+        if not employee:
+            return jsonify(ok=False, message="Data pegawai tidak ditemukan."), 404
+        if not date_value:
+            date_value = _today_key()
+        if not time_value:
+            time_value = datetime.now().strftime("%H:%M")
+        _create_manual_request(
+            employee=employee,
+            date=date_value,
+            time=time_value,
+            action=action,
+            reason=reason,
+            created_by=user,
+        )
+        return jsonify(ok=True, message="Pengajuan manual attendance terkirim."), 200
 
     @app.route("/api/attendance/pending", methods=["GET"])
     def attendance_pending():
-        # LEGACY / DEMO ONLY: Use SQLite manual_attendance_requests for pending list.
         user = _current_user()
         forbidden = _require_api_role(user, ADMIN_ROLES)
         if forbidden:
             return forbidden
-        pending = [r for r in DEMO_ATTENDANCE if r.get("method") == "manual" and r.get("status") == "pending"]
-        return jsonify(
-            ok=True,
-            message="Endpoint legacy (demo). Gunakan approvals admin (SQLite).",
-            data=pending,
-        ), 200
+        conn = _db_connect()
+        try:
+            if not _table_exists(conn, "manual_attendance_requests"):
+                return jsonify(ok=True, data=[]), 200
+            cur = conn.execute(
+                """
+                SELECT *
+                FROM manual_attendance_requests
+                WHERE status = 'PENDING'
+                ORDER BY created_at DESC
+                """
+            )
+            return jsonify(ok=True, data=[dict(row) for row in cur.fetchall()]), 200
+        finally:
+            conn.close()
 
     @app.route("/api/attendance/approve", methods=["POST"])
     def attendance_approve():
-        # LEGACY / DEMO ONLY: Manual attendance approvals handled via SQLite admin routes.
         user = _current_user()
         forbidden = _require_api_role(user, {"supervisor", "manager_operational"})
         if forbidden:
@@ -378,20 +541,18 @@ def create_app() -> Flask:
         data = _get_json()
         rid = data.get("id")
         note = (data.get("note") or "").strip()
-        record = _find_by_id(DEMO_ATTENDANCE, rid)
-        if not record or record.get("method") != "manual":
+        try:
+            request_id = int(rid)
+        except (TypeError, ValueError):
+            return jsonify(ok=False, message="ID tidak valid."), 400
+        request_row = _manual_request_by_id(request_id)
+        if not request_row:
             return jsonify(ok=False, message="Data attendance tidak ditemukan."), 404
-        if record.get("status") != "pending":
+        if request_row.get("status") != "PENDING":
             return jsonify(ok=False, message="Attendance sudah diproses."), 400
-
-        record["status"] = "approved"
-        record["approver"] = user.email
-        record["approved_at"] = _now_ts()
-        record["note"] = note or record.get("note")
-        return jsonify(
-            ok=True,
-            message="Endpoint legacy (demo). Gunakan approvals admin (SQLite).",
-        ), 200
+        _approve_manual_request(request_id, user, note)
+        _insert_manual_attendance_record(request_row)
+        return jsonify(ok=True, message="Manual attendance disetujui."), 200
 
     @app.route("/api/leave/request", methods=["POST"])
     def leave_request():
@@ -399,13 +560,17 @@ def create_app() -> Flask:
         forbidden = _require_api_role(user, EMPLOYEE_ROLES)
         if forbidden:
             return forbidden
-        data = _get_json()
+        if request.is_json:
+            data = _get_json()
+        else:
+            data = request.form or {}
         leave_type = (data.get("type") or "").strip()
         date_from = (data.get("date_from") or "").strip()
         date_to = (data.get("date_to") or "").strip()
         reason = (data.get("reason") or "").strip()
-        attachment = data.get("attachment")
+        attachment = (data.get("attachment") or "").strip()
         attachment_base64 = data.get("attachment_base64")
+        attachment_file = request.files.get("attachment")
 
         if leave_type not in {"izin", "sakit", "absen"}:
             return jsonify(ok=False, message="Tipe izin tidak valid."), 400
@@ -414,22 +579,37 @@ def create_app() -> Flask:
         if not reason:
             return jsonify(ok=False, message="Alasan wajib diisi."), 400
 
-        record = {
-            "id": _next_id(DEMO_LEAVE_REQUESTS),
-            "employee_email": user.email,
-            "type": leave_type,
-            "date_from": date_from,
-            "date_to": date_to,
-            "reason": reason,
-            "attachment": attachment,
-            "attachment_base64": attachment_base64,
-            "status": "pending",
-            "created_at": _now_ts(),
-            "approver": None,
-            "approved_at": None,
-            "note": None,
-        }
-        DEMO_LEAVE_REQUESTS.append(record)
+        attachment_path = None
+        if attachment_file and attachment_file.filename:
+            try:
+                attachment_path = _save_leave_attachment(
+                    attachment_file,
+                    "uploads/leave",
+                    2 * 1024 * 1024,
+                )
+            except ValueError as err:
+                return jsonify(ok=False, message=str(err)), 400
+            attachment = attachment_file.filename
+        elif attachment_base64:
+            try:
+                attachment_path = _save_base64_attachment(
+                    attachment_base64,
+                    "uploads/leave",
+                    2 * 1024 * 1024,
+                )
+            except ValueError as err:
+                return jsonify(ok=False, message=str(err)), 400
+
+        request_id = _create_leave_request(
+            employee_email=user.email,
+            leave_type=leave_type,
+            date_from=date_from,
+            date_to=date_to,
+            reason=reason,
+            attachment=attachment,
+            attachment_path=attachment_path,
+        )
+        record = _get_leave_request_by_id(request_id) or {}
         return jsonify(ok=True, message="Pengajuan izin dikirim.", data=record), 200
 
     @app.route("/api/leave/my", methods=["GET"])
@@ -438,8 +618,7 @@ def create_app() -> Flask:
         forbidden = _require_api_role(user, EMPLOYEE_ROLES)
         if forbidden:
             return forbidden
-        mine = [r for r in DEMO_LEAVE_REQUESTS if r.get("employee_email") == user.email]
-        mine = sorted(mine, key=lambda r: r.get("created_at", ""), reverse=True)
+        mine = _list_leave_requests_by_email(user.email)
         return jsonify(ok=True, data=mine), 200
 
     @app.route("/api/leave/pending", methods=["GET"])
@@ -448,8 +627,7 @@ def create_app() -> Flask:
         forbidden = _require_api_role(user, ADMIN_ROLES)
         if forbidden:
             return forbidden
-        pending = [r for r in DEMO_LEAVE_REQUESTS if r.get("status") == "pending"]
-        pending = sorted(pending, key=lambda r: r.get("created_at", ""), reverse=True)
+        pending = _list_leave_pending()
         return jsonify(ok=True, data=pending), 200
 
     @app.route("/api/leave/approve", methods=["POST"])
@@ -463,18 +641,25 @@ def create_app() -> Flask:
         note = (data.get("note") or "").strip()
         if action not in {"approve", "reject"}:
             return jsonify(ok=False, message="Aksi tidak valid."), 400
-        record = _find_by_id(DEMO_LEAVE_REQUESTS, rid)
+        try:
+            request_id = int(rid)
+        except (TypeError, ValueError):
+            return jsonify(ok=False, message="ID tidak valid."), 400
+        record = _get_leave_request_by_id(request_id)
         if not record:
             return jsonify(ok=False, message="Pengajuan tidak ditemukan."), 404
-        if record.get("status") != "pending":
+        if (record.get("status") or "").lower() != "pending":
             return jsonify(ok=False, message="Pengajuan sudah diproses."), 400
         if action == "reject" and not note:
             return jsonify(ok=False, message="Alasan penolakan wajib diisi."), 400
 
-        record["status"] = "rejected" if action == "reject" else "approved"
-        record["approver"] = user.email
-        record["approved_at"] = _now_ts()
-        record["note"] = note or record.get("note")
+        status = "rejected" if action == "reject" else "approved"
+        _update_leave_request_status(
+            request_id=request_id,
+            status=status,
+            approver_email=user.email,
+            note=note or None,
+        )
         message = "Pengajuan ditolak." if action == "reject" else "Pengajuan disetujui."
         return jsonify(ok=True, message=message), 200
 
@@ -487,13 +672,32 @@ def _looks_like_email(value: str) -> bool:
     return bool(re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", value))
 
 
+def _normalize_phone(value: str) -> str:
+    if not value:
+        return ""
+    return re.sub(r"\D", "", value)
+
+
 def _validate_login(data: Dict[str, str]) -> AuthResult:
-    email = data.get("email", "").strip()
+    login_type = (data.get("login_type") or "email").strip().lower()
+    identifier = (data.get("identifier") or data.get("email") or data.get("phone") or "").strip()
     password = data.get("password", "")
     theme = data.get("theme", "dark")
 
-    if not _looks_like_email(email):
-        return AuthResult(False, "Isi email dengan benar.")
+    if login_type == "phone":
+        phone = _normalize_phone(identifier)
+        if not phone:
+            return AuthResult(False, "Isi nomor telp dulu.")
+        employee = _employee_by_phone(phone, only_active=False)
+        if not employee:
+            return AuthResult(False, "No telp tidak ditemukan.")
+        email = (employee.get("email") or "").strip()
+        if not email:
+            return AuthResult(False, "Email akun tidak ditemukan.")
+    else:
+        email = identifier
+        if not _looks_like_email(email):
+            return AuthResult(False, "Isi email dengan benar.")
     if not password:
         return AuthResult(False, "Isi password dulu.")
 
@@ -504,6 +708,10 @@ def _validate_login(data: Dict[str, str]) -> AuthResult:
         return AuthResult(False, "Akun tidak aktif.")
     if not check_password_hash(row["password_hash"], password):
         return AuthResult(False, "Password salah.")
+    if row["role"] == "employee":
+        employee = _employee_by_email(email, only_active=False)
+        if employee and int(employee.get("is_active") or 0) != 1:
+            return AuthResult(False, "Akun pegawai belum aktif.")
     user = _user_row_to_user(row, theme)
     _persist_user(user)
 
@@ -532,16 +740,25 @@ SEED_USERS = [
     {"email": "manager@gmi.com", "name": "Manager Ops", "role": "manager_operational", "password": "gmi@12345"},
     {"email": "supervisor@gmi.com", "name": "Supervisor", "role": "supervisor", "password": "gmi@12345"},
     {"email": "asisten@gmi.com", "name": "Admin Asisten", "role": "admin_asistent", "password": "gmi@12345"},
-    {"email": "budi@gmi.com", "name": "Budi", "role": "employee", "password": "gmi@12345"},
+]
+SEED_EMPLOYEES = [
 ]
 DEFAULT_RESET_PASSWORD = "gmi@12345"
-ROLE_OPTIONS = ["hr_superadmin", "manager_operational", "supervisor", "admin_asistent", "employee"]
-DEMO_USERS = {}
-DEMO_ATTENDANCE = []
-DEMO_LEAVE_REQUESTS = []
+ADMIN_ROLE_OPTIONS = ["hr_superadmin", "manager_operational", "supervisor", "admin_asistent"]
+ROLE_OPTIONS = ADMIN_ROLE_OPTIONS + ["employee"]
 DEMO_GPS_CENTER = (-6.5706, 107.7603)
 DEMO_GPS_RADIUS_METERS = 100
 DEMO_QR_PREFIX = "GMI-"
+DEFAULT_ATTENDANCE_POLICY = {
+    "work_duration_minutes": None,
+    "grace_minutes": None,
+    "late_threshold_minutes": None,
+    "allow_gps": 1,
+    "require_selfie": 0,
+    "allow_qr": 1,
+    "auto_checkout": 0,
+    "cutoff_time": None,
+}
 
 
 @dataclass
@@ -623,23 +840,6 @@ def _json_forbidden():
     return jsonify(ok=False, message="Unauthorized."), 403
 
 
-def _next_id(records) -> int:
-    if not records:
-        return 1
-    return max(int(r.get("id", 0)) for r in records) + 1
-
-
-def _find_by_id(records, rid):
-    try:
-        rid = int(rid)
-    except (TypeError, ValueError):
-        return None
-    for r in records:
-        if int(r.get("id", 0)) == rid:
-            return r
-    return None
-
-
 def _now_ts() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -648,7 +848,424 @@ def _today_key() -> str:
     return datetime.now().strftime("%Y-%m-%d")
 
 
-def _save_upload(file_obj, subdir: str, max_size: int) -> str:
+def _device_time_parts(device_time: str | None) -> tuple[str, str]:
+    if device_time:
+        value = device_time.strip()
+    else:
+        value = ""
+    if value:
+        try:
+            normalized = value.replace("Z", "+00:00")
+            dt = datetime.fromisoformat(normalized)
+            return dt.strftime("%Y-%m-%d"), dt.strftime("%H:%M")
+        except ValueError:
+            if " " in value:
+                date_part, time_part = value.split(" ", 1)
+                return date_part, time_part[:5]
+    return _today_key(), datetime.now().strftime("%H:%M")
+
+
+def _parse_hhmm(value: str | None) -> int | None:
+    if not value:
+        return None
+    match = re.match(r"^\s*(\d{1,2}):(\d{2})\s*$", value)
+    if not match:
+        return None
+    hour = int(match.group(1))
+    minute = int(match.group(2))
+    if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+        return None
+    return hour * 60 + minute
+
+
+def _extract_minutes(time_value: str | None, created_at: str | None) -> int | None:
+    minutes = _parse_hhmm(time_value)
+    if minutes is not None:
+        return minutes
+    if created_at and " " in created_at:
+        return _parse_hhmm(created_at.split(" ")[1][:5])
+    return None
+
+
+def _date_in_range(target: str, start: str | None, end: str | None) -> bool:
+    if not start or not end:
+        return False
+    return start <= target <= end
+
+
+def _policy_active_for_date(policy: dict, today: str) -> bool:
+    effective_from = (policy.get("effective_from") or "").strip()
+    effective_to = (policy.get("effective_to") or "").strip()
+    if effective_from and effective_from > today:
+        return False
+    if effective_to and effective_to < today:
+        return False
+    return True
+
+
+def _list_active_assignments(today: str) -> list[dict]:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "assignments"):
+            return []
+        cur = conn.execute(
+            """
+            SELECT
+                a.employee_user_id,
+                u.email AS employee_email,
+                a.site_id,
+                s.client_id,
+                COALESCE(c.name, s.client_name) AS client_name
+            FROM assignments a
+            JOIN users u ON u.id = a.employee_user_id
+            JOIN sites s ON s.id = a.site_id
+            LEFT JOIN clients c ON c.id = s.client_id
+            WHERE a.status = 'ACTIVE'
+              AND a.start_date <= ?
+              AND (a.end_date IS NULL OR a.end_date = '' OR a.end_date >= ?)
+            """,
+            (today, today),
+        )
+        return [dict(row) for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def _active_assignment_counts(today: str) -> dict[int, int]:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "assignments"):
+            return {}
+        cur = conn.execute(
+            """
+            SELECT site_id, COUNT(*) AS total
+            FROM assignments
+            WHERE status = 'ACTIVE'
+              AND start_date <= ?
+              AND (end_date IS NULL OR end_date = '' OR end_date >= ?)
+            GROUP BY site_id
+            """,
+            (today, today),
+        )
+        return {int(row["site_id"]): int(row["total"]) for row in cur.fetchall()}
+    finally:
+        conn.close()
+
+
+def _attendance_checkins_for_date(
+    today: str, email_to_user_id: dict[str, int]
+) -> dict[int, int]:
+    checkins: dict[int, int] = {}
+    conn = _db_connect()
+    try:
+        if _table_exists(conn, "attendance"):
+            cur = conn.execute(
+                """
+                SELECT employee_id, employee_email, time, action, created_at
+                FROM attendance
+                WHERE date = ? AND action = 'checkin'
+                """,
+                (today,),
+            )
+            for row in cur.fetchall():
+                user_id = int(row["employee_id"]) if row["employee_id"] else None
+                if not user_id and row["employee_email"]:
+                    user_id = email_to_user_id.get(row["employee_email"])
+                if not user_id:
+                    continue
+                minutes = _extract_minutes(row["time"], row["created_at"])
+                if minutes is None:
+                    continue
+                current = checkins.get(user_id)
+                if current is None or minutes < current:
+                    checkins[user_id] = minutes
+    finally:
+        conn.close()
+    return checkins
+
+
+def _is_late_checkin(checkin_minutes: int | None, assignment: dict) -> bool:
+    if checkin_minutes is None:
+        return False
+    policy = _resolve_attendance_policy(assignment.get("site_id"), assignment.get("client_id"))
+    cutoff_minutes = _parse_hhmm(policy.get("cutoff_time"))
+    # Default start time when policy doesn't define a cutoff.
+    start_minutes = cutoff_minutes if cutoff_minutes is not None else 9 * 60
+    grace_minutes = int(policy.get("grace_minutes") or 0)
+    late_threshold = int(policy.get("late_threshold_minutes") or 0)
+    allowed_minutes = start_minutes + max(grace_minutes, late_threshold)
+    return checkin_minutes > allowed_minutes
+
+
+def _client_operational_summary(today: str) -> list[dict]:
+    clients = _clients()
+    if not clients:
+        return []
+    assignments = _list_active_assignments(today)
+    assignment_by_employee: dict[int, dict] = {}
+    email_to_user_id: dict[str, int] = {}
+    client_employees: dict[int, set[int]] = {}
+    for row in assignments:
+        user_id = int(row["employee_user_id"])
+        assignment_by_employee.setdefault(user_id, row)
+        email = (row.get("employee_email") or "").lower()
+        if email:
+            email_to_user_id[email] = user_id
+        client_id = row.get("client_id")
+        if client_id is None:
+            continue
+        client_employees.setdefault(int(client_id), set()).add(user_id)
+
+    checkins = _attendance_checkins_for_date(today, email_to_user_id)
+    leave_pending_by_client: dict[int, int] = {}
+    leave_excused_today: set[int] = set()
+    pending_leaves = _list_leave_pending()
+    active_leaves = _list_leave_active_for_date(today)
+    for leave in pending_leaves:
+        email = (leave.get("employee_email") or "").lower()
+        if not email:
+            continue
+        user_id = email_to_user_id.get(email)
+        if not user_id:
+            user_row = _get_user_by_email(email)
+            user_id = int(user_row["id"]) if user_row else None
+        if not user_id:
+            continue
+        assignment = assignment_by_employee.get(user_id)
+        if not assignment:
+            continue
+        client_id = assignment.get("client_id")
+        if client_id is None:
+            continue
+        client_id = int(client_id)
+        leave_pending_by_client[client_id] = leave_pending_by_client.get(client_id, 0) + 1
+
+    for leave in active_leaves:
+        email = (leave.get("employee_email") or "").lower()
+        if not email:
+            continue
+        user_id = email_to_user_id.get(email)
+        if not user_id:
+            user_row = _get_user_by_email(email)
+            user_id = int(user_row["id"]) if user_row else None
+        if not user_id:
+            continue
+        leave_excused_today.add(user_id)
+
+    summaries: list[dict] = []
+    for client in clients:
+        client_id = int(client.get("id"))
+        employees = client_employees.get(client_id, set())
+        late_count = 0
+        absent_count = 0
+        for user_id in employees:
+            if user_id in checkins:
+                assignment = assignment_by_employee.get(user_id)
+                if assignment and _is_late_checkin(checkins[user_id], assignment):
+                    late_count += 1
+            else:
+                if user_id not in leave_excused_today:
+                    absent_count += 1
+        summaries.append(
+            {
+                "client_id": client_id,
+                "client_name": client.get("name") or "-",
+                "late_count": late_count,
+                "absent_count": absent_count,
+                "leave_pending_count": leave_pending_by_client.get(client_id, 0),
+            }
+        )
+    return summaries
+
+
+def _active_policy_sets(today: str) -> tuple[set[int], set[int]]:
+    policies = _list_policies()
+    site_policy_ids: set[int] = set()
+    client_policy_ids: set[int] = set()
+    for policy in policies:
+        if not _policy_active_for_date(policy, today):
+            continue
+        if policy.get("scope_type") == "SITE" and policy.get("site_id"):
+            site_policy_ids.add(int(policy["site_id"]))
+        if policy.get("scope_type") == "CLIENT" and policy.get("client_id"):
+            client_policy_ids.add(int(policy["client_id"]))
+    return site_policy_ids, client_policy_ids
+
+
+def _get_policy_by_id(policy_id: int) -> dict | None:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "attendance_policies"):
+            return None
+        cur = conn.execute("SELECT * FROM attendance_policies WHERE id = ?", (policy_id,))
+        row = cur.fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def _list_expired_assignments(today: str) -> list[dict]:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "assignments"):
+            return []
+        cur = conn.execute(
+            """
+            SELECT
+                a.id,
+                a.employee_user_id,
+                u.name AS employee_name,
+                u.email AS employee_email,
+                a.site_id,
+                s.name AS site_name,
+                COALESCE(c.name, s.client_name) AS client_name,
+                a.end_date
+            FROM assignments a
+            JOIN users u ON u.id = a.employee_user_id
+            JOIN sites s ON s.id = a.site_id
+            LEFT JOIN clients c ON c.id = s.client_id
+            WHERE a.status = 'ACTIVE'
+              AND a.end_date IS NOT NULL
+              AND a.end_date != ''
+              AND a.end_date < ?
+            ORDER BY a.end_date DESC
+            """,
+            (today,),
+        )
+        return [dict(row) for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def _alert_badge_class(count: int) -> str:
+    if count <= 0:
+        return "approved"
+    if count <= 3:
+        return "pending"
+    return "rejected"
+
+
+def _limit_alert_items(items: list[str], max_items: int = 6) -> dict:
+    return {
+        "items": items[:max_items],
+        "extra": max(0, len(items) - max_items),
+    }
+
+
+def _build_admin_alerts(today: str) -> dict:
+    site_policy_ids, client_policy_ids = _active_policy_sets(today)
+    sites = _list_sites()
+    sites_without_policy = []
+    for site in sites:
+        site_id = int(site.get("id") or 0)
+        client_id = site.get("client_id")
+        has_policy = False
+        if site_id and site_id in site_policy_ids:
+            has_policy = True
+        elif client_id and int(client_id) in client_policy_ids:
+            has_policy = True
+        if not has_policy:
+            client_label = site.get("client_name") or "-"
+            sites_without_policy.append(f"{client_label} - {site.get('name') or '-'}")
+
+    employee_users = [
+        e for e in _list_employee_users() if int(e.get("is_active") or 0) == 1
+    ]
+    active_assignments = _list_active_assignments(today)
+    active_user_ids = {int(a.get("employee_user_id") or 0) for a in active_assignments}
+    employees_without_assignment = []
+    for employee in employee_users:
+        user_id = int(employee.get("id") or 0)
+        if user_id and user_id not in active_user_ids:
+            label = employee.get("name") or employee.get("email") or "-"
+            employees_without_assignment.append(label)
+
+    expired_assignments = _list_expired_assignments(today)
+    expired_labels = []
+    for row in expired_assignments:
+        name = row.get("employee_name") or row.get("employee_email") or "-"
+        client = row.get("client_name") or "-"
+        site = row.get("site_name") or "-"
+        end_date = row.get("end_date") or "-"
+        expired_labels.append(f"{name} - {client}/{site} (end: {end_date})")
+
+    alerts = {
+        "sites_without_policy": {
+            "count": len(sites_without_policy),
+            "badge_class": _alert_badge_class(len(sites_without_policy)),
+            **_limit_alert_items(sites_without_policy),
+        },
+        "employees_without_assignment": {
+            "count": len(employees_without_assignment),
+            "badge_class": _alert_badge_class(len(employees_without_assignment)),
+            **_limit_alert_items(employees_without_assignment),
+        },
+        "assignments_expired": {
+            "count": len(expired_labels),
+            "badge_class": _alert_badge_class(len(expired_labels)),
+            **_limit_alert_items(expired_labels),
+        },
+    }
+    return alerts
+
+
+def _log_audit_event(
+    entity_type: str,
+    entity_id: int | None,
+    action: str,
+    actor: User | None,
+    summary: str,
+    details: dict | None = None,
+) -> None:
+    if not actor:
+        return
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "audit_logs"):
+            return
+        conn.execute(
+            """
+            INSERT INTO audit_logs (
+                entity_type, entity_id, action,
+                actor_email, actor_role, summary, details_json, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                entity_type,
+                entity_id,
+                action,
+                actor.email,
+                actor.role,
+                summary,
+                json.dumps(details or {}, ensure_ascii=True),
+                _now_ts(),
+            ),
+        )
+    finally:
+        conn.commit()
+        conn.close()
+
+
+def _fetch_audit_logs(limit: int = 50) -> list[dict]:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "audit_logs"):
+            return []
+        cur = conn.execute(
+            """
+            SELECT *
+            FROM audit_logs
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+        return [dict(row) for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def _validate_upload(file_obj, max_size: int) -> None:
     if not file_obj or not file_obj.filename:
         raise ValueError("File wajib diunggah.")
     mime = (file_obj.mimetype or "").lower()
@@ -663,6 +1280,9 @@ def _save_upload(file_obj, subdir: str, max_size: int) -> str:
     if size and size > max_size:
         raise ValueError("Ukuran file maksimal 2MB.")
 
+
+def _save_upload(file_obj, subdir: str, max_size: int) -> str:
+    _validate_upload(file_obj, max_size)
     safe_name = secure_filename(file_obj.filename) or "upload.jpg"
     ts = datetime.now().strftime("%Y%m%d%H%M%S%f")
     filename = f"{ts}_{safe_name}"
@@ -674,9 +1294,90 @@ def _save_upload(file_obj, subdir: str, max_size: int) -> str:
     return f"{subdir}/{filename}"
 
 
+def _validate_leave_attachment(file_obj, max_size: int) -> None:
+    if not file_obj or not file_obj.filename:
+        raise ValueError("Lampiran wajib diunggah.")
+    mime = (file_obj.mimetype or "").lower()
+    if not (mime.startswith("image/") or mime == "application/pdf"):
+        raise ValueError("Lampiran harus berupa gambar atau PDF.")
+    try:
+        file_obj.stream.seek(0, os.SEEK_END)
+        size = file_obj.stream.tell()
+        file_obj.stream.seek(0)
+    except Exception:
+        size = 0
+    if size and size > max_size:
+        raise ValueError("Ukuran lampiran maksimal 2MB.")
+
+
+def _save_leave_attachment(file_obj, subdir: str, max_size: int) -> str:
+    _validate_leave_attachment(file_obj, max_size)
+    safe_name = secure_filename(file_obj.filename) or "attachment"
+    ts = datetime.now().strftime("%Y%m%d%H%M%S%f")
+    filename = f"{ts}_{safe_name}"
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    folder = os.path.join(base_dir, "static", subdir)
+    os.makedirs(folder, exist_ok=True)
+    file_path = os.path.join(folder, filename)
+    file_obj.save(file_path)
+    return f"{subdir}/{filename}"
+
+
+def _decode_base64_payload(data: str) -> tuple[str | None, bytes]:
+    if not data:
+        raise ValueError("Lampiran tidak valid.")
+    payload = data.strip()
+    if payload.startswith("data:") and "," in payload:
+        header, body = payload.split(",", 1)
+        mime = header[5:].split(";")[0].strip()
+    else:
+        mime = None
+        body = payload
+    try:
+        decoded = base64.b64decode(body, validate=True)
+    except Exception:
+        raise ValueError("Lampiran tidak valid.")
+    return mime, decoded
+
+
+def _extension_from_mime(mime: str | None) -> str:
+    if not mime:
+        return ".bin"
+    if mime == "application/pdf":
+        return ".pdf"
+    if mime == "image/jpeg":
+        return ".jpg"
+    if mime == "image/png":
+        return ".png"
+    if mime == "image/gif":
+        return ".gif"
+    if mime.startswith("image/"):
+        return ".jpg"
+    return ".bin"
+
+
+def _save_base64_attachment(data: str, subdir: str, max_size: int) -> str:
+    mime, decoded = _decode_base64_payload(data)
+    if mime and not (mime.startswith("image/") or mime == "application/pdf"):
+        raise ValueError("Lampiran harus berupa gambar atau PDF.")
+    if len(decoded) > max_size:
+        raise ValueError("Ukuran lampiran maksimal 2MB.")
+    ts = datetime.now().strftime("%Y%m%d%H%M%S%f")
+    ext = _extension_from_mime(mime)
+    filename = f"{ts}_attachment{ext}"
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    folder = os.path.join(base_dir, "static", subdir)
+    os.makedirs(folder, exist_ok=True)
+    file_path = os.path.join(folder, filename)
+    with open(file_path, "wb") as handle:
+        handle.write(decoded)
+    return f"{subdir}/{filename}"
+
+
 def _db_connect() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
 
@@ -706,6 +1407,120 @@ def _get_user_by_id(user_id: int) -> sqlite3.Row | None:
     try:
         cur = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,))
         return cur.fetchone()
+    finally:
+        conn.close()
+
+
+def _get_client_by_id(client_id: int | None) -> sqlite3.Row | None:
+    if not client_id:
+        return None
+    conn = _db_connect()
+    try:
+        cur = conn.execute("SELECT * FROM clients WHERE id = ?", (client_id,))
+        return cur.fetchone()
+    finally:
+        conn.close()
+
+
+def _get_site_by_id(site_id: int | None) -> sqlite3.Row | None:
+    if not site_id:
+        return None
+    conn = _db_connect()
+    try:
+        cur = conn.execute("SELECT * FROM sites WHERE id = ?", (site_id,))
+        return cur.fetchone()
+    finally:
+        conn.close()
+
+
+def _get_active_assignment(user_id: int) -> dict | None:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "assignments"):
+            return None
+        today = _today_key()
+        cur = conn.execute(
+            """
+            SELECT *
+            FROM assignments
+            WHERE employee_user_id = ?
+              AND status = 'ACTIVE'
+              AND start_date <= ?
+              AND (end_date IS NULL OR end_date = '' OR end_date >= ?)
+            ORDER BY start_date DESC
+            LIMIT 1
+            """,
+            (user_id, today, today),
+        )
+        row = cur.fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def _get_assignment_by_id(assignment_id: int) -> dict | None:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "assignments"):
+            return None
+        cur = conn.execute("SELECT * FROM assignments WHERE id = ?", (assignment_id,))
+        row = cur.fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def _policy_with_defaults(row: sqlite3.Row | None) -> dict:
+    policy = DEFAULT_ATTENDANCE_POLICY.copy()
+    if not row:
+        return policy
+    for key in policy.keys():
+        if key in row.keys() and row[key] is not None:
+            policy[key] = row[key]
+    return policy
+
+
+def _resolve_attendance_policy(site_id: int | None, client_id: int | None) -> dict:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "attendance_policies"):
+            return DEFAULT_ATTENDANCE_POLICY.copy()
+        today = _today_key()
+        if site_id:
+            cur = conn.execute(
+                """
+                SELECT *
+                FROM attendance_policies
+                WHERE scope_type = 'SITE'
+                  AND site_id = ?
+                  AND effective_from <= ?
+                  AND (effective_to IS NULL OR effective_to = '' OR effective_to >= ?)
+                ORDER BY effective_from DESC
+                LIMIT 1
+                """,
+                (site_id, today, today),
+            )
+            row = cur.fetchone()
+            if row:
+                return _policy_with_defaults(row)
+        if client_id:
+            cur = conn.execute(
+                """
+                SELECT *
+                FROM attendance_policies
+                WHERE scope_type = 'CLIENT'
+                  AND client_id = ?
+                  AND effective_from <= ?
+                  AND (effective_to IS NULL OR effective_to = '' OR effective_to >= ?)
+                ORDER BY effective_from DESC
+                LIMIT 1
+                """,
+                (client_id, today, today),
+            )
+            row = cur.fetchone()
+            if row:
+                return _policy_with_defaults(row)
+        return DEFAULT_ATTENDANCE_POLICY.copy()
     finally:
         conn.close()
 
@@ -746,6 +1561,38 @@ def _create_user(
         conn.close()
 
 
+def _create_user_with_conn(
+    conn: sqlite3.Connection,
+    name: str,
+    email: str,
+    role: str,
+    password: str,
+    is_active: int = 1,
+    must_change_password: int = 0,
+    selfie_path: str | None = None,
+) -> int:
+    cur = conn.execute(
+        """
+        INSERT INTO users (
+            name, email, role, password_hash, is_active,
+            created_at, updated_at, must_change_password, selfie_path
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            name,
+            email.lower(),
+            role,
+            generate_password_hash(password),
+            is_active,
+            _now_ts(),
+            _now_ts(),
+            must_change_password,
+            selfie_path,
+        ),
+    )
+    return int(cur.lastrowid)
+
+
 def _update_user_basic(user_id: int, name: str, role: str, is_active: int) -> None:
     conn = _db_connect()
     try:
@@ -776,6 +1623,47 @@ def _update_user_password(user_id: int, password: str, must_change_password: int
     finally:
         conn.commit()
         conn.close()
+
+
+def _update_user_selfie_path(user_id: int, selfie_path: str | None) -> None:
+    conn = _db_connect()
+    try:
+        conn.execute(
+            """
+            UPDATE users
+            SET selfie_path = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (selfie_path, _now_ts(), user_id),
+        )
+    finally:
+        conn.commit()
+        conn.close()
+
+
+def _update_user_selfie_path_with_conn(
+    conn: sqlite3.Connection, user_id: int, selfie_path: str | None
+) -> None:
+    conn.execute(
+        """
+        UPDATE users
+        SET selfie_path = ?, updated_at = ?
+        WHERE id = ?
+        """,
+        (selfie_path, _now_ts(), user_id),
+    )
+
+
+def _delete_uploaded_file(path: str) -> None:
+    if not path:
+        return
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    file_path = os.path.join(base_dir, "static", path)
+    try:
+        if os.path.exists(file_path):
+            os.remove(file_path)
+    except OSError:
+        pass
 
 
 def _delete_user(user_id: int) -> None:
@@ -825,13 +1713,17 @@ def _active_hr_superadmin_count(exclude_user_id: int | None = None) -> int:
         conn.close()
 
 
-def _list_sites() -> list[dict]:
+def _list_clients() -> list[dict]:
     conn = _db_connect()
     try:
+        if not _table_exists(conn, "clients"):
+            return []
         cur = conn.execute(
             """
-            SELECT id, client_name, name, code, location, notes, is_active, created_at
-            FROM sites
+            SELECT
+                id, name, legal_name, address, office_email, office_phone,
+                pic_name, pic_title, pic_phone, is_active, notes, created_at
+            FROM clients
             ORDER BY created_at DESC
             """
         )
@@ -840,21 +1732,1096 @@ def _list_sites() -> list[dict]:
         conn.close()
 
 
-def _create_site(
-    client_name: str,
+def _list_employees() -> list[dict]:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "employees"):
+            return []
+        cur = conn.execute(
+            """
+            SELECT
+                id, nik, name, email, no_hp, address,
+                gender, status_nikah, notes, is_active, created_at
+            FROM employees
+            ORDER BY created_at DESC
+            """
+        )
+        rows = [dict(row) for row in cur.fetchall()]
+        for row in rows:
+            row.setdefault("client", "-")
+        return rows
+    finally:
+        conn.close()
+
+
+def _create_employee(
+    nik: str,
     name: str,
-    code: str | None,
-    location: str | None,
+    email: str,
+    no_hp: str,
+    address: str,
+    gender: str,
+    status_nikah: str,
+    notes: str | None,
+    is_active: int = 1,
+) -> None:
+    conn = _db_connect()
+    try:
+        conn.execute(
+            """
+            INSERT INTO employees (
+                nik, name, email, no_hp, address, gender,
+                status_nikah, notes, is_active, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                nik,
+                name,
+                email,
+                no_hp,
+                address,
+                gender,
+                status_nikah,
+                notes or None,
+                is_active,
+                _now_ts(),
+            ),
+        )
+    finally:
+        conn.commit()
+        conn.close()
+
+
+def _parse_employee_form(form: dict) -> tuple[dict, str | None]:
+    nik = (form.get("nik") or "").strip()
+    name = (form.get("name") or "").strip()
+    email = (form.get("email") or "").strip().lower()
+    no_hp = (form.get("no_hp") or "").strip()
+    address = (form.get("address") or "").strip()
+    gender = (form.get("gender") or "").strip()
+    status_nikah = (form.get("status_nikah") or "").strip()
+    notes = (form.get("notes") or "").strip()
+    if not nik:
+        return {}, "NIK wajib diisi."
+    if not name:
+        return {}, "Nama wajib diisi."
+    if not email:
+        return {}, "Email wajib diisi."
+    if not _looks_like_email(email):
+        return {}, "Email tidak valid."
+    if not no_hp:
+        return {}, "No HP wajib diisi."
+    if not address:
+        return {}, "Alamat wajib diisi."
+    if not gender:
+        return {}, "Jenis kelamin wajib dipilih."
+    if not status_nikah:
+        return {}, "Status nikah wajib dipilih."
+    return {
+        "nik": nik,
+        "name": name,
+        "email": email,
+        "no_hp": no_hp,
+        "address": address,
+        "gender": gender,
+        "status_nikah": status_nikah,
+        "notes": notes or None,
+    }, None
+
+
+def _set_employee_active_with_conn(conn: sqlite3.Connection, email: str, is_active: int) -> None:
+    conn.execute(
+        "UPDATE employees SET is_active = ? WHERE LOWER(email) = ?",
+        (is_active, email.lower()),
+    )
+
+
+def _update_employee(
+    employee_id: int,
+    nik: str,
+    name: str,
+    email: str,
+    no_hp: str,
+    address: str,
+    gender: str,
+    status_nikah: str,
+    notes: str | None,
+    is_active: int,
+) -> None:
+    conn = _db_connect()
+    try:
+        conn.execute(
+            """
+            UPDATE employees
+            SET
+                nik = ?, name = ?, email = ?, no_hp = ?, address = ?,
+                gender = ?, status_nikah = ?, notes = ?, is_active = ?
+            WHERE id = ?
+            """,
+            (
+                nik,
+                name,
+                email,
+                no_hp,
+                address,
+                gender,
+                status_nikah,
+                notes or None,
+                is_active,
+                employee_id,
+            ),
+        )
+    finally:
+        conn.commit()
+        conn.close()
+
+
+def _delete_employee(employee_id: int) -> None:
+    conn = _db_connect()
+    try:
+        conn.execute("DELETE FROM employees WHERE id = ?", (employee_id,))
+    finally:
+        conn.commit()
+        conn.close()
+
+
+def _list_employee_registration_codes(limit: int = 200) -> list[dict]:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "employee_registration_codes"):
+            return []
+        cur = conn.execute(
+            """
+            SELECT id, year_month, seq, registrant_count, used_count, code, created_at
+            FROM employee_registration_codes
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+        return [dict(row) for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def _next_employee_registration_seq(year_month: str) -> int:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "employee_registration_codes"):
+            return 1
+        cur = conn.execute(
+            "SELECT MAX(seq) AS max_seq FROM employee_registration_codes WHERE year_month = ?",
+            (year_month,),
+        )
+        row = cur.fetchone()
+        return int(row["max_seq"] or 0) + 1
+    finally:
+        conn.close()
+
+
+def _create_employee_registration_code(registrant_count: int) -> str:
+    now = datetime.now()
+    year_month = now.strftime("%Y%m")
+    seq = _next_employee_registration_seq(year_month)
+    code = f"{now.strftime('%y%m')}GMI-{seq:03d}{registrant_count:02d}"
+    conn = _db_connect()
+    try:
+        conn.execute(
+            """
+            INSERT INTO employee_registration_codes (
+                year_month, seq, registrant_count, used_count, code, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (year_month, seq, registrant_count, 0, code, _now_ts()),
+        )
+    finally:
+        conn.commit()
+        conn.close()
+    return code
+
+
+def _looks_like_employee_invite(code: str) -> bool:
+    return bool(re.fullmatch(r"\d{4}GMI-\d{5}", code.strip(), flags=re.IGNORECASE))
+
+
+def _consume_employee_registration_code(code: str) -> tuple[bool, str]:
+    conn = _db_connect()
+    normalized = code.strip().upper()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            """
+            SELECT id, registrant_count, COALESCE(used_count, 0) AS used_count
+            FROM employee_registration_codes
+            WHERE UPPER(code) = ?
+            """,
+            (normalized,),
+        ).fetchone()
+        if not row:
+            conn.rollback()
+            return False, "Kode undangan tidak dikenal."
+        if int(row["used_count"] or 0) >= int(row["registrant_count"] or 0):
+            conn.rollback()
+            return False, "Kuota kode undangan sudah habis."
+        conn.execute(
+            """
+            UPDATE employee_registration_codes
+            SET used_count = COALESCE(used_count, 0) + 1
+            WHERE id = ?
+            """,
+            (row["id"],),
+        )
+        conn.commit()
+        return True, ""
+    finally:
+        conn.close()
+
+
+def _consume_employee_registration_code_with_conn(
+    conn: sqlite3.Connection, code: str
+) -> tuple[bool, str]:
+    normalized = code.strip().upper()
+    row = conn.execute(
+        """
+        SELECT id, registrant_count, COALESCE(used_count, 0) AS used_count
+        FROM employee_registration_codes
+        WHERE UPPER(code) = ?
+        """,
+        (normalized,),
+    ).fetchone()
+    if not row:
+        return False, "Kode undangan tidak dikenal."
+    if int(row["used_count"] or 0) >= int(row["registrant_count"] or 0):
+        return False, "Kuota kode undangan sudah habis."
+    conn.execute(
+        """
+        UPDATE employee_registration_codes
+        SET used_count = COALESCE(used_count, 0) + 1
+        WHERE id = ?
+        """,
+        (row["id"],),
+    )
+    return True, ""
+
+
+def _employee_by_email(email: str, only_active: bool = False) -> dict | None:
+    if not email:
+        return None
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "employees"):
+            return None
+        clause = "AND is_active = 1" if only_active else ""
+        cur = conn.execute(
+            f"""
+            SELECT
+                id, nik, name, email, no_hp, address,
+                gender, status_nikah, notes, is_active, created_at
+            FROM employees
+            WHERE lower(email) = ? {clause}
+            LIMIT 1
+            """,
+            (email.lower(),),
+        )
+        row = cur.fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def _employee_by_phone(phone: str, only_active: bool = False) -> dict | None:
+    normalized = _normalize_phone(phone)
+    if not normalized:
+        return None
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "employees"):
+            return None
+        clause = "WHERE is_active = 1" if only_active else ""
+        cur = conn.execute(
+            f"""
+            SELECT
+                id, nik, name, email, no_hp, address,
+                gender, status_nikah, notes, is_active, created_at
+            FROM employees
+            {clause}
+            """
+        )
+        rows = cur.fetchall()
+        for row in rows:
+            if _normalize_phone(row["no_hp"]) == normalized:
+                return dict(row)
+        return None
+    finally:
+        conn.close()
+
+
+def _normalize_client_identity(value: str | None) -> str | None:
+    if not value:
+        return None
+    value = value.strip()
+    return value if value else None
+
+
+def _find_client_identity_conflict(
+    name: str,
+    legal_name: str | None,
+    exclude_client_id: int | None = None,
+) -> dict | None:
+    identities: list[str] = []
+    normalized_name = _normalize_client_identity(name)
+    if normalized_name:
+        identities.append(normalized_name.lower())
+    normalized_legal = _normalize_client_identity(legal_name)
+    if normalized_legal:
+        identities.append(normalized_legal.lower())
+    if not identities:
+        return None
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "clients"):
+            return None
+        placeholders = ", ".join("?" for _ in identities)
+        params = identities + identities
+        query = f"""
+            SELECT id, name, legal_name
+            FROM clients
+            WHERE lower(name) IN ({placeholders})
+               OR lower(legal_name) IN ({placeholders})
+        """
+        if exclude_client_id is not None:
+            query += " AND id != ?"
+            params.append(exclude_client_id)
+        cur = conn.execute(query, params)
+        row = cur.fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def _create_client(
+    name: str,
+    legal_name: str | None,
+    address: str,
+    office_email: str,
+    office_phone: str,
+    pic_name: str,
+    pic_title: str,
+    pic_phone: str,
     notes: str | None,
 ) -> None:
     conn = _db_connect()
     try:
         conn.execute(
             """
-            INSERT INTO sites (client_name, name, code, location, notes, is_active, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO clients (
+                name, legal_name, address, office_email, office_phone,
+                pic_name, pic_title, pic_phone, is_active, notes, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (client_name, name, code or None, location or None, notes or None, 1, _now_ts()),
+            (
+                name,
+                legal_name or None,
+                address,
+                office_email,
+                office_phone,
+                pic_name,
+                pic_title,
+                pic_phone,
+                1,
+                notes or None,
+                _now_ts(),
+            ),
+        )
+    finally:
+        conn.commit()
+        conn.close()
+
+
+def _update_client(
+    client_id: int,
+    name: str,
+    legal_name: str | None,
+    address: str,
+    office_email: str,
+    office_phone: str,
+    pic_name: str,
+    pic_title: str,
+    pic_phone: str,
+    is_active: int,
+    notes: str | None,
+) -> None:
+    conn = _db_connect()
+    try:
+        conn.execute(
+            """
+            UPDATE clients
+            SET
+                name = ?, legal_name = ?, address = ?, office_email = ?, office_phone = ?,
+                pic_name = ?, pic_title = ?, pic_phone = ?,
+                is_active = ?, notes = ?
+            WHERE id = ?
+            """,
+            (
+                name,
+                legal_name or None,
+                address,
+                office_email,
+                office_phone,
+                pic_name,
+                pic_title,
+                pic_phone,
+                is_active,
+                notes or None,
+                client_id,
+            ),
+        )
+    finally:
+        conn.commit()
+        conn.close()
+
+
+def _client_has_sites(client_id: int) -> bool:
+    conn = _db_connect()
+    try:
+        cur = conn.execute(
+            "SELECT 1 FROM sites WHERE client_id = ? LIMIT 1",
+            (client_id,),
+        )
+        return cur.fetchone() is not None
+    finally:
+        conn.close()
+
+
+def _delete_client(client_id: int) -> None:
+    conn = _db_connect()
+    try:
+        conn.execute("DELETE FROM clients WHERE id = ?", (client_id,))
+    finally:
+        conn.commit()
+        conn.close()
+
+
+def _list_sites() -> list[dict]:
+    conn = _db_connect()
+    try:
+        cur = conn.execute(
+            """
+            SELECT
+                s.id,
+                s.client_id,
+                COALESCE(c.name, s.client_name) AS client_name,
+                s.name,
+                s.timezone,
+                s.work_mode,
+                s.latitude,
+                s.longitude,
+                s.radius_meters,
+                s.notes,
+                s.is_active,
+                s.created_at,
+                CASE
+                    WHEN s.client_id IS NOT NULL AND c.id IS NULL THEN 1
+                    ELSE 0
+                END AS is_orphan
+            FROM sites s
+            LEFT JOIN clients c ON c.id = s.client_id
+            ORDER BY s.created_at DESC
+            """
+        )
+        return [dict(row) for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def _list_sites_by_client(client_id: int) -> list[dict]:
+    conn = _db_connect()
+    try:
+        cur = conn.execute(
+            """
+            SELECT
+                s.id,
+                s.client_id,
+                COALESCE(c.name, s.client_name) AS client_name,
+                s.name,
+                s.timezone,
+                s.work_mode,
+                s.latitude,
+                s.longitude,
+                s.radius_meters,
+                s.notes,
+                s.is_active,
+                s.created_at
+            FROM sites s
+            LEFT JOIN clients c ON c.id = s.client_id
+            WHERE s.client_id = ?
+            ORDER BY s.created_at DESC
+            """,
+            (client_id,),
+        )
+        return [dict(row) for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def _list_client_contacts(client_id: int) -> list[dict]:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "client_contacts"):
+            return []
+        cur = conn.execute(
+            """
+            SELECT
+                id,
+                client_id,
+                contact_type,
+                name,
+                title,
+                phone,
+                email,
+                is_primary,
+                notes,
+                created_at,
+                updated_at
+            FROM client_contacts
+            WHERE client_id = ?
+            ORDER BY is_primary DESC, created_at DESC
+            """,
+            (client_id,),
+        )
+        return [dict(row) for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def _get_client_contact_by_id(contact_id: int) -> dict | None:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "client_contacts"):
+            return None
+        cur = conn.execute("SELECT * FROM client_contacts WHERE id = ?", (contact_id,))
+        row = cur.fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def _create_client_contact(
+    client_id: int,
+    contact_type: str,
+    name: str,
+    title: str | None,
+    phone: str | None,
+    email: str | None,
+    is_primary: int,
+    notes: str | None,
+) -> None:
+    conn = _db_connect()
+    try:
+        if is_primary:
+            conn.execute(
+                """
+                UPDATE client_contacts
+                SET is_primary = 0, updated_at = ?
+                WHERE client_id = ? AND contact_type = ?
+                """,
+                (_now_ts(), client_id, contact_type),
+            )
+        conn.execute(
+            """
+            INSERT INTO client_contacts (
+                client_id, contact_type, name, title, phone, email,
+                is_primary, notes, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                client_id,
+                contact_type,
+                name,
+                title or None,
+                phone or None,
+                email or None,
+                1 if is_primary else 0,
+                notes or None,
+                _now_ts(),
+                _now_ts(),
+            ),
+        )
+    finally:
+        conn.commit()
+        conn.close()
+
+
+def _set_primary_client_contact(contact_id: int) -> None:
+    conn = _db_connect()
+    try:
+        cur = conn.execute(
+            "SELECT client_id, contact_type FROM client_contacts WHERE id = ?",
+            (contact_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return
+        client_id = row["client_id"]
+        contact_type = row["contact_type"]
+        conn.execute(
+            """
+            UPDATE client_contacts
+            SET is_primary = 0, updated_at = ?
+            WHERE client_id = ? AND contact_type = ?
+            """,
+            (_now_ts(), client_id, contact_type),
+        )
+        conn.execute(
+            """
+            UPDATE client_contacts
+            SET is_primary = 1, updated_at = ?
+            WHERE id = ?
+            """,
+            (_now_ts(), contact_id),
+        )
+    finally:
+        conn.commit()
+        conn.close()
+
+
+def _delete_client_contact(contact_id: int) -> None:
+    conn = _db_connect()
+    try:
+        conn.execute("DELETE FROM client_contacts WHERE id = ?", (contact_id,))
+    finally:
+        conn.commit()
+        conn.close()
+
+
+def _list_employee_users() -> list[dict]:
+    conn = _db_connect()
+    try:
+        cur = conn.execute(
+            """
+            SELECT id, name, email, is_active
+            FROM users
+            WHERE role = 'employee'
+            ORDER BY name, email
+            """
+        )
+        return [dict(row) for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def _list_assignments_by_client(client_id: int) -> list[dict]:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "assignments"):
+            return []
+        cur = conn.execute(
+            """
+            SELECT
+                a.id,
+                a.employee_user_id,
+                u.name AS employee_name,
+                u.email AS employee_email,
+                a.site_id,
+                s.name AS site_name,
+                COALESCE(c.name, s.client_name) AS client_name,
+                a.job_title,
+                a.start_date,
+                a.end_date,
+                a.status,
+                a.created_at,
+                a.updated_at
+            FROM assignments a
+            JOIN users u ON u.id = a.employee_user_id
+            JOIN sites s ON s.id = a.site_id
+            LEFT JOIN clients c ON c.id = s.client_id
+            WHERE s.client_id = ?
+            ORDER BY a.created_at DESC
+            """,
+            (client_id,),
+        )
+        return [dict(row) for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def _list_assignments() -> list[dict]:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "assignments"):
+            return []
+        cur = conn.execute(
+            """
+            SELECT
+                a.id,
+                a.employee_user_id,
+                u.name AS employee_name,
+                u.email AS employee_email,
+                a.site_id,
+                s.name AS site_name,
+                COALESCE(c.name, s.client_name) AS client_name,
+                a.job_title,
+                a.start_date,
+                a.end_date,
+                a.status,
+                a.created_at,
+                a.updated_at
+            FROM assignments a
+            JOIN users u ON u.id = a.employee_user_id
+            JOIN sites s ON s.id = a.site_id
+            LEFT JOIN clients c ON c.id = s.client_id
+            ORDER BY a.created_at DESC
+            """
+        )
+        return [dict(row) for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def _list_policies_by_client(client_id: int) -> list[dict]:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "attendance_policies"):
+            return []
+        cur = conn.execute(
+            """
+            SELECT
+                p.*,
+                c.name AS direct_client_name,
+                s.name AS site_name,
+                COALESCE(c.name, cs.name, s.client_name) AS client_name
+            FROM attendance_policies p
+            LEFT JOIN clients c ON c.id = p.client_id
+            LEFT JOIN sites s ON s.id = p.site_id
+            LEFT JOIN clients cs ON cs.id = s.client_id
+            WHERE p.client_id = ? OR s.client_id = ?
+            ORDER BY p.created_at DESC
+            """,
+            (client_id, client_id),
+        )
+        return [dict(row) for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def _list_policies() -> list[dict]:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "attendance_policies"):
+            return []
+        cur = conn.execute(
+            """
+            SELECT
+                p.*,
+                c.name AS direct_client_name,
+                s.name AS site_name,
+                COALESCE(c.name, cs.name, s.client_name) AS client_name
+            FROM attendance_policies p
+            LEFT JOIN clients c ON c.id = p.client_id
+            LEFT JOIN sites s ON s.id = p.site_id
+            LEFT JOIN clients cs ON cs.id = s.client_id
+            ORDER BY p.created_at DESC
+            """
+        )
+        return [dict(row) for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def _create_policy(
+    scope_type: str,
+    client_id: int | None,
+    site_id: int | None,
+    effective_from: str,
+    effective_to: str | None,
+    work_duration_minutes: int | None,
+    grace_minutes: int | None,
+    late_threshold_minutes: int | None,
+    allow_gps: int,
+    require_selfie: int,
+    allow_qr: int,
+    auto_checkout: int,
+    cutoff_time: str | None,
+) -> int:
+    scope = scope_type.upper()
+    if scope == "CLIENT":
+        site_id = None
+    elif scope == "SITE":
+        client_id = None
+    conn = _db_connect()
+    try:
+        cur = conn.execute(
+            """
+            INSERT INTO attendance_policies (
+                scope_type, client_id, site_id, effective_from, effective_to,
+                work_duration_minutes, grace_minutes, late_threshold_minutes,
+                allow_gps, require_selfie, allow_qr, auto_checkout, cutoff_time,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                scope,
+                client_id,
+                site_id,
+                effective_from,
+                effective_to or None,
+                work_duration_minutes,
+                grace_minutes,
+                late_threshold_minutes,
+                allow_gps,
+                require_selfie,
+                allow_qr,
+                auto_checkout,
+                cutoff_time or None,
+                _now_ts(),
+                _now_ts(),
+            ),
+        )
+        policy_id = int(cur.lastrowid)
+        return policy_id
+    finally:
+        conn.commit()
+        conn.close()
+
+
+def _update_policy(
+    policy_id: int,
+    scope_type: str,
+    client_id: int | None,
+    site_id: int | None,
+    effective_from: str,
+    effective_to: str | None,
+    work_duration_minutes: int | None,
+    grace_minutes: int | None,
+    late_threshold_minutes: int | None,
+    allow_gps: int,
+    require_selfie: int,
+    allow_qr: int,
+    auto_checkout: int,
+    cutoff_time: str | None,
+) -> None:
+    scope = scope_type.upper()
+    if scope == "CLIENT":
+        site_id = None
+    elif scope == "SITE":
+        client_id = None
+    conn = _db_connect()
+    try:
+        conn.execute(
+            """
+            UPDATE attendance_policies
+            SET scope_type = ?, client_id = ?, site_id = ?, effective_from = ?, effective_to = ?,
+                work_duration_minutes = ?, grace_minutes = ?, late_threshold_minutes = ?,
+                allow_gps = ?, require_selfie = ?, allow_qr = ?, auto_checkout = ?, cutoff_time = ?,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                scope,
+                client_id,
+                site_id,
+                effective_from,
+                effective_to or None,
+                work_duration_minutes,
+                grace_minutes,
+                late_threshold_minutes,
+                allow_gps,
+                require_selfie,
+                allow_qr,
+                auto_checkout,
+                cutoff_time or None,
+                _now_ts(),
+                policy_id,
+            ),
+        )
+    finally:
+        conn.commit()
+        conn.close()
+
+
+def _end_policy(policy_id: int) -> None:
+    conn = _db_connect()
+    try:
+        conn.execute(
+            """
+            UPDATE attendance_policies
+            SET effective_to = COALESCE(effective_to, ?),
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (_today_key(), _now_ts(), policy_id),
+        )
+    finally:
+        conn.commit()
+        conn.close()
+
+
+def _create_assignment(
+    employee_user_id: int,
+    site_id: int,
+    job_title: str | None,
+    start_date: str,
+    end_date: str | None,
+    status: str,
+) -> int:
+    if status == "ENDED" and not end_date:
+        end_date = start_date
+    conn = _db_connect()
+    try:
+        if status == "ACTIVE":
+            conn.execute(
+                """
+                UPDATE assignments
+                SET status = 'ENDED', end_date = ?, updated_at = ?
+                WHERE employee_user_id = ? AND status = 'ACTIVE'
+                """,
+                (start_date, _now_ts(), employee_user_id),
+            )
+        cur = conn.execute(
+            """
+            INSERT INTO assignments (
+                employee_user_id, site_id, job_title, start_date, end_date,
+                status, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                employee_user_id,
+                site_id,
+                job_title,
+                start_date,
+                end_date,
+                status,
+                _now_ts(),
+                _now_ts(),
+            ),
+        )
+        assignment_id = int(cur.lastrowid)
+        return assignment_id
+    finally:
+        conn.commit()
+        conn.close()
+
+
+def _update_assignment(
+    assignment_id: int,
+    employee_user_id: int,
+    site_id: int,
+    job_title: str | None,
+    start_date: str,
+    end_date: str | None,
+    status: str,
+) -> None:
+    if status == "ENDED" and not end_date:
+        end_date = start_date
+    conn = _db_connect()
+    try:
+        if status == "ACTIVE":
+            conn.execute(
+                """
+                UPDATE assignments
+                SET status = 'ENDED', end_date = ?, updated_at = ?
+                WHERE employee_user_id = ? AND status = 'ACTIVE' AND id != ?
+                """,
+                (start_date, _now_ts(), employee_user_id, assignment_id),
+            )
+        conn.execute(
+            """
+            UPDATE assignments
+            SET employee_user_id = ?, site_id = ?, job_title = ?, start_date = ?, end_date = ?,
+                status = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                employee_user_id,
+                site_id,
+                job_title,
+                start_date,
+                end_date,
+                status,
+                _now_ts(),
+                assignment_id,
+            ),
+        )
+    finally:
+        conn.commit()
+        conn.close()
+
+
+def _end_assignment(assignment_id: int) -> None:
+    conn = _db_connect()
+    try:
+        conn.execute(
+            """
+            UPDATE assignments
+            SET status = 'ENDED',
+                end_date = CASE
+                    WHEN end_date IS NULL OR end_date = '' THEN ?
+                    ELSE end_date
+                END,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (_today_key(), _now_ts(), assignment_id),
+        )
+    finally:
+        conn.commit()
+        conn.close()
+
+
+def _end_assignment_with_date(assignment_id: int, end_date: str) -> None:
+    conn = _db_connect()
+    try:
+        conn.execute(
+            """
+            UPDATE assignments
+            SET status = 'ENDED',
+                end_date = ?,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (end_date, _now_ts(), assignment_id),
+        )
+    finally:
+        conn.commit()
+        conn.close()
+
+
+def _create_site(
+    client_id: int,
+    name: str,
+    latitude: float,
+    longitude: float,
+    radius_meters: int,
+    notes: str | None,
+    timezone: str | None,
+    work_mode: str | None,
+) -> None:
+    client_name = _client_name_by_id(client_id) or ""
+    conn = _db_connect()
+    try:
+        conn.execute(
+            """
+            INSERT INTO sites (
+                client_id, client_name, name, timezone, work_mode, latitude,
+                longitude, radius_meters, notes, is_active, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                client_id,
+                client_name,
+                name,
+                timezone or "Asia/Jakarta",
+                work_mode or None,
+                latitude,
+                longitude,
+                radius_meters,
+                notes or None,
+                1,
+                _now_ts(),
+            ),
         )
     finally:
         conn.commit()
@@ -863,21 +2830,38 @@ def _create_site(
 
 def _update_site(
     site_id: int,
-    client_name: str,
+    client_id: int,
     name: str,
-    code: str | None,
-    location: str | None,
+    latitude: float,
+    longitude: float,
+    radius_meters: int,
     notes: str | None,
+    timezone: str | None,
+    work_mode: str | None,
 ) -> None:
+    client_name = _client_name_by_id(client_id) or ""
     conn = _db_connect()
     try:
         conn.execute(
             """
             UPDATE sites
-            SET client_name = ?, name = ?, code = ?, location = ?, notes = ?
+            SET client_id = ?, client_name = ?, name = ?, timezone = ?, work_mode = ?,
+                latitude = ?, longitude = ?, radius_meters = ?, notes = ?, updated_at = ?
             WHERE id = ?
             """,
-            (client_name, name, code or None, location or None, notes or None, site_id),
+            (
+                client_id,
+                client_name,
+                name,
+                timezone or None,
+                work_mode or None,
+                latitude,
+                longitude,
+                radius_meters,
+                notes or None,
+                _now_ts(),
+                site_id,
+            ),
         )
     finally:
         conn.commit()
@@ -993,6 +2977,27 @@ def _table_columns(conn: sqlite3.Connection, name: str) -> set[str]:
     return {row[1] for row in cur.fetchall()}
 
 
+def _foreign_key_exists(
+    conn: sqlite3.Connection,
+    table: str,
+    column: str,
+    ref_table: str,
+    ref_column: str,
+) -> bool:
+    try:
+        cur = conn.execute(f"PRAGMA foreign_key_list({table})")
+    except sqlite3.OperationalError:
+        return False
+    for row in cur.fetchall():
+        if (
+            row["from"] == column
+            and row["table"] == ref_table
+            and row["to"] == ref_column
+        ):
+            return True
+    return False
+
+
 def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
     columns = _table_columns(conn, table)
     if column not in columns:
@@ -1020,15 +3025,93 @@ def _init_db() -> None:
         )
         conn.execute(
             """
-            CREATE TABLE IF NOT EXISTS sites (
+            CREATE TABLE IF NOT EXISTS clients (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                client_name TEXT,
                 name TEXT NOT NULL,
-                code TEXT UNIQUE,
-                location TEXT,
+                legal_name TEXT,
+                tax_id TEXT,
+                status TEXT NOT NULL DEFAULT 'ACTIVE',
+                contract_no TEXT,
+                contract_start TEXT,
+                contract_end TEXT,
+                address TEXT NOT NULL,
+                office_email TEXT NOT NULL,
+                office_phone TEXT NOT NULL,
+                pic_name TEXT NOT NULL,
+                pic_title TEXT NOT NULL,
+                pic_phone TEXT NOT NULL,
+                is_active INTEGER DEFAULT 1,
+                notes TEXT,
+                created_at TEXT,
+                updated_at TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS client_contacts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                client_id INTEGER NOT NULL,
+                contact_type TEXT NOT NULL,
+                name TEXT NOT NULL,
+                title TEXT,
+                phone TEXT,
+                email TEXT,
+                is_primary INTEGER DEFAULT 0,
+                notes TEXT,
+                created_at TEXT,
+                updated_at TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS employees (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nik TEXT NOT NULL,
+                name TEXT NOT NULL,
+                email TEXT NOT NULL,
+                no_hp TEXT NOT NULL,
+                address TEXT NOT NULL,
+                gender TEXT NOT NULL,
+                status_nikah TEXT NOT NULL,
                 notes TEXT,
                 is_active INTEGER DEFAULT 1,
                 created_at TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS employee_registration_codes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                year_month TEXT NOT NULL,
+                seq INTEGER NOT NULL,
+                registrant_count INTEGER NOT NULL,
+                used_count INTEGER DEFAULT 0,
+                code TEXT NOT NULL,
+                created_at TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS sites (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                client_id INTEGER,
+                client_name TEXT,
+                name TEXT NOT NULL,
+                address TEXT,
+                timezone TEXT,
+                work_mode TEXT,
+                latitude REAL,
+                longitude REAL,
+                radius_meters INTEGER,
+                notes TEXT,
+                is_active INTEGER DEFAULT 1,
+                created_at TEXT,
+                updated_at TEXT,
+                FOREIGN KEY (client_id) REFERENCES clients(id) ON UPDATE CASCADE ON DELETE RESTRICT
             )
             """
         )
@@ -1065,6 +3148,84 @@ def _init_db() -> None:
                 UNIQUE(employee_user_id, site_id)
             )
             """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS assignments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                employee_user_id INTEGER NOT NULL,
+                site_id INTEGER NOT NULL,
+                job_title TEXT,
+                start_date TEXT NOT NULL,
+                end_date TEXT,
+                status TEXT NOT NULL DEFAULT 'ACTIVE',
+                created_at TEXT,
+                updated_at TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS attendance_policies (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                scope_type TEXT NOT NULL,
+                client_id INTEGER,
+                site_id INTEGER,
+                effective_from TEXT NOT NULL,
+                effective_to TEXT,
+                work_duration_minutes INTEGER,
+                grace_minutes INTEGER,
+                late_threshold_minutes INTEGER,
+                allow_gps INTEGER DEFAULT 1,
+                require_selfie INTEGER DEFAULT 0,
+                allow_qr INTEGER DEFAULT 1,
+                auto_checkout INTEGER DEFAULT 0,
+                cutoff_time TEXT,
+                created_at TEXT,
+                updated_at TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS leave_requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                employee_email TEXT NOT NULL,
+                leave_type TEXT NOT NULL,
+                date_from TEXT NOT NULL,
+                date_to TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                attachment TEXT,
+                attachment_path TEXT,
+                status TEXT NOT NULL DEFAULT 'pending',
+                approver_email TEXT,
+                approved_at TEXT,
+                note TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS audit_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                entity_type TEXT NOT NULL,
+                entity_id INTEGER,
+                action TEXT NOT NULL,
+                actor_email TEXT NOT NULL,
+                actor_role TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                details_json TEXT,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_audit_logs_entity ON audit_logs(entity_type, entity_id)"
         )
 
         conn.execute(
@@ -1120,8 +3281,197 @@ def _init_db() -> None:
             _ensure_column(conn, "attendance", "source", "source TEXT")
             _ensure_column(conn, "attendance", "manual_request_id", "manual_request_id INTEGER")
             _ensure_column(conn, "sites", "client_name", "client_name TEXT")
+            _ensure_column(conn, "sites", "client_id", "client_id INTEGER")
+            _ensure_column(conn, "sites", "address", "address TEXT")
+            _ensure_column(conn, "sites", "timezone", "timezone TEXT")
+            _ensure_column(conn, "sites", "work_mode", "work_mode TEXT")
+            _ensure_column(conn, "sites", "latitude", "latitude REAL")
+            _ensure_column(conn, "sites", "longitude", "longitude REAL")
+            _ensure_column(conn, "sites", "radius_meters", "radius_meters INTEGER")
+            _ensure_column(conn, "sites", "updated_at", "updated_at TEXT")
+        if _table_exists(conn, "clients"):
+            _ensure_column(conn, "clients", "is_active", "is_active INTEGER DEFAULT 1")
+            _ensure_column(conn, "clients", "legal_name", "legal_name TEXT")
+            _ensure_column(conn, "clients", "tax_id", "tax_id TEXT")
+            _ensure_column(conn, "clients", "status", "status TEXT NOT NULL DEFAULT 'ACTIVE'")
+            _ensure_column(conn, "clients", "contract_no", "contract_no TEXT")
+            _ensure_column(conn, "clients", "contract_start", "contract_start TEXT")
+            _ensure_column(conn, "clients", "contract_end", "contract_end TEXT")
+            _ensure_column(conn, "clients", "updated_at", "updated_at TEXT")
+            try:
+                conn.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_unique_name ON clients(lower(name))"
+                )
+                conn.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_unique_legal_name ON clients(lower(legal_name))"
+                )
+            except sqlite3.IntegrityError:
+                pass
+        if _table_exists(conn, "employees"):
+            _ensure_column(conn, "employees", "nik", "nik TEXT")
+            _ensure_column(conn, "employees", "name", "name TEXT")
+            _ensure_column(conn, "employees", "email", "email TEXT")
+            _ensure_column(conn, "employees", "no_hp", "no_hp TEXT")
+            _ensure_column(conn, "employees", "address", "address TEXT")
+            _ensure_column(conn, "employees", "gender", "gender TEXT")
+            _ensure_column(conn, "employees", "status_nikah", "status_nikah TEXT")
+            _ensure_column(conn, "employees", "notes", "notes TEXT")
+            _ensure_column(conn, "employees", "is_active", "is_active INTEGER DEFAULT 1")
+            _ensure_column(conn, "employees", "created_at", "created_at TEXT")
+        if _table_exists(conn, "employee_registration_codes"):
+            _ensure_column(conn, "employee_registration_codes", "year_month", "year_month TEXT")
+            _ensure_column(conn, "employee_registration_codes", "seq", "seq INTEGER")
+            _ensure_column(conn, "employee_registration_codes", "registrant_count", "registrant_count INTEGER")
+            _ensure_column(conn, "employee_registration_codes", "used_count", "used_count INTEGER DEFAULT 0")
+            _ensure_column(conn, "employee_registration_codes", "code", "code TEXT")
+            _ensure_column(conn, "employee_registration_codes", "created_at", "created_at TEXT")
+        if _table_exists(conn, "leave_requests"):
+            _ensure_column(conn, "leave_requests", "employee_email", "employee_email TEXT")
+            _ensure_column(conn, "leave_requests", "leave_type", "leave_type TEXT")
+            _ensure_column(conn, "leave_requests", "date_from", "date_from TEXT")
+            _ensure_column(conn, "leave_requests", "date_to", "date_to TEXT")
+            _ensure_column(conn, "leave_requests", "reason", "reason TEXT")
+            _ensure_column(conn, "leave_requests", "attachment", "attachment TEXT")
+            _ensure_column(conn, "leave_requests", "attachment_path", "attachment_path TEXT")
+            _ensure_column(conn, "leave_requests", "status", "status TEXT NOT NULL DEFAULT 'pending'")
+            _ensure_column(conn, "leave_requests", "approver_email", "approver_email TEXT")
+            _ensure_column(conn, "leave_requests", "approved_at", "approved_at TEXT")
+            _ensure_column(conn, "leave_requests", "note", "note TEXT")
+            _ensure_column(conn, "leave_requests", "created_at", "created_at TEXT")
+            _ensure_column(conn, "leave_requests", "updated_at", "updated_at TEXT")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_leave_requests_status ON leave_requests(status)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_leave_requests_employee ON leave_requests(employee_email)"
+            )
+        if _table_exists(conn, "client_contacts"):
+            _ensure_column(conn, "client_contacts", "client_id", "client_id INTEGER")
+            _ensure_column(conn, "client_contacts", "contact_type", "contact_type TEXT")
+            _ensure_column(conn, "client_contacts", "name", "name TEXT")
+            _ensure_column(conn, "client_contacts", "title", "title TEXT")
+            _ensure_column(conn, "client_contacts", "phone", "phone TEXT")
+            _ensure_column(conn, "client_contacts", "email", "email TEXT")
+            _ensure_column(conn, "client_contacts", "is_primary", "is_primary INTEGER DEFAULT 0")
+            _ensure_column(conn, "client_contacts", "notes", "notes TEXT")
+            _ensure_column(conn, "client_contacts", "created_at", "created_at TEXT")
+            _ensure_column(conn, "client_contacts", "updated_at", "updated_at TEXT")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_client_contacts_client ON client_contacts(client_id)"
+            )
+            try:
+                conn.execute(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_client_contacts_primary
+                    ON client_contacts(client_id, contact_type)
+                    WHERE is_primary = 1
+                    """
+                )
+            except sqlite3.OperationalError:
+                pass
+
+        if _table_exists(conn, "sites") and _table_exists(conn, "clients"):
+            cur = conn.execute(
+                """
+                SELECT id, client_name
+                FROM sites
+                WHERE client_id IS NULL
+                  AND client_name IS NOT NULL
+                  AND client_name != ''
+                """
+            )
+            for row in cur.fetchall():
+                client_row = conn.execute(
+                    "SELECT id FROM clients WHERE lower(name) = ?",
+                    (row["client_name"].lower(),),
+                ).fetchone()
+                if client_row:
+                    conn.execute(
+                        "UPDATE sites SET client_id = ? WHERE id = ?",
+                        (client_row["id"], row["id"]),
+                    )
+            conn.execute(
+                """
+                UPDATE sites
+                SET client_id = NULL
+                WHERE client_id IS NOT NULL
+                  AND client_id NOT IN (SELECT id FROM clients)
+                """
+            )
+            if not _foreign_key_exists(conn, "sites", "client_id", "clients", "id"):
+                conn.execute("ALTER TABLE sites RENAME TO sites_old")
+                conn.execute(
+                    """
+                    CREATE TABLE sites (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        client_id INTEGER,
+                        client_name TEXT,
+                        name TEXT NOT NULL,
+                        address TEXT,
+                        timezone TEXT,
+                        work_mode TEXT,
+                        latitude REAL,
+                        longitude REAL,
+                        radius_meters INTEGER,
+                        notes TEXT,
+                        is_active INTEGER DEFAULT 1,
+                        created_at TEXT,
+                        updated_at TEXT,
+                        FOREIGN KEY (client_id) REFERENCES clients(id)
+                            ON UPDATE CASCADE
+                            ON DELETE RESTRICT
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    INSERT INTO sites (
+                        id, client_id, client_name, name, address, timezone, work_mode,
+                        latitude, longitude, radius_meters, notes, is_active, created_at, updated_at
+                    )
+                    SELECT
+                        id, client_id, client_name, name, address, timezone, work_mode,
+                        latitude, longitude, radius_meters, notes, is_active, created_at, updated_at
+                    FROM sites_old
+                    """
+                )
+                conn.execute("DROP TABLE sites_old")
+
+        if _table_exists(conn, "assignments"):
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_assignments_user_status ON assignments(employee_user_id, status)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_assignments_site_status ON assignments(site_id, status)"
+            )
+            if _table_exists(conn, "employee_site"):
+                cur = conn.execute("SELECT COUNT(1) AS total FROM assignments")
+                row = cur.fetchone()
+                total = row["total"] if row else 0
+                if total == 0:
+                    cur = conn.execute("SELECT employee_user_id, site_id FROM employee_site")
+                    for row in cur.fetchall():
+                        conn.execute(
+                            """
+                            INSERT INTO assignments (
+                                employee_user_id, site_id, job_title, start_date, end_date,
+                                status, created_at, updated_at
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                            """,
+                            (
+                                row["employee_user_id"],
+                                row["site_id"],
+                                None,
+                                _today_key(),
+                                None,
+                                "ACTIVE",
+                                _now_ts(),
+                                _now_ts(),
+                            ),
+                        )
 
         _seed_users(conn)
+        _seed_employees(conn)
     finally:
         conn.commit()
         conn.close()
@@ -1149,6 +3499,40 @@ def _seed_users(conn: sqlite3.Connection) -> None:
                 _now_ts(),
                 _now_ts(),
                 0,
+            ),
+        )
+
+
+def _seed_employees(conn: sqlite3.Connection) -> None:
+    if not _table_exists(conn, "employees"):
+        return
+    for seed in SEED_EMPLOYEES:
+        email = (seed.get("email") or "").lower()
+        nik = seed.get("nik") or ""
+        cur = conn.execute(
+            "SELECT id FROM employees WHERE email = ? OR nik = ?",
+            (email, nik),
+        )
+        if cur.fetchone():
+            continue
+        conn.execute(
+            """
+            INSERT INTO employees (
+                nik, name, email, no_hp, address, gender,
+                status_nikah, notes, is_active, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                seed.get("nik") or "",
+                seed.get("name") or "",
+                email,
+                seed.get("no_hp") or "",
+                seed.get("address") or "",
+                seed.get("gender") or "",
+                seed.get("status_nikah") or "",
+                seed.get("notes") or None,
+                int(seed.get("is_active") or 0),
+                _now_ts(),
             ),
         )
 
@@ -1214,6 +3598,182 @@ def _can_approve_manual(user: User) -> bool:
     if user.role == "manager_operational":
         return not _has_supervisor_account()
     return False
+
+
+def _create_leave_request(
+    employee_email: str,
+    leave_type: str,
+    date_from: str,
+    date_to: str,
+    reason: str,
+    attachment: str | None,
+    attachment_path: str | None,
+) -> int:
+    conn = _db_connect()
+    try:
+        cur = conn.execute(
+            """
+            INSERT INTO leave_requests (
+                employee_email, leave_type, date_from, date_to, reason,
+                attachment, attachment_path, status, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                employee_email,
+                leave_type,
+                date_from,
+                date_to,
+                reason,
+                attachment,
+                attachment_path,
+                "pending",
+                _now_ts(),
+                _now_ts(),
+            ),
+        )
+        return int(cur.lastrowid)
+    finally:
+        conn.commit()
+        conn.close()
+
+
+def _list_leave_requests_by_email(employee_email: str) -> list[dict]:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "leave_requests"):
+            return []
+        cur = conn.execute(
+            """
+            SELECT
+                id,
+                employee_email,
+                leave_type AS type,
+                date_from,
+                date_to,
+                reason,
+                attachment,
+                attachment_path,
+                status,
+                approver_email AS approver,
+                approved_at,
+                note,
+                created_at,
+                updated_at
+            FROM leave_requests
+            WHERE employee_email = ?
+            ORDER BY created_at DESC
+            """,
+            (employee_email,),
+        )
+        return [dict(row) for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def _list_leave_pending() -> list[dict]:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "leave_requests"):
+            return []
+        cur = conn.execute(
+            """
+            SELECT
+                id,
+                employee_email,
+                leave_type AS type,
+                date_from,
+                date_to,
+                reason,
+                attachment,
+                attachment_path,
+                status,
+                approver_email AS approver,
+                approved_at,
+                note,
+                created_at,
+                updated_at
+            FROM leave_requests
+            WHERE status = 'pending'
+            ORDER BY created_at DESC
+            """
+        )
+        return [dict(row) for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def _get_leave_request_by_id(request_id: int) -> dict | None:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "leave_requests"):
+            return None
+        cur = conn.execute(
+            """
+            SELECT
+                id,
+                employee_email,
+                leave_type AS type,
+                date_from,
+                date_to,
+                reason,
+                attachment,
+                attachment_path,
+                status,
+                approver_email AS approver,
+                approved_at,
+                note,
+                created_at,
+                updated_at
+            FROM leave_requests
+            WHERE id = ?
+            """,
+            (request_id,),
+        )
+        row = cur.fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def _update_leave_request_status(
+    request_id: int,
+    status: str,
+    approver_email: str,
+    note: str | None,
+) -> None:
+    conn = _db_connect()
+    try:
+        conn.execute(
+            """
+            UPDATE leave_requests
+            SET status = ?, approver_email = ?, approved_at = ?, note = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (status, approver_email, _now_ts(), note, _now_ts(), request_id),
+        )
+    finally:
+        conn.commit()
+        conn.close()
+
+
+def _list_leave_active_for_date(today: str) -> list[dict]:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "leave_requests"):
+            return []
+        cur = conn.execute(
+            """
+            SELECT employee_email, status, date_from, date_to
+            FROM leave_requests
+            WHERE status != 'rejected'
+              AND date_from <= ?
+              AND date_to >= ?
+            """,
+            (today, today),
+        )
+        return [dict(row) for row in cur.fetchall()]
+    finally:
+        conn.close()
 
 
 def _create_manual_request(
@@ -1350,10 +3910,113 @@ def _insert_manual_attendance_record(request_row: dict) -> None:
         conn.close()
 
 
+def _create_attendance_record(
+    employee: dict | None,
+    employee_email: str,
+    action: str,
+    method: str,
+    device_time: str | None,
+    source: str,
+) -> dict:
+    date_value, time_value = _device_time_parts(device_time)
+    employee_id = employee.get("id") if employee else None
+    employee_name = employee.get("name") if employee else None
+    created_at = _now_ts()
+    conn = _db_connect()
+    try:
+        conn.execute(
+            """
+            INSERT INTO attendance (
+                employee_id, employee_name, employee_email,
+                date, time, action, method, source, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                employee_id,
+                employee_name,
+                employee_email,
+                date_value,
+                time_value,
+                action,
+                method,
+                source,
+                created_at,
+            ),
+        )
+    finally:
+        conn.commit()
+        conn.close()
+    return {
+        "employee_email": employee_email,
+        "action": action,
+        "method": method,
+        "date": date_value,
+        "time": time_value,
+        "created_at": created_at,
+    }
+
+
+def _list_attendance_today(employee_email: str, today: str, limit: int = 10) -> list[dict]:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "attendance"):
+            return []
+        cur = conn.execute(
+            """
+            SELECT id, employee_email, date, time, action, method, created_at
+            FROM attendance
+            WHERE employee_email = ? AND date = ?
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (employee_email, today, limit),
+        )
+        return [dict(row) for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def _attendance_today_count(today: str) -> int:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "attendance"):
+            return 0
+        cur = conn.execute(
+            """
+            SELECT COUNT(1) AS total
+            FROM attendance
+            WHERE date = ? AND action = 'checkin'
+            """,
+            (today,),
+        )
+        row = cur.fetchone()
+        return int(row["total"]) if row else 0
+    finally:
+        conn.close()
+
+
 def _within_radius(lat: float, lng: float) -> bool:
     center_lat, center_lng = DEMO_GPS_CENTER
     radius_m = DEMO_GPS_RADIUS_METERS
     # Haversine distance in meters
+    r = 6371000
+    phi1 = math.radians(center_lat)
+    phi2 = math.radians(lat)
+    dphi = math.radians(lat - center_lat)
+    dlambda = math.radians(lng - center_lng)
+    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return (r * c) <= radius_m
+
+
+def _within_site_radius(lat: float, lng: float, site: sqlite3.Row | dict | None) -> bool:
+    if not site:
+        return _within_radius(lat, lng)
+    center_lat = site.get("latitude") if isinstance(site, dict) else site["latitude"]
+    center_lng = site.get("longitude") if isinstance(site, dict) else site["longitude"]
+    radius_m = site.get("radius_meters") if isinstance(site, dict) else site["radius_meters"]
+    if center_lat is None or center_lng is None or radius_m is None:
+        return _within_radius(lat, lng)
     r = 6371000
     phi1 = math.radians(center_lat)
     phi2 = math.radians(lat)
@@ -1381,17 +4044,31 @@ def admin_bp() -> Blueprint:
     @bp.before_request
     def _guard():
         user = _current_user()
-        _require_admin(user)
+        if not user:
+            return redirect(url_for("index"))
+        if user.role not in ADMIN_ROLES:
+            return redirect(url_for("dashboard_employee"))
 
     @bp.route("/", methods=["GET"])
     def overview():
         user = _current_user()
+        today = _today_key()
         stats = {
             "clients": len(_clients()),
             "employees": len(_employees()),
-            "attendance_today": len([a for a in _attendance() if a["status"] == "hadir"]),
+            "attendance_today": _attendance_today_count(today),
         }
-        return render_template("dashboard/admin_overview.html", user=user, stats=stats)
+        client_summaries = _client_operational_summary(today)
+        alerts = _build_admin_alerts(today)
+        audit_logs = _fetch_audit_logs(50)
+        return render_template(
+            "dashboard/admin_overview.html",
+            user=user,
+            stats=stats,
+            client_summaries=client_summaries,
+            alerts=alerts,
+            audit_logs=audit_logs,
+        )
 
     @bp.route("/clients", methods=["GET"])
     def clients():
@@ -1400,14 +4077,726 @@ def admin_bp() -> Blueprint:
             "dashboard/admin_clients.html",
             user=user,
             clients=_clients(),
+        )
+
+    @bp.route("/clients/<int:client_id>", methods=["GET"])
+    def client_profile(client_id: int):
+        user = _current_user()
+        client = _get_client_by_id(client_id)
+        if not client:
+            flash("Client tidak ditemukan.")
+            return redirect(url_for("admin.clients"))
+        sites = _list_sites_by_client(client_id)
+        assignments = _list_assignments_by_client(client_id)
+        policies = _list_policies_by_client(client_id)
+        contacts = _list_client_contacts(client_id)
+        today = _today_key()
+
+        site_policy_ids = {
+            int(p["site_id"])
+            for p in policies
+            if p.get("scope_type") == "SITE"
+            and p.get("site_id")
+            and _policy_active_for_date(p, today)
+        }
+        summary = {
+            "sites_total": len(sites),
+            "sites_active": len([s for s in sites if int(s.get("is_active") or 0) == 1]),
+            "assignments_active": len(
+                [
+                    a
+                    for a in assignments
+                    if (a.get("status") == "ACTIVE")
+                    and (a.get("start_date") or "") <= today
+                    and (not a.get("end_date") or a.get("end_date") >= today)
+                ]
+            ),
+            "client_policy_active": any(
+                p.get("scope_type") == "CLIENT"
+                and int(p.get("client_id") or 0) == client_id
+                and _policy_active(p)
+                for p in policies
+            ),
+            "site_policy_count": len(site_policy_ids),
+        }
+        return render_template(
+            "dashboard/admin_client_profile.html",
+            user=user,
+            client=client,
+            sites=sites,
+            assignments=assignments,
+            policies=policies,
+            contacts=contacts,
+            summary=summary,
+        )
+
+    @bp.route("/clients/<int:client_id>/contacts/create", methods=["POST"])
+    def client_contacts_create(client_id: int):
+        user = _current_user()
+        _require_hr_superadmin(user)
+        if not _get_client_by_id(client_id):
+            flash("Client tidak ditemukan.")
+            return redirect(url_for("admin.clients"))
+        contact_type = (request.form.get("contact_type") or "").strip().upper()
+        name = (request.form.get("name") or "").strip()
+        title = (request.form.get("title") or "").strip()
+        phone = (request.form.get("phone") or "").strip()
+        email = (request.form.get("email") or "").strip().lower()
+        notes = (request.form.get("notes") or "").strip()
+        is_primary = 1 if request.form.get("is_primary") == "1" else 0
+
+        if contact_type not in {"OPERATIONAL", "BILLING", "HR", "OTHER"}:
+            flash("Tipe PIC tidak valid.")
+            return redirect(url_for("admin.client_profile", client_id=client_id))
+        if not name:
+            flash("Nama PIC wajib diisi.")
+            return redirect(url_for("admin.client_profile", client_id=client_id))
+
+        _create_client_contact(
+            client_id=client_id,
+            contact_type=contact_type,
+            name=name,
+            title=title or None,
+            phone=phone or None,
+            email=email or None,
+            is_primary=is_primary,
+            notes=notes or None,
+        )
+        flash("Kontak client ditambahkan.")
+        return redirect(url_for("admin.client_profile", client_id=client_id))
+
+    @bp.route("/clients/contacts/<int:contact_id>/primary", methods=["POST"])
+    def client_contacts_primary(contact_id: int):
+        user = _current_user()
+        _require_hr_superadmin(user)
+        contact = _get_client_contact_by_id(contact_id)
+        if not contact:
+            flash("Kontak tidak ditemukan.")
+            return redirect(url_for("admin.clients"))
+        _set_primary_client_contact(contact_id)
+        flash("Primary PIC diperbarui.")
+        return redirect(url_for("admin.client_profile", client_id=contact["client_id"]))
+
+    @bp.route("/clients/contacts/<int:contact_id>/delete", methods=["POST"])
+    def client_contacts_delete(contact_id: int):
+        user = _current_user()
+        _require_hr_superadmin(user)
+        contact = _get_client_contact_by_id(contact_id)
+        if not contact:
+            flash("Kontak tidak ditemukan.")
+            return redirect(url_for("admin.clients"))
+        _delete_client_contact(contact_id)
+        flash("Kontak client dihapus.")
+        return redirect(url_for("admin.client_profile", client_id=contact["client_id"]))
+
+    @bp.route("/sites", methods=["GET"])
+    def sites():
+        user = _current_user()
+        sites = _list_sites()
+        orphan_sites = [s for s in sites if s.get("is_orphan")]
+        today = _today_key()
+        site_policy_ids, client_policy_ids = _active_policy_sets(today)
+        assignment_counts = _active_assignment_counts(today)
+        for site in sites:
+            score = 0
+            if int(site.get("is_active") or 0) == 1:
+                score += 1
+            if assignment_counts.get(int(site.get("id") or 0), 0) > 0:
+                score += 1
+            client_id = site.get("client_id")
+            has_policy = False
+            if site.get("id") and int(site["id"]) in site_policy_ids:
+                has_policy = True
+            elif client_id and int(client_id) in client_policy_ids:
+                has_policy = True
+            if has_policy:
+                score += 1
+            if score == 3:
+                label, cls = "Compliant", "approved"
+            elif score == 2:
+                label, cls = "Watch", "pending"
+            else:
+                label, cls = "Risk", "rejected"
+            site["compliance_score"] = score
+            site["compliance_label"] = label
+            site["compliance_class"] = cls
+        return render_template(
+            "dashboard/admin_sites.html",
+            user=user,
+            clients=_clients(),
+            sites=sites,
+            orphan_sites=orphan_sites,
+        )
+
+    @bp.route("/assignments", methods=["GET"])
+    def assignments():
+        user = _current_user()
+        return render_template(
+            "dashboard/admin_assignments.html",
+            user=user,
+            employees=_list_employee_users(),
             sites=_list_sites(),
+            assignments=_list_assignments(),
+        )
+
+    @bp.route("/policies", methods=["GET"])
+    def policies():
+        user = _current_user()
+        return render_template(
+            "dashboard/admin_policies.html",
+            user=user,
+            clients=_clients(),
+            sites=_list_sites(),
+            policies=_list_policies(),
+        )
+
+    @bp.route("/shifts", methods=["GET"])
+    def shifts():
+        user = _current_user()
+        return render_template(
+            "dashboard/admin_shifts.html",
+            user=user,
             shifts=_list_shifts(),
         )
+
+    @bp.route("/clients/create", methods=["POST"])
+    def clients_create():
+        user = _current_user()
+        _require_hr_superadmin(user)
+        name = (request.form.get("client_name") or "").strip()
+        legal_name = (request.form.get("legal_name") or "").strip()
+        address = (request.form.get("address") or "").strip()
+        office_email = (request.form.get("office_email") or "").strip()
+        office_phone = (request.form.get("office_phone") or "").strip()
+        pic_name = (request.form.get("pic_name") or "").strip()
+        pic_title = (request.form.get("pic_title") or "").strip()
+        pic_phone = (request.form.get("pic_phone") or "").strip()
+        notes = (request.form.get("notes") or "").strip()
+        if not name:
+            flash("Nama client wajib diisi.")
+            return redirect(url_for("admin.clients", _anchor="add-client"))
+        if not address:
+            flash("Alamat client wajib diisi.")
+            return redirect(url_for("admin.clients", _anchor="add-client"))
+        if not office_email:
+            flash("Email kantor wajib diisi.")
+            return redirect(url_for("admin.clients", _anchor="add-client"))
+        if not office_phone:
+            flash("No telp kantor wajib diisi.")
+            return redirect(url_for("admin.clients", _anchor="add-client"))
+        if not pic_name:
+            flash("Nama PIC wajib diisi.")
+            return redirect(url_for("admin.clients", _anchor="add-client"))
+        if not pic_title:
+            flash("Jabatan PIC wajib diisi.")
+            return redirect(url_for("admin.clients", _anchor="add-client"))
+        if not pic_phone:
+            flash("No HP PIC wajib diisi.")
+            return redirect(url_for("admin.clients", _anchor="add-client"))
+        conflict = _find_client_identity_conflict(name, legal_name)
+        if conflict:
+            flash("Nama client atau nama legal sudah digunakan.")
+            return redirect(url_for("admin.clients", _anchor="add-client"))
+        _create_client(
+            name=name,
+            legal_name=legal_name or None,
+            address=address,
+            office_email=office_email,
+            office_phone=office_phone,
+            pic_name=pic_name,
+            pic_title=pic_title,
+            pic_phone=pic_phone,
+            notes=notes or None,
+        )
+        flash("Client berhasil ditambahkan.")
+        return redirect(url_for("admin.clients", _anchor="add-client"))
+
+    @bp.route("/clients/<int:client_id>/update", methods=["POST"])
+    def clients_update(client_id: int):
+        user = _current_user()
+        _require_hr_superadmin(user)
+        name = (request.form.get("client_name") or "").strip()
+        legal_name = (request.form.get("legal_name") or "").strip()
+        address = (request.form.get("address") or "").strip()
+        office_email = (request.form.get("office_email") or "").strip()
+        office_phone = (request.form.get("office_phone") or "").strip()
+        pic_name = (request.form.get("pic_name") or "").strip()
+        pic_title = (request.form.get("pic_title") or "").strip()
+        pic_phone = (request.form.get("pic_phone") or "").strip()
+        notes = (request.form.get("notes") or "").strip()
+        is_active = int(request.form.get("is_active") or 0)
+        if not name:
+            flash("Nama client wajib diisi.")
+            return redirect(url_for("admin.clients"))
+        if not address:
+            flash("Alamat client wajib diisi.")
+            return redirect(url_for("admin.clients"))
+        if not office_email:
+            flash("Email kantor wajib diisi.")
+            return redirect(url_for("admin.clients"))
+        if not office_phone:
+            flash("No telp kantor wajib diisi.")
+            return redirect(url_for("admin.clients"))
+        if not pic_name:
+            flash("Nama PIC wajib diisi.")
+            return redirect(url_for("admin.clients"))
+        if not pic_title:
+            flash("Jabatan PIC wajib diisi.")
+            return redirect(url_for("admin.clients"))
+        if not pic_phone:
+            flash("No HP PIC wajib diisi.")
+            return redirect(url_for("admin.clients"))
+        conflict = _find_client_identity_conflict(name, legal_name, exclude_client_id=client_id)
+        if conflict:
+            flash("Nama client atau nama legal sudah digunakan.")
+            return redirect(url_for("admin.clients"))
+        _update_client(
+            client_id=client_id,
+            name=name,
+            legal_name=legal_name or None,
+            address=address,
+            office_email=office_email,
+            office_phone=office_phone,
+            pic_name=pic_name,
+            pic_title=pic_title,
+            pic_phone=pic_phone,
+            is_active=is_active,
+            notes=notes or None,
+        )
+        flash("Client berhasil diperbarui.")
+        return redirect(url_for("admin.clients"))
+
+    @bp.route("/clients/<int:client_id>/delete", methods=["POST"])
+    def clients_delete(client_id: int):
+        user = _current_user()
+        _require_hr_superadmin(user)
+        if _client_has_sites(client_id):
+            flash("Client masih punya site. Pindahkan atau hapus site terlebih dahulu.")
+            return redirect(url_for("admin.clients"))
+        _delete_client(client_id)
+        flash("Client berhasil dihapus.")
+        return redirect(url_for("admin.clients"))
+
+    @bp.route("/assignments/create", methods=["POST"])
+    def assignments_create():
+        user = _current_user()
+        _require_hr_superadmin(user)
+        employee_id_raw = (request.form.get("employee_user_id") or "").strip()
+        site_id_raw = (request.form.get("site_id") or "").strip()
+        job_title = (request.form.get("job_title") or "").strip()
+        start_date = (request.form.get("start_date") or "").strip()
+        end_date = (request.form.get("end_date") or "").strip()
+        status = (request.form.get("status") or "ACTIVE").strip().upper()
+
+        if not employee_id_raw or not site_id_raw:
+            flash("Pegawai dan site wajib dipilih.")
+            return redirect(url_for("admin.assignments", _anchor="add-assignment"))
+        if not start_date:
+            flash("Tanggal mulai wajib diisi.")
+            return redirect(url_for("admin.assignments", _anchor="add-assignment"))
+        try:
+            employee_id = int(employee_id_raw)
+            site_id = int(site_id_raw)
+        except ValueError:
+            flash("Pegawai atau site tidak valid.")
+            return redirect(url_for("admin.assignments", _anchor="add-assignment"))
+        if status not in {"ACTIVE", "ENDED"}:
+            status = "ACTIVE"
+
+        assignment_id = _create_assignment(
+            employee_user_id=employee_id,
+            site_id=site_id,
+            job_title=job_title or None,
+            start_date=start_date,
+            end_date=end_date or None,
+            status=status,
+        )
+        _log_audit_event(
+            entity_type="assignment",
+            entity_id=assignment_id,
+            action="CREATE",
+            actor=user,
+            summary=f"Assignment dibuat untuk user_id {employee_id} ke site_id {site_id}.",
+            details={
+                "employee_user_id": employee_id,
+                "site_id": site_id,
+                "job_title": job_title or None,
+                "start_date": start_date,
+                "end_date": end_date or None,
+                "status": status,
+            },
+        )
+        flash("Assignment berhasil ditambahkan.")
+        return redirect(url_for("admin.assignments", _anchor="add-assignment"))
+
+    @bp.route("/assignments/<int:assignment_id>/update", methods=["POST"])
+    def assignments_update(assignment_id: int):
+        user = _current_user()
+        _require_hr_superadmin(user)
+        employee_id_raw = (request.form.get("employee_user_id") or "").strip()
+        site_id_raw = (request.form.get("site_id") or "").strip()
+        job_title = (request.form.get("job_title") or "").strip()
+        start_date = (request.form.get("start_date") or "").strip()
+        end_date = (request.form.get("end_date") or "").strip()
+        status = (request.form.get("status") or "ACTIVE").strip().upper()
+
+        if not employee_id_raw or not site_id_raw:
+            flash("Pegawai dan site wajib dipilih.")
+            return redirect(url_for("admin.assignments"))
+        if not start_date:
+            flash("Tanggal mulai wajib diisi.")
+            return redirect(url_for("admin.assignments"))
+        try:
+            employee_id = int(employee_id_raw)
+            site_id = int(site_id_raw)
+        except ValueError:
+            flash("Pegawai atau site tidak valid.")
+            return redirect(url_for("admin.assignments"))
+        if status not in {"ACTIVE", "ENDED"}:
+            status = "ACTIVE"
+
+        current = _get_assignment_by_id(assignment_id)
+        if not current:
+            flash("Assignment tidak ditemukan.")
+            return redirect(url_for("admin.assignments"))
+
+        if status == "ACTIVE":
+            current_status = (current.get("status") or "").upper()
+            current_employee_id = int(current.get("employee_user_id") or 0)
+            current_site_id = int(current.get("site_id") or 0)
+            current_start_date = (current.get("start_date") or "").strip()
+            needs_new = current_status != "ACTIVE"
+            if not needs_new:
+                if current_employee_id != employee_id or current_site_id != site_id or current_start_date != start_date:
+                    needs_new = True
+            if needs_new:
+                if current_status == "ACTIVE":
+                    _end_assignment_with_date(assignment_id, start_date)
+                    _log_audit_event(
+                        entity_type="assignment",
+                        entity_id=assignment_id,
+                        action="END",
+                        actor=user,
+                        summary=f"Assignment ditutup untuk user_id {current_employee_id}.",
+                        details={
+                            "before": current,
+                            "end_date": start_date,
+                        },
+                    )
+                new_assignment_id = _create_assignment(
+                    employee_user_id=employee_id,
+                    site_id=site_id,
+                    job_title=job_title or None,
+                    start_date=start_date,
+                    end_date=end_date or None,
+                    status=status,
+                )
+                _log_audit_event(
+                    entity_type="assignment",
+                    entity_id=new_assignment_id,
+                    action="CREATE",
+                    actor=user,
+                    summary=f"Assignment baru dibuat untuk user_id {employee_id} ke site_id {site_id}.",
+                    details={
+                        "employee_user_id": employee_id,
+                        "site_id": site_id,
+                        "job_title": job_title or None,
+                        "start_date": start_date,
+                        "end_date": end_date or None,
+                        "status": status,
+                        "previous_assignment_id": assignment_id,
+                    },
+                )
+                flash("Assignment baru dibuat (history tersimpan).")
+                return redirect(url_for("admin.assignments"))
+
+        _update_assignment(
+            assignment_id=assignment_id,
+            employee_user_id=employee_id,
+            site_id=site_id,
+            job_title=job_title or None,
+            start_date=start_date,
+            end_date=end_date or None,
+            status=status,
+        )
+        _log_audit_event(
+            entity_type="assignment",
+            entity_id=assignment_id,
+            action="UPDATE",
+            actor=user,
+            summary=f"Assignment diperbarui untuk user_id {employee_id}.",
+            details={
+                "before": current,
+                "after": {
+                    "employee_user_id": employee_id,
+                    "site_id": site_id,
+                    "job_title": job_title or None,
+                    "start_date": start_date,
+                    "end_date": end_date or None,
+                    "status": status,
+                },
+            },
+        )
+        flash("Assignment berhasil diperbarui.")
+        return redirect(url_for("admin.assignments"))
+
+    @bp.route("/assignments/<int:assignment_id>/end", methods=["POST"])
+    def assignments_end(assignment_id: int):
+        user = _current_user()
+        _require_hr_superadmin(user)
+        current = _get_assignment_by_id(assignment_id)
+        _end_assignment(assignment_id)
+        _log_audit_event(
+            entity_type="assignment",
+            entity_id=assignment_id,
+            action="END",
+            actor=user,
+            summary=f"Assignment ditutup untuk id {assignment_id}.",
+            details={
+                "before": current,
+                "end_date": _today_key(),
+            },
+        )
+        flash("Assignment ditutup.")
+        return redirect(url_for("admin.assignments"))
+
+    @bp.route("/policies/create", methods=["POST"])
+    def policies_create():
+        user = _current_user()
+        _require_hr_superadmin(user)
+        scope_type = (request.form.get("scope_type") or "CLIENT").strip().upper()
+        client_id_raw = (request.form.get("client_id") or "").strip()
+        site_id_raw = (request.form.get("site_id") or "").strip()
+        effective_from = (request.form.get("effective_from") or "").strip()
+        effective_to = (request.form.get("effective_to") or "").strip()
+        work_duration_raw = (request.form.get("work_duration_minutes") or "").strip()
+        grace_raw = (request.form.get("grace_minutes") or "").strip()
+        late_raw = (request.form.get("late_threshold_minutes") or "").strip()
+        allow_gps = 1 if request.form.get("allow_gps") == "1" else 0
+        require_selfie = 1 if request.form.get("require_selfie") == "1" else 0
+        allow_qr = 1 if request.form.get("allow_qr") == "1" else 0
+        auto_checkout = 1 if request.form.get("auto_checkout") == "1" else 0
+        cutoff_time = (request.form.get("cutoff_time") or "").strip()
+
+        if scope_type not in {"CLIENT", "SITE"}:
+            scope_type = "CLIENT"
+        if not effective_from:
+            flash("Tanggal mulai wajib diisi.")
+            return redirect(url_for("admin.policies", _anchor="add-policy"))
+
+        client_id = int(client_id_raw) if client_id_raw.isdigit() else None
+        site_id = int(site_id_raw) if site_id_raw.isdigit() else None
+        if scope_type == "CLIENT" and not client_id:
+            flash("Client wajib dipilih untuk scope CLIENT.")
+            return redirect(url_for("admin.policies", _anchor="add-policy"))
+        if scope_type == "SITE" and not site_id:
+            flash("Site wajib dipilih untuk scope SITE.")
+            return redirect(url_for("admin.policies", _anchor="add-policy"))
+
+        work_duration = int(work_duration_raw) if work_duration_raw.isdigit() else None
+        grace_minutes = int(grace_raw) if grace_raw.isdigit() else None
+        late_minutes = int(late_raw) if late_raw.isdigit() else None
+
+        policy_id = _create_policy(
+            scope_type=scope_type,
+            client_id=client_id,
+            site_id=site_id,
+            effective_from=effective_from,
+            effective_to=effective_to or None,
+            work_duration_minutes=work_duration,
+            grace_minutes=grace_minutes,
+            late_threshold_minutes=late_minutes,
+            allow_gps=allow_gps,
+            require_selfie=require_selfie,
+            allow_qr=allow_qr,
+            auto_checkout=auto_checkout,
+            cutoff_time=cutoff_time or None,
+        )
+        _log_audit_event(
+            entity_type="policy",
+            entity_id=policy_id,
+            action="CREATE",
+            actor=user,
+            summary=f"Policy dibuat untuk scope {scope_type}.",
+            details={
+                "scope_type": scope_type,
+                "client_id": client_id,
+                "site_id": site_id,
+                "effective_from": effective_from,
+                "effective_to": effective_to or None,
+                "work_duration_minutes": work_duration,
+                "grace_minutes": grace_minutes,
+                "late_threshold_minutes": late_minutes,
+                "allow_gps": allow_gps,
+                "require_selfie": require_selfie,
+                "allow_qr": allow_qr,
+                "auto_checkout": auto_checkout,
+                "cutoff_time": cutoff_time or None,
+            },
+        )
+        flash("Policy berhasil ditambahkan.")
+        return redirect(url_for("admin.policies", _anchor="add-policy"))
+
+    @bp.route("/policies/<int:policy_id>/update", methods=["POST"])
+    def policies_update(policy_id: int):
+        user = _current_user()
+        _require_hr_superadmin(user)
+        before = _get_policy_by_id(policy_id)
+        scope_type = (request.form.get("scope_type") or "CLIENT").strip().upper()
+        client_id_raw = (request.form.get("client_id") or "").strip()
+        site_id_raw = (request.form.get("site_id") or "").strip()
+        effective_from = (request.form.get("effective_from") or "").strip()
+        effective_to = (request.form.get("effective_to") or "").strip()
+        work_duration_raw = (request.form.get("work_duration_minutes") or "").strip()
+        grace_raw = (request.form.get("grace_minutes") or "").strip()
+        late_raw = (request.form.get("late_threshold_minutes") or "").strip()
+        allow_gps = 1 if request.form.get("allow_gps") == "1" else 0
+        require_selfie = 1 if request.form.get("require_selfie") == "1" else 0
+        allow_qr = 1 if request.form.get("allow_qr") == "1" else 0
+        auto_checkout = 1 if request.form.get("auto_checkout") == "1" else 0
+        cutoff_time = (request.form.get("cutoff_time") or "").strip()
+
+        if scope_type not in {"CLIENT", "SITE"}:
+            scope_type = "CLIENT"
+        if not effective_from:
+            flash("Tanggal mulai wajib diisi.")
+            return redirect(url_for("admin.policies"))
+
+        client_id = int(client_id_raw) if client_id_raw.isdigit() else None
+        site_id = int(site_id_raw) if site_id_raw.isdigit() else None
+        if scope_type == "CLIENT" and not client_id:
+            flash("Client wajib dipilih untuk scope CLIENT.")
+            return redirect(url_for("admin.policies"))
+        if scope_type == "SITE" and not site_id:
+            flash("Site wajib dipilih untuk scope SITE.")
+            return redirect(url_for("admin.policies"))
+
+        work_duration = int(work_duration_raw) if work_duration_raw.isdigit() else None
+        grace_minutes = int(grace_raw) if grace_raw.isdigit() else None
+        late_minutes = int(late_raw) if late_raw.isdigit() else None
+
+        _update_policy(
+            policy_id=policy_id,
+            scope_type=scope_type,
+            client_id=client_id,
+            site_id=site_id,
+            effective_from=effective_from,
+            effective_to=effective_to or None,
+            work_duration_minutes=work_duration,
+            grace_minutes=grace_minutes,
+            late_threshold_minutes=late_minutes,
+            allow_gps=allow_gps,
+            require_selfie=require_selfie,
+            allow_qr=allow_qr,
+            auto_checkout=auto_checkout,
+            cutoff_time=cutoff_time or None,
+        )
+        _log_audit_event(
+            entity_type="policy",
+            entity_id=policy_id,
+            action="UPDATE",
+            actor=user,
+            summary=f"Policy diperbarui untuk scope {scope_type}.",
+            details={
+                "before": before,
+                "after": {
+                    "scope_type": scope_type,
+                    "client_id": client_id,
+                    "site_id": site_id,
+                    "effective_from": effective_from,
+                    "effective_to": effective_to or None,
+                    "work_duration_minutes": work_duration,
+                    "grace_minutes": grace_minutes,
+                    "late_threshold_minutes": late_minutes,
+                    "allow_gps": allow_gps,
+                    "require_selfie": require_selfie,
+                    "allow_qr": allow_qr,
+                    "auto_checkout": auto_checkout,
+                    "cutoff_time": cutoff_time or None,
+                },
+            },
+        )
+        flash("Policy berhasil diperbarui.")
+        return redirect(url_for("admin.policies"))
+
+    @bp.route("/policies/<int:policy_id>/end", methods=["POST"])
+    def policies_end(policy_id: int):
+        user = _current_user()
+        _require_hr_superadmin(user)
+        before = _get_policy_by_id(policy_id)
+        _end_policy(policy_id)
+        _log_audit_event(
+            entity_type="policy",
+            entity_id=policy_id,
+            action="END",
+            actor=user,
+            summary=f"Policy ditutup untuk id {policy_id}.",
+            details={
+                "before": before,
+                "effective_to": _today_key(),
+            },
+        )
+        flash("Policy ditutup.")
+        return redirect(url_for("admin.policies"))
 
     @bp.route("/employees", methods=["GET"])
     def employees():
         user = _current_user()
         return render_template("dashboard/admin_employees.html", user=user, employees=_employees())
+
+    @bp.route("/employees/create", methods=["POST"])
+    def employees_create():
+        user = _current_user()
+        _require_hr_superadmin(user)
+        payload, error = _parse_employee_form(request.form or {})
+        if error:
+            flash(error)
+            return redirect(url_for("admin.employees", _anchor="add-employee"))
+        _create_employee(
+            nik=payload["nik"],
+            name=payload["name"],
+            email=payload["email"],
+            no_hp=payload["no_hp"],
+            address=payload["address"],
+            gender=payload["gender"],
+            status_nikah=payload["status_nikah"],
+            notes=payload["notes"],
+            is_active=0,
+        )
+        flash("Pegawai berhasil ditambahkan.")
+        return redirect(url_for("admin.employees", _anchor="add-employee"))
+
+    @bp.route("/employees/<int:employee_id>/update", methods=["POST"])
+    def employees_update(employee_id: int):
+        user = _current_user()
+        _require_hr_superadmin(user)
+        payload, error = _parse_employee_form(request.form or {})
+        is_active = 1 if request.form.get("is_active") == "1" else 0
+        if error:
+            flash(error)
+            return redirect(url_for("admin.employees"))
+        _update_employee(
+            employee_id=employee_id,
+            nik=payload["nik"],
+            name=payload["name"],
+            email=payload["email"],
+            no_hp=payload["no_hp"],
+            address=payload["address"],
+            gender=payload["gender"],
+            status_nikah=payload["status_nikah"],
+            notes=payload["notes"],
+            is_active=is_active,
+        )
+        flash("Data pegawai berhasil diperbarui.")
+        return redirect(url_for("admin.employees"))
+
+    @bp.route("/employees/<int:employee_id>/delete", methods=["POST"])
+    def employees_delete(employee_id: int):
+        user = _current_user()
+        _require_hr_superadmin(user)
+        _delete_employee(employee_id)
+        flash("Pegawai berhasil dihapus.")
+        return redirect(url_for("admin.employees"))
 
     @bp.route("/attendance", methods=["GET"])
     def attendance():
@@ -1482,13 +4871,14 @@ def admin_bp() -> Blueprint:
     @bp.route("/settings", methods=["GET"])
     def settings():
         user = _current_user()
-        _require_hr_superadmin(user)
+        _require_admin(user)
         tab = (request.args.get("tab") or "users").lower()
-        if tab not in {"users", "roles"}:
+        if tab not in {"users", "roles", "hr"}:
             tab = "users"
-        users = _list_users()
+        users = [u for u in _list_users() if u.get("role") != "employee"]
         sites = _list_sites()
         supervisor_sites = _get_supervisor_sites_map()
+        registration_codes = _list_employee_registration_codes()
         return render_template(
             "dashboard/admin_settings.html",
             user=user,
@@ -1496,9 +4886,27 @@ def admin_bp() -> Blueprint:
             users=users,
             sites=sites,
             supervisor_sites=supervisor_sites,
-            role_options=ROLE_OPTIONS,
+            registration_codes=registration_codes,
+            role_options=ADMIN_ROLE_OPTIONS,
             default_password=DEFAULT_RESET_PASSWORD,
         )
+
+    @bp.route("/settings/registration-codes/create", methods=["POST"])
+    def settings_registration_codes_create():
+        user = _current_user()
+        _require_admin(user)
+        count_raw = (request.form.get("registrant_count") or "").strip()
+        try:
+            registrant_count = int(count_raw)
+        except ValueError:
+            flash("Jumlah pendaftar wajib angka.")
+            return redirect(url_for("admin.settings", tab="hr"))
+        if registrant_count < 1 or registrant_count > 20:
+            flash("Jumlah pendaftar harus 1 - 20.")
+            return redirect(url_for("admin.settings", tab="hr"))
+        code = _create_employee_registration_code(registrant_count)
+        flash(f"Kode berhasil dibuat: {code}")
+        return redirect(url_for("admin.settings", tab="hr"))
 
     @bp.route("/settings/users/create", methods=["POST"])
     def settings_users_create():
@@ -1506,13 +4914,13 @@ def admin_bp() -> Blueprint:
         _require_hr_superadmin(user)
         name = (request.form.get("name") or "").strip()
         email = (request.form.get("email") or "").strip().lower()
-        role = (request.form.get("role") or "employee").strip()
+        role = (request.form.get("role") or "admin_asistent").strip()
         password = (request.form.get("password") or DEFAULT_RESET_PASSWORD).strip()
 
         if not _looks_like_email(email):
             flash("Email tidak valid.")
             return redirect(url_for("admin.settings", tab="users"))
-        if role not in ROLE_OPTIONS:
+        if role not in ADMIN_ROLE_OPTIONS:
             flash("Role tidak valid.")
             return redirect(url_for("admin.settings", tab="users"))
         if role == "hr_superadmin" and _active_hr_superadmin_count():
@@ -1531,10 +4939,10 @@ def admin_bp() -> Blueprint:
         user = _current_user()
         _require_hr_superadmin(user)
         name = (request.form.get("name") or "").strip()
-        role = (request.form.get("role") or "employee").strip()
+        role = (request.form.get("role") or "admin_asistent").strip()
         is_active = 1 if request.form.get("is_active") == "1" else 0
 
-        if role not in ROLE_OPTIONS:
+        if role not in ADMIN_ROLE_OPTIONS:
             flash("Role tidak valid.")
             return redirect(url_for("admin.settings", tab="users"))
         if user_id == user.id and role != "hr_superadmin":
@@ -1622,46 +5030,100 @@ def admin_bp() -> Blueprint:
     def settings_sites_create():
         user = _current_user()
         _require_hr_superadmin(user)
-        client_name = (request.form.get("client_name") or "").strip()
+        client_id_raw = (request.form.get("client_id") or "").strip()
         name = (request.form.get("name") or "").strip()
-        code = (request.form.get("code") or "").strip()
-        location = (request.form.get("location") or "").strip()
+        timezone = (request.form.get("timezone") or "").strip()
+        work_mode = (request.form.get("work_mode") or "").strip().upper()
+        latitude_raw = (request.form.get("latitude") or "").strip()
+        longitude_raw = (request.form.get("longitude") or "").strip()
+        radius_raw = (request.form.get("radius_meters") or "").strip()
         notes = (request.form.get("notes") or "").strip()
-        if not client_name:
+        if not client_id_raw:
             flash("Client wajib dipilih.")
-            return redirect(url_for("admin.clients", _anchor="sites"))
+            return redirect(url_for("admin.sites"))
+        try:
+            client_id = int(client_id_raw)
+        except ValueError:
+            flash("Client tidak valid.")
+            return redirect(url_for("admin.sites"))
+        if not _get_client_by_id(client_id):
+            flash("Client tidak ditemukan.")
+            return redirect(url_for("admin.sites"))
         if not name:
             flash("Nama site wajib diisi.")
-            return redirect(url_for("admin.clients", _anchor="sites"))
-        _create_site(client_name=client_name, name=name, code=code, location=location, notes=notes)
+            return redirect(url_for("admin.sites"))
+        try:
+            latitude = float(latitude_raw)
+            longitude = float(longitude_raw)
+            radius_meters = int(radius_raw)
+        except ValueError:
+            flash("Latitude, longitude, dan radius wajib angka.")
+            return redirect(url_for("admin.sites"))
+        if radius_meters <= 0:
+            flash("Radius harus lebih besar dari 0.")
+            return redirect(url_for("admin.sites"))
+        _create_site(
+            client_id=client_id,
+            name=name,
+            latitude=latitude,
+            longitude=longitude,
+            radius_meters=radius_meters,
+            notes=notes,
+            timezone=timezone or None,
+            work_mode=work_mode or None,
+        )
         flash("Site berhasil ditambahkan.")
-        return redirect(url_for("admin.clients", _anchor="sites"))
+        return redirect(url_for("admin.sites"))
 
     @bp.route("/settings/sites/<int:site_id>/update", methods=["POST"])
     def settings_sites_update(site_id: int):
         user = _current_user()
         _require_hr_superadmin(user)
-        client_name = (request.form.get("client_name") or "").strip()
+        client_id_raw = (request.form.get("client_id") or "").strip()
         name = (request.form.get("name") or "").strip()
-        code = (request.form.get("code") or "").strip()
-        location = (request.form.get("location") or "").strip()
+        timezone = (request.form.get("timezone") or "").strip()
+        work_mode = (request.form.get("work_mode") or "").strip().upper()
+        latitude_raw = (request.form.get("latitude") or "").strip()
+        longitude_raw = (request.form.get("longitude") or "").strip()
+        radius_raw = (request.form.get("radius_meters") or "").strip()
         notes = (request.form.get("notes") or "").strip()
-        if not client_name:
+        if not client_id_raw:
             flash("Client wajib dipilih.")
-            return redirect(url_for("admin.clients", _anchor="sites"))
+            return redirect(url_for("admin.sites"))
+        try:
+            client_id = int(client_id_raw)
+        except ValueError:
+            flash("Client tidak valid.")
+            return redirect(url_for("admin.sites"))
+        if not _get_client_by_id(client_id):
+            flash("Client tidak ditemukan.")
+            return redirect(url_for("admin.sites"))
         if not name:
             flash("Nama site wajib diisi.")
-            return redirect(url_for("admin.clients", _anchor="sites"))
+            return redirect(url_for("admin.sites"))
+        try:
+            latitude = float(latitude_raw)
+            longitude = float(longitude_raw)
+            radius_meters = int(radius_raw)
+        except ValueError:
+            flash("Latitude, longitude, dan radius wajib angka.")
+            return redirect(url_for("admin.sites"))
+        if radius_meters <= 0:
+            flash("Radius harus lebih besar dari 0.")
+            return redirect(url_for("admin.sites"))
         _update_site(
             site_id=site_id,
-            client_name=client_name,
+            client_id=client_id,
             name=name,
-            code=code,
-            location=location,
+            latitude=latitude,
+            longitude=longitude,
+            radius_meters=radius_meters,
             notes=notes,
+            timezone=timezone or None,
+            work_mode=work_mode or None,
         )
         flash("Site berhasil diperbarui.")
-        return redirect(url_for("admin.clients", _anchor="sites"))
+        return redirect(url_for("admin.sites"))
 
     @bp.route("/settings/sites/<int:site_id>/toggle", methods=["POST"])
     def settings_sites_toggle(site_id: int):
@@ -1670,11 +5132,11 @@ def admin_bp() -> Blueprint:
         current = next((s for s in _list_sites() if int(s["id"]) == site_id), None)
         if not current:
             flash("Site tidak ditemukan.")
-            return redirect(url_for("admin.clients", _anchor="sites"))
+            return redirect(url_for("admin.sites"))
         is_active = 0 if int(current["is_active"] or 0) == 1 else 1
         _toggle_site(site_id, is_active)
         flash("Status site diperbarui.")
-        return redirect(url_for("admin.clients", _anchor="sites"))
+        return redirect(url_for("admin.sites"))
 
     @bp.route("/settings/shifts/create", methods=["POST"])
     def settings_shifts_create():
@@ -1686,10 +5148,10 @@ def admin_bp() -> Blueprint:
         grace_minutes = int(request.form.get("grace_minutes") or 0)
         if not name:
             flash("Nama shift wajib diisi.")
-            return redirect(url_for("admin.clients", _anchor="shifts"))
+            return redirect(url_for("admin.shifts"))
         _create_shift(name=name, start_time=start_time, end_time=end_time, grace_minutes=grace_minutes)
         flash("Shift berhasil ditambahkan.")
-        return redirect(url_for("admin.clients", _anchor="shifts"))
+        return redirect(url_for("admin.shifts"))
 
     @bp.route("/settings/shifts/<int:shift_id>/update", methods=["POST"])
     def settings_shifts_update(shift_id: int):
@@ -1701,10 +5163,10 @@ def admin_bp() -> Blueprint:
         grace_minutes = int(request.form.get("grace_minutes") or 0)
         if not name:
             flash("Nama shift wajib diisi.")
-            return redirect(url_for("admin.clients", _anchor="shifts"))
+            return redirect(url_for("admin.shifts"))
         _update_shift(shift_id=shift_id, name=name, start_time=start_time, end_time=end_time, grace_minutes=grace_minutes)
         flash("Shift berhasil diperbarui.")
-        return redirect(url_for("admin.clients", _anchor="shifts"))
+        return redirect(url_for("admin.shifts"))
 
     @bp.route("/settings/shifts/<int:shift_id>/toggle", methods=["POST"])
     def settings_shifts_toggle(shift_id: int):
@@ -1713,39 +5175,32 @@ def admin_bp() -> Blueprint:
         current = next((s for s in _list_shifts() if int(s["id"]) == shift_id), None)
         if not current:
             flash("Shift tidak ditemukan.")
-            return redirect(url_for("admin.clients", _anchor="shifts"))
+            return redirect(url_for("admin.shifts"))
         is_active = 0 if int(current["is_active"] or 0) == 1 else 1
         _toggle_shift(shift_id, is_active)
         flash("Status shift diperbarui.")
-        return redirect(url_for("admin.clients", _anchor="shifts"))
+        return redirect(url_for("admin.shifts"))
 
     return bp
 
 
 def _clients():
-    return [
-        {"id": 1, "name": "PT Sinar Berkah", "sector": "Manufaktur", "since": "2021"},
-        {"id": 2, "name": "RS Sehat Sentosa", "sector": "Kesehatan", "since": "2022"},
-        {"id": 3, "name": "Mall Harmoni", "sector": "Retail", "since": "2019"},
-    ]
+    return _list_clients()
 
 
 def _employees():
-    return [
-        {"id": 101, "name": "Budi", "role": "Satpam", "client": "Mall Harmoni", "email": "budi@gmi.com"},
-        {"id": 102, "name": "Sari", "role": "Cleaning Service", "client": "RS Sehat Sentosa", "email": "sari@gmi.com"},
-        {"id": 103, "name": "Andi", "role": "Operator", "client": "PT Sinar Berkah", "email": "andi@gmi.com"},
-        {"id": 104, "name": "Rina", "role": "Supir", "client": "PT Sinar Berkah", "email": "rina@gmi.com"},
-    ]
+    return _list_employees()
 
 
-def _attendance():
-    return [
-        {"id": 1, "name": "Budi", "client": "Mall Harmoni", "status": "hadir", "time": "07:58", "method": "gps+selfie"},
-        {"id": 2, "name": "Sari", "client": "RS Sehat Sentosa", "status": "hadir", "time": "08:05", "method": "gps+selfie"},
-        {"id": 3, "name": "Andi", "client": "PT Sinar Berkah", "status": "telat", "time": "08:20", "method": "gps"},
-        {"id": 4, "name": "Rina", "client": "PT Sinar Berkah", "status": "izin", "time": "-", "method": "-"},
-    ]
+def _client_name_by_id(client_id: int | None) -> str | None:
+    if not client_id:
+        return None
+    conn = _db_connect()
+    try:
+        row = conn.execute("SELECT name FROM clients WHERE id = ?", (client_id,)).fetchone()
+        return row["name"] if row else None
+    finally:
+        conn.close()
 
 
 def _attendance_live(limit: int = 200) -> list[dict]:
@@ -1768,7 +5223,7 @@ def _attendance_live(limit: int = 200) -> list[dict]:
                 time = row["time"] or (created_at.split(" ")[1] if " " in created_at else "-")
                 name = row["employee_name"] or row["employee_email"] or "-"
                 raw_source = row["source"] or "sqlite"
-                source_label = "demo" if raw_source == "demo" else "sqlite"
+                source_label = "-" if raw_source == "manual_request" else "sqlite"
                 method = row["method"] or ("manual" if raw_source == "manual_request" else "-")
                 records.append(
                     {
@@ -1784,27 +5239,6 @@ def _attendance_live(limit: int = 200) -> list[dict]:
                 )
     finally:
         conn.close()
-
-    for r in DEMO_ATTENDANCE:
-        if r.get("method") == "manual":
-            continue
-        created_at = r.get("created_at", "")
-        date = created_at.split(" ")[0] if " " in created_at else "-"
-        time = created_at.split(" ")[1] if " " in created_at else "-"
-        action = r.get("action", "-")
-        action_label = "IN" if action == "checkin" else "OUT" if action == "checkout" else action
-        records.append(
-            {
-                "employee": r.get("employee_email", "-"),
-                "email": r.get("employee_email", "-"),
-                "date": date,
-                "time": time,
-                "action": action_label,
-                "method": r.get("method", "-"),
-                "source": "demo",
-                "created_at": created_at,
-            }
-        )
 
     records = sorted(records, key=lambda row: row.get("created_at", ""), reverse=True)
     return records[:limit]

@@ -13,20 +13,62 @@
           <h2>Presensi pegawai</h2>
           <p>
             Presensi butuh <b>GPS</b> dan <b>foto selfie</b>.
-            Admin tersedia khusus desktop untuk HR, Supervisor, Koordinator, dan Client Admin
           </p>
         </div>
 
         <ul class="features">
-          <li><div class="dot"></div><div><b>GPS + Selfie</b><span>Bukti presensi lebih kuat daripada "pak, sinyalnya hilang".</span></div></li>
-          <li><div class="dot"></div><div><b>Multi-role Admin</b><span>HR, Supervisor, Koordinator, dan Client Admin.</span></div></li>
-          <li><div class="dot"></div><div><b>Daftar pakai Kode Undangan</b><span>Registrasi rapi, bukan pasar malam akun.</span></div></li>
+          <li><div class="dot"></div><div><b>GPS + Selfie</b><span> - Bukti presensi lebih kuat.</span></div></li>
+          <li><div class="dot"></div><div><b>Multi-role Admin</b><span> - HR, Supervisor dan Koordinator.</span></div></li>
+          <li><div class="dot"></div><div><b>Daftar pakai Kode Undangan</b><span> - Registrasi rapi.</span></div></li>
         </ul>
       </div>
 
       <div class="brandActions">
-        <div class="mini">.</div>
-      </div>
+        <div class="hero-controls is-collapsed" aria-label="Pengaturan hero">
+          <div class="hero-controls-header">
+            <div class="hero-controls-title">Hero Toggle</div>
+            <button class="hero-controls-toggle" type="button" aria-label="Toggle hero controls" data-hero-toggle>
+              <span></span>
+              <span></span>
+              <span></span>
+            </button>
+          </div>
+          <div class="hero-controls-body">
+          <label class="check">
+            <input type="checkbox" id="toggleLogo" checked />
+            <span>Logo perusahaan</span>
+          </label>
+          <label class="check">
+            <input type="checkbox" id="toggleLabel" checked />
+            <span>Label perusahaan</span>
+          </label>
+          <div class="hero-input" id="labelInputWrap">
+            <input type="text" id="companyLabelInput" placeholder="Label perusahaan" value="GroupMitraIndonesia" />
+          </div>
+          <label class="check">
+            <input type="checkbox" id="toggleClock" checked />
+            <span>Tanggal + jam</span>
+          </label>
+          <label class="check">
+            <input type="checkbox" id="toggleNotice" />
+            <span>Notifikasi</span>
+          </label>
+          <div class="hero-input">
+            <label for="primaryKeySelect">Primari key :</label>
+            <select id="primaryKeySelect">
+              <option value="both" selected>Email + No telp</option>
+              <option value="email">Email</option>
+              <option value="phone">No telp</option>
+            </select>
+          </div>
+          </div>
+        </div>
+        <div class="hero-decor" aria-hidden="true">
+          <div class="bounce-track">
+            <span class="ball"></span>
+          </div>
+        </div>
+              </div>
     </section>
 
     <!-- RIGHT CARD -->
@@ -35,17 +77,17 @@
       <!-- Topbar: Clock + Theme -->
       <div class="topbar">
         <div class="logo">
-          <div class="mark" aria-hidden="true">
+          <div class="mark" id="heroLogo" aria-hidden="true">
             <img src="/static/img/gmi_logo.gif" alt="" />
           </div>
           <div>
-            <h1>GroupMitraIndonesia</h1>
-            <div class="clock" aria-label="Jam digital">
+            <h1 id="heroLabel">GroupMitraIndonesia</h1>
+            <div class="clock" id="heroClock" aria-label="Tanggal dan jam">
+              <div class="date" id="dateText">-</div>
               <div class="hhmm">
                 <span id="hh">00</span><span class="blink">:</span><span id="mm">00</span>
               </div>
-            <div class="date" id="dateText">-</div>
-        </div>            
+            </div>
           </div>
         </div>
         
@@ -70,23 +112,37 @@
                 <h3>Login</h3>
                 
               </div>
-              <div class="badge">Masuk</div>
             </div>
-
-            <form id="form-emp" class="tall-fields" novalidate autocomplete="off">
+            <form id="form-emp" class="tall-fields" novalidate autocomplete="off" data-login-scope>
               <input type="hidden" name="theme" id="themeEmp" value="{{ theme|default('dark') }}" />
               <div class="autofill-trap" aria-hidden="true">
                 <input type="text" name="fakeuser" autocomplete="username" tabindex="-1" />
                 <input type="password" name="fakepass" autocomplete="current-password" tabindex="-1" />
               </div>
 
-              <div>
+              <div class="login-switch" role="group" aria-label="Metode login">
+                <button type="button" class="login-switch-btn active" data-login-method-btn="email" aria-pressed="true">Email</button>
+                <button type="button" class="login-switch-btn" data-login-method-btn="phone" aria-pressed="false">No Telp</button>
+              </div>
+              <input type="hidden" id="loginMethod" data-login-method-input value="email" />
+
+              <div class="login-field" data-login-field="email">
                 <label for="empEmail">Email</label>
                 <div class="field">
                   <svg class="icon" viewBox="0 0 24 24" fill="none">
                     <path d="M20 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2Zm0 4-8 5L4 8V6l8 5 8-5Z" fill="currentColor" opacity=".85"/>
                   </svg>
                   <input id="empEmail" name="email" type="email" placeholder="nama@contoh.com" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" required />
+                </div>
+              </div>
+
+              <div class="login-field is-hidden" data-login-field="phone">
+                <label for="empPhone">No Telp</label>
+                <div class="field">
+                  <svg class="icon" viewBox="0 0 24 24" fill="none">
+                    <path d="M6.6 3h2.7l1.5 4.4-1.6 1.2a14 14 0 0 0 6.2 6.2l1.2-1.6 4.4 1.5v2.7c0 .7-.6 1.3-1.3 1.3C10.4 19.7 4.3 13.6 4.3 6.6c0-.7.6-1.3 1.3-1.3Z" fill="currentColor" opacity=".85"/>
+                  </svg>
+                  <input id="empPhone" name="phone" type="tel" placeholder="08xx-xxxx-xxxx" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" required />
                 </div>
               </div>
 
@@ -101,12 +157,11 @@
                 </div>
               </div>
 
-              <div class="links">
-                <a class="link" href="#" data-go="1">Daftar</a>
-                <a class="link" href="#" data-go="2">Lupa password?</a>
-              </div>
-
               <button class="btn" type="submit">Masuk</button>
+              <div class="btn-grid">
+                <button class="btn secondary" type="button" data-go="1">Daftar</button>
+                <button class="btn secondary" type="button" data-go="2">Lupa password?</button>
+              </div>
 
               <div class="toast" id="toast-emp" aria-live="polite" data-marquee="Assalamulaikum, selamat beraktifitas, jadikan hari ini hari yang lebik baik dari hari sebelumnya"></div>             
             </form>
@@ -118,31 +173,57 @@
               <div>
                 <h3>Daftar Akun</h3>                
               </div>
-              <div class="badge">Sign Up</div>
+              <div class="selfie-badge">
+                <span class="selfie-label">Wajib Selfie</span>
+                <div class="selfie-pick">
+                  <label class="selfie-btn" for="suSelfie" aria-label="Ambil foto selfie">
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <path d="M3 7a2 2 0 0 1 2-2h3l1-2h6l1 2h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Zm9 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z" fill="currentColor" opacity=".85"/>
+                    </svg>
+                  </label>
+                  <span class="selfie-sep" aria-hidden="true"></span>
+                  <span class="selfie-indicator" aria-hidden="true"></span>
+                </div>
+                <input id="suSelfie" class="selfie-input" name="selfie" type="file" accept="image/*" capture="user" />
+              </div>
             </div>
-
-            <form id="form-signup" novalidate autocomplete="off">
+            <form id="form-signup" novalidate autocomplete="off" data-login-scope>
               <input type="hidden" name="theme" id="themeSignup" value="{{ theme|default('dark') }}" />
               <div class="autofill-trap" aria-hidden="true">
                 <input type="text" name="fakeuser" autocomplete="username" tabindex="-1" />
                 <input type="password" name="fakepass" autocomplete="new-password" tabindex="-1" />
               </div>
 
+              <div class="login-switch" role="group" aria-label="Metode daftar">
+                <button type="button" class="login-switch-btn active" data-login-method-btn="email" aria-pressed="true">Email</button>
+                <button type="button" class="login-switch-btn" data-login-method-btn="phone" aria-pressed="false">No Telp</button>
+              </div>
+              <input type="hidden" id="signupMethod" data-login-method-input value="email" />
+
               <div>
                 <div class="field">
                   <svg class="icon" viewBox="0 0 24 24" fill="none">
                     <path d="M20 12v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-8h16Zm0-2H4V6a2 2 0 0 1 2-2h3a3 3 0 0 1 6 0h3a2 2 0 0 1 2 2v4Zm-9-6a1 1 0 0 0-2 0h2Z" fill="currentColor" opacity=".85"/>
                   </svg>
-                  <input id="inviteCode" name="invite_code" placeholder="Kode undangan, mis. gmi26-01003" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" required />
+                  <input id="inviteCode" name="invite_code" placeholder="Kode undangan, mis. 2501GMI-00103" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" required />
                 </div>
               </div>
 
-              <div>
+              <div data-login-field="email">
                 <div class="field">
                   <svg class="icon" viewBox="0 0 24 24" fill="none">
                     <path d="M20 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2Zm0 4-8 5L4 8V6l8 5 8-5Z" fill="currentColor" opacity=".85"/>
                   </svg>
                   <input id="suEmail" name="email" type="email" placeholder="Email, mis. pegawai@contoh.com" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" required />
+                </div>
+              </div>
+
+              <div class="is-hidden" data-login-field="phone">
+                <div class="field">
+                  <svg class="icon" viewBox="0 0 24 24" fill="none">
+                    <path d="M6.6 3h2.7l1.5 4.4-1.6 1.2a14 14 0 0 0 6.2 6.2l1.2-1.6 4.4 1.5v2.7c0 .7-.6 1.3-1.3 1.3C10.4 19.7 4.3 13.6 4.3 6.6c0-.7.6-1.3 1.3-1.3Z" fill="currentColor" opacity=".85"/>
+                  </svg>
+                  <input id="suPhone" name="phone" type="tel" placeholder="No telp, mis. 08xx-xxxx-xxxx" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" required />
                 </div>
               </div>
 
@@ -164,18 +245,10 @@
                 </div>
               </div>
 
-              <div>
-                <label for="suSelfie">Foto Selfie (untuk profil)</label>
-                <div class="field">
-                  <svg class="icon" viewBox="0 0 24 24" fill="none">
-                    <path d="M3 7a2 2 0 0 1 2-2h3l1-2h6l1 2h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Zm9 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z" fill="currentColor" opacity=".85"/>
-                  </svg>
-                  <input id="suSelfie" name="selfie" type="file" accept="image/*" capture="user" />
-                </div>
+              <div class="btn-grid">
+                <button class="btn" type="submit">Buat Akun</button>
+                <button class="btn secondary" type="button" data-go="0">Kembali</button>
               </div>
-
-              <button class="btn" type="submit">Buat Akun</button>
-              <button class="btn secondary" type="button" data-go="0">Kembali</button>
 
               <div class="toast" id="toast-signup" aria-live="polite" data-marquee="Assalamulaikum, selamat beraktifitas, jadikan hari ini hari yang lebik baik dari hari sebelumnya"></div>
             </form>
@@ -186,19 +259,22 @@
             <div class="title">
               <div>
                 <h3>Lupa Password</h3>
-                <p>Reset via WhatsApp OTP atau Email.</p>
               </div>
-              <div class="badge">Recovery</div>
             </div>
-
-            <form id="form-forgot" class="tall-fields" novalidate autocomplete="off">
+            <form id="form-forgot" class="tall-fields" novalidate autocomplete="off" data-login-scope>
               <input type="hidden" name="theme" id="themeForgot" value="{{ theme|default('dark') }}" />
               <div class="autofill-trap" aria-hidden="true">
                 <input type="text" name="fakeuser" autocomplete="username" tabindex="-1" />
                 <input type="password" name="fakepass" autocomplete="current-password" tabindex="-1" />
               </div>
 
-              <div>
+              <div class="login-switch" role="group" aria-label="Metode reset">
+                <button type="button" class="login-switch-btn active" data-login-method-btn="email" aria-pressed="true">Email</button>
+                <button type="button" class="login-switch-btn" data-login-method-btn="phone" aria-pressed="false">No Telp</button>
+              </div>
+              <input type="hidden" id="forgotMethod" data-login-method-input value="email" />
+
+              <div data-login-field="email">
                 <label for="fpEmail">Email Akun</label>
                 <div class="field">
                   <svg class="icon" viewBox="0 0 24 24" fill="none">
@@ -208,21 +284,22 @@
                 </div>
               </div>
 
-              <div>
-                <label for="fpMethod">Metode Reset</label>
+              <div class="is-hidden" data-login-field="phone">
+                <label for="fpPhone">No Telp</label>
                 <div class="field">
                   <svg class="icon" viewBox="0 0 24 24" fill="none">
-                    <path d="M6 4h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm2 6h8v2H8v-2Zm0 4h5v2H8v-2Z" fill="currentColor" opacity=".85"/>
+                    <path d="M6.6 3h2.7l1.5 4.4-1.6 1.2a14 14 0 0 0 6.2 6.2l1.2-1.6 4.4 1.5v2.7c0 .7-.6 1.3-1.3 1.3C10.4 19.7 4.3 13.6 4.3 6.6c0-.7.6-1.3 1.3-1.3Z" fill="currentColor" opacity=".85"/>
                   </svg>
-                  <select id="fpMethod" name="method" autocomplete="off" required>
-                    <option value="whatsapp_otp">WhatsApp OTP</option>
-                    <option value="email_link">Email</option>
-                  </select>
+                  <input id="fpPhone" name="phone" type="tel" placeholder="08xx-xxxx-xxxx" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" required />
                 </div>
               </div>
 
-              <button class="btn" type="submit">Kirim Instruksi Reset</button>
-              <button class="btn secondary" type="button" data-go="0">Kembali</button>
+              <input type="hidden" id="fpMethod" name="method" data-reset-method-input value="email_link" />
+
+              <div class="btn-grid">
+                <button class="btn" type="submit">Reset</button>
+                <button class="btn secondary" type="button" data-go="0">Kembali</button>
+              </div>
 
               <div class="toast" id="toast-forgot" aria-live="polite" data-marquee="Assalamulaikum, selamat beraktifitas, jadikan hari ini hari yang lebik baik dari hari sebelumnya"></div>
             </form>
@@ -234,3 +311,5 @@
   </main>
 </div>
 {% endblock %}
+
+

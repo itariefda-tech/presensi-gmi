@@ -77,6 +77,187 @@ tick();
 setInterval(tick, 1000);
 
 /* =========================
+   HERO TOGGLES
+========================= */
+const toggleLogo = document.getElementById("toggleLogo");
+const toggleLabel = document.getElementById("toggleLabel");
+const toggleClock = document.getElementById("toggleClock");
+const toggleNotice = document.getElementById("toggleNotice");
+const primaryKeySelect = document.getElementById("primaryKeySelect");
+
+const heroLogo = document.getElementById("heroLogo");
+const heroLabel = document.getElementById("heroLabel");
+const heroClock = document.getElementById("heroClock");
+const marqueeToasts = Array.from(document.querySelectorAll(".toast[data-marquee]"));
+const labelInputWrap = document.getElementById("labelInputWrap");
+const labelInput = document.getElementById("companyLabelInput");
+
+const defaultLabel = heroLabel ? heroLabel.textContent.trim() : "";
+
+function setHidden(el, hidden){
+  if(!el) return;
+  el.classList.toggle("is-hidden", hidden);
+}
+
+function syncHero(){
+  if(toggleLogo) setHidden(heroLogo, !toggleLogo.checked);
+  if(toggleLabel){
+    setHidden(heroLabel, !toggleLabel.checked);
+    setHidden(labelInputWrap, !toggleLabel.checked);
+  }
+  if(toggleClock) setHidden(heroClock, !toggleClock.checked);
+  if(toggleNotice){
+    marqueeToasts.forEach(t => t.classList.toggle("marquee-hidden", !toggleNotice.checked));
+  }
+}
+
+[toggleLogo, toggleLabel, toggleClock, toggleNotice].forEach(cb => {
+  if(cb) cb.addEventListener("change", syncHero);
+});
+
+if(labelInput && heroLabel){
+  labelInput.addEventListener("input", () => {
+    const next = labelInput.value.trim();
+    heroLabel.textContent = next || defaultLabel || "Label";
+  });
+}
+
+syncHero();
+
+const heroControls = document.querySelector(".hero-controls");
+const heroToggleBtn = document.querySelector("[data-hero-toggle]");
+if (heroControls && heroToggleBtn){
+  heroToggleBtn.setAttribute("aria-expanded", "false");
+  heroToggleBtn.addEventListener("click", () => {
+    const isCollapsed = heroControls.classList.contains("is-collapsed");
+    if (isCollapsed){
+      const pin = window.prompt("Masukkan PIN developer:");
+      if (pin !== "131280"){
+        return;
+      }
+    }
+    heroControls.classList.toggle("is-collapsed");
+    heroToggleBtn.setAttribute(
+      "aria-expanded",
+      heroControls.classList.contains("is-collapsed") ? "false" : "true"
+    );
+  });
+}
+
+/* =========================
+   LOGIN METHOD TOGGLE
+========================= */
+function initLoginToggles(){
+  const scopes = Array.from(document.querySelectorAll("[data-login-scope]"));
+  scopes.forEach(scope => {
+    const methodInput = scope.querySelector("[data-login-method-input]");
+    const resetMethodInput = scope.querySelector("[data-reset-method-input]");
+    const buttons = Array.from(scope.querySelectorAll("[data-login-method-btn]"));
+    const fields = Array.from(scope.querySelectorAll("[data-login-field]"));
+    if (!methodInput || !buttons.length || !fields.length) return;
+
+    function syncResetMethod(nextMethod){
+      if (!resetMethodInput) return;
+      resetMethodInput.value = nextMethod === "phone" ? "whatsapp_otp" : "email_link";
+    }
+
+    function setMethod(method){
+      const nextMethod = method === "phone" ? "phone" : "email";
+      methodInput.value = nextMethod;
+      syncResetMethod(nextMethod);
+      buttons.forEach(btn => {
+        const active = btn.dataset.loginMethodBtn === nextMethod;
+        btn.classList.toggle("active", active);
+        btn.setAttribute("aria-pressed", active ? "true" : "false");
+      });
+      fields.forEach(field => {
+        const show = field.dataset.loginField === nextMethod;
+        field.classList.toggle("is-hidden", !show);
+        field.querySelectorAll("input").forEach(input => {
+          input.disabled = !show;
+          input.required = show;
+        });
+      });
+    }
+
+    buttons.forEach(btn => {
+      btn.addEventListener("click", () => setMethod(btn.dataset.loginMethodBtn));
+    });
+
+    setMethod(methodInput.value || "email");
+  });
+}
+
+function getLoginMethod(formId){
+  const form = document.getElementById(formId);
+  return form?.querySelector("[data-login-method-input]")?.value || "email";
+}
+
+initLoginToggles();
+
+function applyPrimaryKeyMode(mode){
+  const scopes = Array.from(document.querySelectorAll("[data-login-scope]"));
+  const nextMode = mode === "email" || mode === "phone" ? mode : "both";
+  scopes.forEach(scope => {
+    const methodInput = scope.querySelector("[data-login-method-input]");
+    const resetMethodInput = scope.querySelector("[data-reset-method-input]");
+    const switchWrap = scope.querySelector(".login-switch");
+    const buttons = Array.from(scope.querySelectorAll("[data-login-method-btn]"));
+    const fields = Array.from(scope.querySelectorAll("[data-login-field]"));
+    if (!methodInput || !fields.length) return;
+
+    if (nextMode === "both"){
+      if (switchWrap) switchWrap.classList.remove("is-hidden");
+      const current = methodInput.value || "email";
+      methodInput.value = current === "phone" ? "phone" : "email";
+    } else {
+      if (switchWrap) switchWrap.classList.add("is-hidden");
+      methodInput.value = nextMode;
+    }
+
+    if (resetMethodInput){
+      resetMethodInput.value = methodInput.value === "phone" ? "whatsapp_otp" : "email_link";
+    }
+
+    const showMethod = methodInput.value;
+    buttons.forEach(btn => {
+      const active = btn.dataset.loginMethodBtn === showMethod;
+      btn.classList.toggle("active", active);
+      btn.setAttribute("aria-pressed", active ? "true" : "false");
+    });
+    fields.forEach(field => {
+      const show = field.dataset.loginField === showMethod;
+      field.classList.toggle("is-hidden", !show);
+      field.querySelectorAll("input").forEach(input => {
+        input.disabled = !show;
+        input.required = show;
+      });
+    });
+  });
+}
+
+if (primaryKeySelect){
+  primaryKeySelect.addEventListener("change", () => {
+    applyPrimaryKeyMode(primaryKeySelect.value);
+  });
+  applyPrimaryKeyMode(primaryKeySelect.value);
+}
+
+/* =========================
+   SELFIE INDICATOR
+========================= */
+const selfieInput = document.getElementById("suSelfie");
+if (selfieInput){
+  const selfieWrap = selfieInput.closest(".selfie-pick");
+  const updateSelfieIndicator = () => {
+    const hasFile = Boolean(selfieInput.files && selfieInput.files.length);
+    if (selfieWrap) selfieWrap.classList.toggle("has-file", hasFile);
+  };
+  selfieInput.addEventListener("change", updateSelfieIndicator);
+  updateSelfieIndicator();
+}
+
+/* =========================
    PASSWORD TOGGLES
 ========================= */
 function togglePass(inputId, btnId){
@@ -169,13 +350,17 @@ bindForm(
   "form-emp",
   "toast-emp",
   () => {
-    const email = getValue("empEmail");
+    const method = getLoginMethod("form-emp");
+    const identifier = method === "phone" ? getValue("empPhone") : getValue("empEmail");
     const pw = getValue("empPass");
-    if(!email || !pw){
-      toast(document.getElementById("toast-emp"), "Isi email dan password dulu.", "err");
+    if(!identifier || !pw){
+      const msg = method === "phone"
+        ? "Isi nomor telp dan password dulu."
+        : "Isi email dan password dulu.";
+      toast(document.getElementById("toast-emp"), msg, "err");
       return null;
     }
-    return { email, password: pw, theme: currentTheme() };
+    return { identifier, login_type: method, password: pw, theme: currentTheme() };
   },
   "/api/auth/login"
 );
@@ -187,8 +372,9 @@ function bindSignupMultipart(){
 
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
+    const method = getLoginMethod("form-signup");
     const inv = getValue("inviteCode");
-    const email = getValue("suEmail");
+    const identifier = method === "phone" ? getValue("suPhone") : getValue("suEmail");
     const p1 = getValue("suPass");
     const p2 = getValue("suPass2");
     const selfieInput = document.getElementById("suSelfie");
@@ -198,8 +384,11 @@ function bindSignupMultipart(){
       toast(toastEl, "Kode undangan wajib.", "err");
       return;
     }
-    if(!email){
-      toast(toastEl, "Email wajib diisi.", "err");
+    if(!identifier){
+      const msg = method === "phone"
+        ? "No telp wajib diisi."
+        : "Email wajib diisi.";
+      toast(toastEl, msg, "err");
       return;
     }
     if(p1.length < 6){
@@ -217,7 +406,13 @@ function bindSignupMultipart(){
 
     const formData = new FormData();
     formData.append("invite_code", inv);
-    formData.append("email", email);
+    formData.append("login_type", method);
+    formData.append("identifier", identifier);
+    if (method === "email") {
+      formData.append("email", identifier);
+    } else {
+      formData.append("phone", identifier);
+    }
     formData.append("password", p1);
     formData.append("password2", p2);
     formData.append("theme", currentTheme());
@@ -248,13 +443,17 @@ bindForm(
   "form-forgot",
   "toast-forgot",
   () => {
-    const email = getValue("fpEmail");
-    const method = document.getElementById("fpMethod")?.value || "whatsapp_otp";
-    if(!email){
-      toast(document.getElementById("toast-forgot"), "Email wajib diisi.", "err");
+    const loginType = getLoginMethod("form-forgot");
+    const identifier = loginType === "phone" ? getValue("fpPhone") : getValue("fpEmail");
+    const resetMethod = document.getElementById("fpMethod")?.value || "whatsapp_otp";
+    if(!identifier){
+      const msg = loginType === "phone"
+        ? "No telp wajib diisi."
+        : "Email wajib diisi.";
+      toast(document.getElementById("toast-forgot"), msg, "err");
       return null;
     }
-    return { email, method, theme: currentTheme() };
+    return { identifier, login_type: loginType, method: resetMethod, theme: currentTheme() };
   },
   "/api/auth/forgot"
 );
