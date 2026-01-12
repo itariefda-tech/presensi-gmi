@@ -6,16 +6,23 @@
 {% block body %}
 <div class="card">
   <div class="tabs">
+    {% if user.role == "hr_superadmin" %}
     <a class="tab-btn {% if tab == 'users' %}active{% endif %}" href="{{ url_for('admin.settings', tab='users') }}">Users</a>
     <a class="tab-btn {% if tab == 'roles' %}active{% endif %}" href="{{ url_for('admin.settings', tab='roles') }}">Roles</a>
-    <a class="tab-btn {% if tab == 'hr' %}active{% endif %}" href="{{ url_for('admin.settings', tab='hr') }}">HR Setting</a>
+    {% endif %}
+    {% if permissions.get('manage_settings_codes') %}
+    <a class="tab-btn {% if tab == 'hr' %}active{% endif %}" href="{{ url_for('admin.settings', tab='hr') }}">Kode Reg</a>
+    {% endif %}
+    {% if permissions.get('manage_settings_password') %}
+    <a class="tab-btn {% if tab == 'password' %}active{% endif %}" href="{{ url_for('admin.settings', tab='password') }}">Password</a>
+    {% endif %}
   </div>
 
   {% for msg in get_flashed_messages() %}
   <div class="alert info">{{ msg }}</div>
   {% endfor %}
 
-  {% if tab == 'users' %}
+  {% if tab == 'users' and user.role == "hr_superadmin" %}
   <div class="card" style="margin-bottom:12px;">
     <div style="font-weight:700; margin-bottom:8px;">Add User</div>
     <form class="inline" method="post" action="{{ url_for('admin.settings_users_create') }}">
@@ -154,11 +161,11 @@
   {% endfor %}
   {% endif %}
 
-  {% if tab == 'roles' %}
+  {% if tab == 'roles' and user.role == "hr_superadmin" %}
   <div class="card">
     <div class="muted">Atur akses fitur per role.</div>
     {% for role in role_options %}
-    <form class="card" method="post" action="{{ url_for('admin.settings_roles_update') }}" style="margin-top:12px;">
+    <form class="card" method="post" action="{{ url_for('admin.settings_roles_update') }}" style="margin-top:12px;{% if role == 'hr_superadmin' %}display:none;{% endif %}">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
       <input type="hidden" name="role" value="{{ role }}" />
       <div style="font-weight:700; margin-bottom:8px;">{{ role|replace('_',' ')|title }}</div>
@@ -178,7 +185,7 @@
   </div>
   {% endif %}
 
-  {% if tab == 'hr' %}
+  {% if tab == 'hr' and permissions.get('manage_settings_codes') %}
   <div class="card">
     <div style="font-weight:700; margin-bottom:8px;">Pemberian Kode Pendaftaran Pegawai</div>
     <div class="muted" style="margin-bottom:10px;">Format: YYMMGMI-XXXNN (XXX urutan kode bulan ini, NN jumlah pendaftar).</div>
@@ -215,14 +222,16 @@
       </table>
     </div>
   </div>
-  <div class="card" style="margin-top:12px;">
-    <div style="font-weight:700; margin-bottom:8px;">Security</div>
-    <div class="stack">
-      <div class="muted">Ganti password admin secara berkala untuk keamanan akun.</div>
-      <button class="btn primary" type="button" id="btnOpenChangePassword">Ganti Password</button>
-    </div>
-  </div>
   {% endif %}
+{% if tab == 'password' and permissions.get('manage_settings_password') %}
+<div class="card" style="margin-top:12px;">
+  <div style="font-weight:700; margin-bottom:8px;">Security</div>
+  <div class="stack">
+    <div class="muted">Ganti password admin secara berkala untuk keamanan akun.</div>
+    <button class="btn primary" type="button" id="btnOpenChangePassword">Ganti Password</button>
+  </div>
+</div>
+{% endif %}
 </div>
 {% if tab == 'users' %}
 <script>

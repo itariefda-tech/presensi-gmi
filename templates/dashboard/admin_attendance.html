@@ -4,16 +4,6 @@
 {% set subtitle = "Monitoring presensi GPS + selfie" %}
 
 {% block body %}
-<div class="card" style="margin-bottom:12px;">
-  <div class="inline" style="justify-content:space-between;">
-    <div>
-      <div style="font-weight:700;">Manual Attendance</div>
-      <div class="muted" style="font-size:12px;">Review pengajuan manual attendance pending.</div>
-    </div>
-    <a class="btn secondary" href="{{ url_for('admin.manual_attendance_admin', status='pending') }}">Lihat Manual Pending</a>
-  </div>
-</div>
-
 <div class="card">
   <div class="muted" style="margin-bottom:10px;">Sumber: sqlite = data persisted, manual = hasil approval manual.</div>
   <div class="table-wrap">

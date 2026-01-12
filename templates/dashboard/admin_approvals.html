@@ -1,16 +1,12 @@
 {% extends "dashboard/base.html" %}
 {% set active = "approvals" %}
 {% set heading = "Approvals" %}
-{% set subtitle = "Approve leave dan manual attendance" %}
+{% set subtitle = "Approve leave requests" %}
 
 {% block body %}
 <div class="card">
-  <div class="alert info">
-    Leave dan manual attendance tersimpan di SQLite.
-  </div>
   <div class="tabs">
     <button class="tab-btn active" data-tab="leave">Leave Requests</button>
-    <button class="tab-btn" data-tab="manual">Manual Attendance Pending</button>
   </div>
 
   <div class="tab-panel active" id="tab-leave">
@@ -35,62 +31,6 @@
     </div>
   </div>
 
-  <div class="tab-panel" id="tab-manual">
-    <div class="table-wrap">
-      <table class="table" aria-label="Manual attendance pending">
-        <thead>
-          <tr>
-            <th>Diajukan</th>
-            <th>Pegawai</th>
-            <th>Tanggal</th>
-            <th>Waktu</th>
-            <th>Tipe</th>
-            <th>Alasan</th>
-            <th>Role Pengaju</th>
-            <th>Status</th>
-            {% if can_approve_manual %}<th>Aksi</th>{% endif %}
-          </tr>
-        </thead>
-        <tbody>
-          {% if not manual_items %}
-          <tr><td colspan="{% if can_approve_manual %}9{% else %}8{% endif %}" class="muted">Tidak ada pending.</td></tr>
-          {% endif %}
-          {% for r in manual_items %}
-          <tr>
-            <td>{{ r.created_at }}</td>
-            <td>
-              <div>{{ r.employee_name or r.employee_email }}</div>
-              <div class="muted">{{ r.employee_email }}</div>
-            </td>
-            <td>{{ r.date }}</td>
-            <td>{{ r.time }}</td>
-            <td><span class="badge">{{ r.action }}</span></td>
-            <td>{{ r.reason }}</td>
-            <td><span class="badge">{{ r.created_by_role|title }}</span></td>
-            <td><span class="badge pending">PENDING</span></td>
-            {% if can_approve_manual %}
-            <td>
-              <div class="inline approval-actions">
-                <form method="post" action="{{ url_for('admin.manual_attendance_approve', request_id=r.id) }}">
-  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-                  <input class="input" type="text" name="note" placeholder="Catatan (opsional)" />
-                  <button class="btn primary" type="submit">Approve</button>
-                </form>
-                <form method="post" action="{{ url_for('admin.manual_attendance_reject', request_id=r.id) }}">
-  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-                  <input class="input" type="text" name="note" placeholder="Alasan tolak" required />
-                  <button class="btn secondary" type="submit">Reject</button>
-                </form>
-              </div>
-            </td>
-            {% endif %}
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
   </div>
-</div>
-
-<script src="{{ url_for('static', filename='js/dashboard_admin.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/dashboard_admin.js') }}"></script>
 {% endblock %}

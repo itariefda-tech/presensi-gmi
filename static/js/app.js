@@ -107,7 +107,8 @@ const heroLogo = document.getElementById("heroLogo");
 const heroLabel = document.getElementById("heroLabel");
 const heroClock = document.getElementById("heroClock");
 const marqueeToasts = Array.from(document.querySelectorAll(".toast[data-marquee]"));
-const inviteCodeWrap = document.getElementById("inviteCodeWrap");
+  const inviteCodeWrap = document.getElementById("inviteCodeWrap");
+  const inviteCodeInput = document.getElementById("inviteCode");
 const labelInputWrap = document.getElementById("labelInputWrap");
 const labelInput = document.getElementById("companyLabelInput");
 const brandCircles = document.querySelector(".brand-circles");
@@ -136,9 +137,17 @@ function syncHero(){
   if(toggleNotice){
     marqueeToasts.forEach(t => t.classList.toggle("marquee-hidden", !toggleNotice.checked));
   }
-  if(toggleInvite){
-    setHidden(inviteCodeWrap, !toggleInvite.checked);
-  }
+    if(toggleInvite){
+      const inviteEnabled = toggleInvite.checked;
+      setHidden(inviteCodeWrap, !inviteEnabled);
+      if (inviteCodeInput) {
+        if (!inviteEnabled) {
+          inviteCodeInput.value = "SUDAHBYADMIN";
+        } else if (inviteCodeInput.value === "SUDAHBYADMIN") {
+          inviteCodeInput.value = "";
+        }
+      }
+    }
   if (toggleHeroCircles){
     setHidden(brandCircles, !toggleHeroCircles.checked);
   }

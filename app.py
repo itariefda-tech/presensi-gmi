@@ -69,10 +69,6 @@ def create_app() -> Flask:
             session["csrf_token"] = token
         return token
 
-    @app.context_processor
-    def _inject_csrf_token():
-        return {"csrf_token": _ensure_csrf_token()}
-
     @app.before_request
     def _csrf_guard():
         if request.method not in {"POST", "PUT", "DELETE"}:
@@ -87,6 +83,33 @@ def create_app() -> Flask:
         if not token or form_token != token:
             return abort(403)
         return None
+
+    @app.context_processor
+    def _inject_csrf_token():
+        return {"csrf_token": _ensure_csrf_token()}
+
+    @app.context_processor
+    def _inject_permissions():
+        user = _current_user()
+        if not user:
+            return {"permissions": {}}
+        return {"permissions": _get_role_permissions(user.role)}
+
+    @app.context_processor
+    def _inject_notifications():
+        user = _current_user()
+        if not user:
+            return {"pending_leave_count": 0, "pending_manual_count": 0}
+        pending_leave_count = 0
+        pending_manual_count = 0
+        if _can_approve_leave(user):
+            pending_leave_count = len(_list_leave_pending())
+        if user.role == "hr_superadmin":
+            pending_manual_count = len(_fetch_manual_requests("pending"))
+        return {
+            "pending_leave_count": pending_leave_count,
+            "pending_manual_count": pending_manual_count,
+        }
 
     @app.template_filter("ddmmyyyy")
     def _format_ddmmyyyy(value: str | None) -> str:
@@ -913,9 +936,9 @@ ROLE_PERMISSION_KEYS = [
     "manage_assignments",
     "manage_policies",
     "view_attendance",
-    "manage_manual_attendance",
     "approve_requests",
-    "manage_settings",
+    "manage_settings_codes",
+    "manage_settings_password",
 ]
 ROLE_PERMISSION_LABELS = {
     "view_overview": "Overview",
@@ -930,9 +953,9 @@ ROLE_PERMISSION_LABELS = {
     "manage_assignments": "Assignments",
     "manage_policies": "Policies",
     "view_attendance": "Attendance",
-    "manage_manual_attendance": "Manual Attendance",
     "approve_requests": "Approvals",
-    "manage_settings": "Settings",
+    "manage_settings_codes": "Setting: Kode Reg",
+    "manage_settings_password": "Setting: Password",
 }
 DEMO_GPS_CENTER = (-6.5706, 107.7603)
 DEMO_GPS_RADIUS_METERS = 100
@@ -1025,7 +1048,8 @@ def _default_role_permissions(role: str) -> dict[str, bool]:
     defaults = {key: True for key in ROLE_PERMISSION_KEYS}
     if role == "hr_superadmin":
         return defaults
-    defaults["manage_settings"] = False
+    defaults["manage_settings_codes"] = False
+    defaults["manage_settings_password"] = False
     return defaults
 
 
@@ -1116,19 +1140,8 @@ def _permission_for_admin_endpoint(endpoint: str | None) -> str | None:
         "admin.policies_update": "manage_policies",
         "admin.policies_end": "manage_policies",
         "admin.attendance": "view_attendance",
-        "admin.manual_attendance_admin": "manage_manual_attendance",
-        "admin.manual_attendance_approve": "manage_manual_attendance",
-        "admin.manual_attendance_reject": "manage_manual_attendance",
         "admin.approvals": "approve_requests",
-        "admin.settings": "manage_settings",
-        "admin.settings_users_create": "manage_settings",
-        "admin.settings_users_update": "manage_settings",
-        "admin.settings_users_toggle": "manage_settings",
-        "admin.settings_users_reset_password": "manage_settings",
-        "admin.settings_users_delete": "manage_settings",
-        "admin.settings_users_assign_sites": "manage_settings",
-        "admin.settings_registration_codes_create": "manage_settings",
-        "admin.settings_roles_update": "manage_settings",
+        "admin.settings_registration_codes_create": "manage_settings_codes",
     }
     return mapping.get(endpoint)
 
@@ -1942,17 +1955,29 @@ def _create_user_with_conn(
     return int(cur.lastrowid)
 
 
-def _update_user_basic(user_id: int, name: str, role: str, is_active: int) -> None:
+def _update_user_basic(
+    user_id: int, name: str, role: str, is_active: int, email: str | None = None
+) -> None:
     conn = _db_connect()
     try:
-        conn.execute(
-            """
-            UPDATE users
-            SET name = ?, role = ?, is_active = ?, updated_at = ?
-            WHERE id = ?
-            """,
-            (name, role, is_active, _now_ts(), user_id),
-        )
+        if email is None:
+            conn.execute(
+                """
+                UPDATE users
+                SET name = ?, role = ?, is_active = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (name, role, is_active, _now_ts(), user_id),
+            )
+        else:
+            conn.execute(
+                """
+                UPDATE users
+                SET name = ?, email = ?, role = ?, is_active = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (name, email.lower(), role, is_active, _now_ts(), user_id),
+            )
     finally:
         conn.commit()
         conn.close()
@@ -3977,11 +4002,7 @@ def _has_manager_operational() -> bool:
 
 
 def _can_submit_manual(user: User) -> bool:
-    if user.role == "supervisor":
-        return True
-    if user.role == "manager_operational":
-        return True
-    return False
+    return user.role in ADMIN_ROLE_OPTIONS and user.role != "hr_superadmin"
 
 
 def _can_approve_leave(user: User) -> bool:
@@ -4622,7 +4643,7 @@ def admin_bp() -> Blueprint:
         }
         client_summaries = _client_operational_summary(today)
         alerts = _build_admin_alerts(today)
-        audit_logs = _fetch_audit_logs(50)
+        audit_logs = _fetch_audit_logs(5)
         return render_template(
             "dashboard/admin_overview.html",
             user=user,
@@ -5389,6 +5410,7 @@ def admin_bp() -> Blueprint:
     @bp.route("/manual_attendance", methods=["GET"])
     def manual_attendance_admin():
         user = _current_user()
+        _require_hr_superadmin(user)
         status = (request.args.get("status") or "pending").lower()
         if status not in {"pending", "approved", "rejected"}:
             status = "pending"
@@ -5404,7 +5426,7 @@ def admin_bp() -> Blueprint:
     @bp.route("/manual_attendance/<int:request_id>/approve", methods=["POST"])
     def manual_attendance_approve(request_id: int):
         user = _current_user()
-        _require_manual_approver(user)
+        _require_hr_superadmin(user)
         note = (request.form.get("note") or "").strip()
         request_row = _manual_request_by_id(request_id)
         if not request_row:
@@ -5424,7 +5446,7 @@ def admin_bp() -> Blueprint:
     @bp.route("/manual_attendance/<int:request_id>/reject", methods=["POST"])
     def manual_attendance_reject(request_id: int):
         user = _current_user()
-        _require_manual_approver(user)
+        _require_hr_superadmin(user)
         note = (request.form.get("note") or "").strip()
         request_row = _manual_request_by_id(request_id)
         if not request_row:
@@ -5456,10 +5478,28 @@ def admin_bp() -> Blueprint:
     @bp.route("/settings", methods=["GET"])
     def settings():
         user = _current_user()
-        _require_hr_superadmin(user)
+        if not user:
+            return abort(403)
+        if user.role != "hr_superadmin":
+            permissions = _get_role_permissions(user.role)
+            if not (
+                permissions.get("manage_settings_codes")
+                or permissions.get("manage_settings_password")
+            ):
+                return abort(403)
         tab = (request.args.get("tab") or "users").lower()
-        if tab not in {"users", "roles", "hr"}:
+        if tab not in {"users", "roles", "hr", "password"}:
             tab = "users"
+        if user.role != "hr_superadmin":
+            allowed_tabs = []
+            if permissions.get("manage_settings_codes"):
+                allowed_tabs.append("hr")
+            if permissions.get("manage_settings_password"):
+                allowed_tabs.append("password")
+            if not allowed_tabs:
+                return abort(403)
+            if tab not in allowed_tabs:
+                tab = allowed_tabs[0]
         users = [u for u in _list_users() if u.get("role") != "employee"]
         sites = _list_sites()
         supervisor_sites = _get_supervisor_sites_map()
@@ -5529,10 +5569,18 @@ def admin_bp() -> Blueprint:
     def settings_users_update(user_id: int):
         user = _current_user()
         _require_hr_superadmin(user)
+        target = _get_user_by_id(user_id)
+        if not target:
+            flash("User tidak ditemukan.")
+            return redirect(url_for("admin.settings", tab="users"))
         name = (request.form.get("name") or "").strip()
+        email = (request.form.get("email") or "").strip().lower()
         role = (request.form.get("role") or "admin_asistent").strip()
         is_active = 1 if request.form.get("is_active") == "1" else 0
 
+        if not _looks_like_email(email):
+            flash("Email tidak valid.")
+            return redirect(url_for("admin.settings", tab="users"))
         if role not in ADMIN_ROLE_OPTIONS:
             flash("Role tidak valid.")
             return redirect(url_for("admin.settings", tab="users"))
@@ -5545,8 +5593,12 @@ def admin_bp() -> Blueprint:
         if user_id == user.id and is_active == 0:
             flash("HR superadmin tidak boleh dinonaktifkan.")
             return redirect(url_for("admin.settings", tab="users"))
+        existing = _get_user_by_email(email)
+        if existing and int(existing["id"]) != user_id:
+            flash("Email sudah terdaftar.")
+            return redirect(url_for("admin.settings", tab="users"))
 
-        _update_user_basic(user_id=user_id, name=name, role=role, is_active=is_active)
+        _update_user_basic(user_id=user_id, name=name, role=role, is_active=is_active, email=email)
         flash("User berhasil diperbarui.")
         return redirect(url_for("admin.settings", tab="users"))
 

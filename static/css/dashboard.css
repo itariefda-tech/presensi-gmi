@@ -128,19 +128,21 @@ a:hover{ text-decoration:underline; }
 }
 .brand .dot{
   width:12px;height:12px;border-radius:50%;
-  background: linear-gradient(135deg, var(--accent), var(--accent2));
-  box-shadow: 0 10px 24px rgba(56,189,248,.15);
+  background: linear-gradient(135deg, rgba(125,211,252,.5), rgba(110,231,183,.5));
+  box-shadow: 0 10px 24px rgba(125,211,252,.35);
 }
 .nav{
   display:grid;
-  gap:8px;
+  gap:12px;
+  width: max-content;
 }
 .nav a{
   position: relative;
   display:flex;
   align-items:center;
   gap:10px;
-  padding:6px 12px;
+  width: 100%;
+  padding:10px;
   border-radius:12px;
   color: var(--text);
   border:1px solid transparent;
@@ -188,6 +190,9 @@ a:hover{ text-decoration:underline; }
 .nav-icon svg{
   width: 20px;
   height: 20px;
+}
+.nav-label{
+  white-space: nowrap;
 }
 .collapse-btn{
   width: 45px;
@@ -551,6 +556,16 @@ a:hover{ text-decoration:underline; }
   border-radius: 50%;
   background: #fbbf24;
   box-shadow: 0 0 0 2px rgba(11,16,32,.9);
+  opacity: 0;
+}
+.notify-badge.is-active{
+  opacity: 1;
+  animation: notifyBlink 1.2s ease-in-out infinite;
+  box-shadow: 0 0 0 2px rgba(11,16,32,.9), 0 0 8px rgba(251,191,36,.9);
+}
+@keyframes notifyBlink{
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.25); opacity: 0.4; }
 }
 .logout-btn{
   width: 40px;
