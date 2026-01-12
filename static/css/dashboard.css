@@ -79,6 +79,21 @@ html[data-theme="light"] .nav a.active::before{
   border-radius: 12px;
   pointer-events: none;
 }
+html[data-theme="light"] .dropdown-menu{
+  background: linear-gradient(180deg, rgba(244,247,251,.98), rgba(226,231,239,.98));
+  border-color: rgba(148,163,184,.55);
+  box-shadow: 0 18px 40px rgba(15,23,42,.15);
+}
+html[data-theme="light"] .dropdown-menu .btn{
+  background: rgba(255,255,255,.7);
+  border-color: rgba(148,163,184,.45);
+}
+html[data-theme="light"] .dropdown-menu .btn:hover,
+html[data-theme="light"] .dropdown-menu .btn:focus-visible{
+  background: rgba(148,163,184,.18);
+  border-color: rgba(100,116,139,.5);
+  box-shadow: 0 8px 18px rgba(15,23,42,.12);
+}
 
 *{ box-sizing:border-box; }
 html, body{ overflow-x:hidden; }
@@ -787,6 +802,10 @@ a:hover{ text-decoration:underline; }
 .dropdown-menu .btn{
   width: 100%;
   justify-content: flex-start;
+}
+.dropdown-menu .btn.dropdown-center{
+  justify-content: center;
+  text-align: center;
 }
 .icon-btn{
   display: inline-flex;

@@ -96,13 +96,13 @@
               <span></span>
               <span></span>
             </summary>
-            <div class="dropdown-menu">
-              <a class="btn secondary" href="{{ url_for('admin.client_profile', client_id=c.id) }}">Profile</a>
-              <button class="btn secondary" type="button" data-modal-open="client-edit-{{ c.id }}">Edit</button>
-            </div>
+              <div class="dropdown-menu">
+                <a class="btn secondary dropdown-center" href="{{ url_for('admin.client_profile', client_id=c.id) }}">Profile</a>
+                <button class="btn secondary" type="button" data-modal-open="client-edit-{{ c.id }}">Edit</button>
+              </div>
           </details>
           {% elif can_view %}
-          <a class="btn secondary" href="{{ url_for('admin.client_profile', client_id=c.id) }}">Profile</a>
+            <a class="btn secondary dropdown-center" href="{{ url_for('admin.client_profile', client_id=c.id) }}">Profile</a>
           {% else %}
           <span class="muted">-</span>
           {% endif %}
