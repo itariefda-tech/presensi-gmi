@@ -32,6 +32,16 @@ function setToast(el, msg, ok = true){
   el.style.color = ok ? "#22c55e" : "#fb7185";
 }
 
+function toIsoDate(value){
+  const raw = (value || "").trim();
+  if (!raw) return "";
+  const match = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (match) {
+    return `${match[3]}-${match[2]}-${match[1]}`;
+  }
+  return raw;
+}
+
 async function safeFetch(url, options = {}){
   let res = null;
   try {
@@ -178,17 +188,27 @@ btnCheckin?.addEventListener("click", async () => {
 
 btnLeave?.addEventListener("click", async () => {
   if (!leaveType || !leaveFrom || !leaveTo || !leaveReason || !leaveToast) return;
-  const payload = {
-    type: leaveType.value,
-    date_from: leaveFrom.value,
-    date_to: leaveTo.value,
-    reason: leaveReason.value.trim(),
-    attachment: leaveAttachment.files?.[0]?.name || "",
-  };
+  const file = leaveAttachment?.files?.[0];
+  if (file) {
+    const maxSize = 2 * 1024 * 1024;
+    if (file.size > maxSize) {
+      setToast(leaveToast, "Lampiran maksimal 2MB.", false);
+      return;
+    }
+  }
+  const fromIso = toIsoDate(leaveFrom.value);
+  const toIso = toIsoDate(leaveTo.value);
+  const formData = new FormData();
+  formData.append("type", leaveType.value);
+  formData.append("date_from", fromIso);
+  formData.append("date_to", toIso);
+  formData.append("reason", leaveReason.value.trim());
+  if (file) {
+    formData.append("attachment", file);
+  }
   const result = await safeFetch("/api/leave/request", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+    body: formData,
   });
   setToast(leaveToast, result.message || "Selesai.", result.ok);
   if (result.ok) {

@@ -1,4 +1,4 @@
-# HRIS GMI - Attendance & Leave System (Demo)
+# HRIS GMI - Attendance & Leave System
 
 Dokumen ini menjadi ringkasan singkat untuk template dashboard.
 
@@ -10,15 +10,10 @@ Dokumen ini menjadi ringkasan singkat untuk template dashboard.
 - admin_asistent
 - employee
 
-## Demo Login (Seed)
+## Login (Seed)
 
-Password default: `gmi@12345`
-
-- hr_superadmin: `hr@gmi.com` / `hr123456`
-- manager_operational: `manager@gmi.com`
-- supervisor: `supervisor@gmi.com`
-- admin_asistent: `asisten@gmi.com`
-- employee: `budi@gmi.com`
+Seed user hanya aktif jika `SEED_USERS_JSON` di-set via environment.
+Password reset default hanya aktif jika `ADMIN_RESET_PASSWORD` di-set.
 
 ## Catatan
 

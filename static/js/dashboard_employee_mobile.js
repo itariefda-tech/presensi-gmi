@@ -1,4 +1,4 @@
-const themeButtons = Array.from(document.querySelectorAll(".theme-btn"));
+const themeToggle = document.querySelector("[data-theme-toggle]");
 const clockHH = document.getElementById("clockHH");
 const clockMM = document.getElementById("clockMM");
 const clockColon = document.getElementById("clockColon");
@@ -16,8 +16,12 @@ const btnLocation = document.getElementById("btnLocation");
 const locStatus = document.getElementById("locStatus");
 const latEl = document.getElementById("lat");
 const lonEl = document.getElementById("lon");
+const presenceStatusTitle = document.getElementById("presenceStatusTitle");
+const presenceStatusSub = document.getElementById("presenceStatusSub");
+const presenceLocationIcon = document.getElementById("presenceLocationIcon");
 const selfieFile = document.getElementById("selfieFile");
 const selfiePreview = document.getElementById("selfiePreview");
+const btnSelfieReset = document.getElementById("btnSelfieReset");
 const selfieBlock = document.querySelector(".tool-selfie");
 const btnScan = document.getElementById("btnScan");
 const qrStatus = document.getElementById("qrStatus");
@@ -64,18 +68,105 @@ let qrLastValue = "";
 let swipeIndex = 0;
 let toastTimer = null;
 let leaveToastTimer = null;
-let leaveAttachmentData = "";
 let lastAccuracy = "";
 let lastDeviceTime = "";
+let locationActive = false;
+let hasLocation = false;
+let isOnline = navigator.onLine;
+let hasCheckedIn = lastActionBadge?.textContent === "IN";
+const attendanceModeStorage = {
+  gps_selfie: "gmi_att_mode_gps_selfie",
+  gps: "gmi_att_mode_gps",
+  qr: "gmi_att_mode_qr",
+};
 
 function pad2(n){
   return String(n).padStart(2, "0");
 }
 
+function toIsoDate(value){
+  const raw = (value || "").trim();
+  if (!raw) return "";
+  const match = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (match) {
+    return `${match[3]}-${match[2]}-${match[1]}`;
+  }
+  return raw;
+}
+
+function parseIsoDate(value){
+  const iso = toIsoDate(value);
+  if (!iso) return null;
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return null;
+  return { iso, date };
+}
+
+function updatePresenceReadiness(){
+  if (!presenceStatusTitle) return;
+  const ready = isOnline && locationActive && hasLocation;
+  presenceStatusTitle.textContent = ready ? "Siap Absen" : "Belum siap Absen";
+  if (btnLocation) {
+    btnLocation.classList.toggle("is-warning", !hasLocation);
+  }
+  if (btnCheckin) {
+    btnCheckin.disabled = !ready;
+    btnCheckin.setAttribute("aria-disabled", ready ? "false" : "true");
+  }
+  if (btnCheckout) {
+    const canCheckout = ready && hasCheckedIn;
+    btnCheckout.disabled = !canCheckout;
+    btnCheckout.setAttribute("aria-disabled", canCheckout ? "false" : "true");
+  }
+}
+
+function setLocationStatus(active, message){
+  if (!presenceStatusSub) return;
+  locationActive = active;
+  const nextMessage = message || (active
+    ? "Lokasi aktif"
+    : "Lokasi tidak aktif, mohon aktifkan lokasi di pengaturan.");
+  presenceStatusSub.textContent = nextMessage;
+  if (presenceLocationIcon) {
+    presenceLocationIcon.classList.toggle("status-icon-ok", active);
+    presenceLocationIcon.classList.toggle("status-icon-warning", !active);
+  }
+  updatePresenceReadiness();
+}
+
+async function checkLocationStatus(){
+  if (!presenceStatusSub) return;
+  if (!navigator.geolocation) {
+    setLocationStatus(false);
+    return;
+  }
+  if (navigator.permissions && navigator.permissions.query) {
+    try {
+      const perm = await navigator.permissions.query({ name: "geolocation" });
+      const applyState = () => {
+        if (perm.state === "granted") {
+          setLocationStatus(true);
+        } else {
+          setLocationStatus(false);
+        }
+      };
+      applyState();
+      perm.onchange = applyState;
+      return;
+    } catch (err) {
+      setLocationStatus(false);
+      return;
+    }
+  }
+  setLocationStatus(false);
+}
+
 function setTheme(theme){
   document.documentElement.setAttribute("data-theme", theme);
   localStorage.setItem("gmi_theme", theme);
-  themeButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.theme === theme));
+  if (themeToggle) {
+    themeToggle.classList.toggle("active", theme === "light");
+  }
 }
 
 function initTheme(){
@@ -83,9 +174,16 @@ function initTheme(){
   setTheme(saved);
 }
 
-themeButtons.forEach((btn) => {
-  btn.addEventListener("click", () => setTheme(btn.dataset.theme));
-});
+function currentTheme(){
+  return document.documentElement.getAttribute("data-theme") || "dark";
+}
+
+if (themeToggle) {
+  themeToggle.addEventListener("click", () => {
+    const next = currentTheme() === "dark" ? "light" : "dark";
+    setTheme(next);
+  });
+}
 
 function tickClock(){
   const d = new Date();
@@ -276,12 +374,23 @@ function initNavDrag(){
 function getLocation(){
   return new Promise((resolve, reject) => {
     if (!navigator.geolocation) {
+      setLocationStatus(false);
       reject(new Error("Browser tidak mendukung GPS."));
       return;
     }
     navigator.geolocation.getCurrentPosition(
-      (pos) => resolve(pos),
-      (err) => reject(err),
+      (pos) => {
+        setLocationStatus(true);
+        hasLocation = true;
+        updatePresenceReadiness();
+        resolve(pos);
+      },
+      (err) => {
+        setLocationStatus(false);
+        hasLocation = Boolean(latEl?.value && lonEl?.value);
+        updatePresenceReadiness();
+        reject(err);
+      },
       { enableHighAccuracy: true, timeout: 12000 }
     );
   });
@@ -307,23 +416,49 @@ btnLocation?.addEventListener("click", async () => {
     lonEl.value = pos.coords.longitude.toFixed(6);
     lastAccuracy = String(pos.coords.accuracy || "");
     lastDeviceTime = new Date().toISOString();
+    hasLocation = true;
     locStatus.textContent = `${latEl.value}, ${lonEl.value}`;
     locStatus.classList.add("loc-centered");
+    btnLocation?.classList.add("is-ready");
+    updatePresenceReadiness();
   } catch (err) {
     locStatus.textContent = "Gagal ambil lokasi.";
     locStatus.classList.remove("loc-centered");
+    btnLocation?.classList.remove("is-ready");
+    hasLocation = Boolean(latEl?.value && lonEl?.value);
+    updatePresenceReadiness();
   }
 });
 
 selfieFile?.addEventListener("change", (e) => {
   const file = e.target.files?.[0];
-  if (!file) return;
+  if (!file) {
+    const selfiePick = document.querySelector(".selfie-pick");
+    selfiePick?.classList.remove("is-ready");
+    selfiePreview.style.display = "none";
+    btnSelfieReset?.classList.add("is-hidden");
+    return;
+  }
+  const selfiePick = document.querySelector(".selfie-pick");
+  selfiePick?.classList.add("is-ready");
   const reader = new FileReader();
   reader.onload = () => {
     selfiePreview.src = reader.result || "";
     selfiePreview.style.display = "block";
+    btnSelfieReset?.classList.remove("is-hidden");
   };
   reader.readAsDataURL(file);
+});
+
+btnSelfieReset?.addEventListener("click", () => {
+  if (selfieFile) selfieFile.value = "";
+  if (selfiePreview) {
+    selfiePreview.src = "";
+    selfiePreview.style.display = "none";
+  }
+  const selfiePick = document.querySelector(".selfie-pick");
+  selfiePick?.classList.remove("is-ready");
+  btnSelfieReset?.classList.add("is-hidden");
 });
 
 async function startScan(){
@@ -396,15 +531,9 @@ btnScan?.addEventListener("click", () => {
   startScan();
 });
 
-leaveAttachment?.addEventListener("change", (e) => {
-  const file = e.target.files?.[0];
-  leaveAttachmentData = "";
+leaveAttachment?.addEventListener("change", () => {
+  const file = leaveAttachment?.files?.[0];
   if (!file) return;
-  const reader = new FileReader();
-  reader.onload = () => {
-    leaveAttachmentData = reader.result || "";
-  };
-  reader.readAsDataURL(file);
 });
 
 function setPresenceLoading(activeBtn, isLoading){
@@ -439,6 +568,10 @@ async function ensureLocation(){
   const lat = latEl.value;
   const lon = lonEl.value;
   if (lat && lon) {
+    setLocationStatus(true);
+    hasLocation = true;
+    btnLocation?.classList.add("is-ready");
+    updatePresenceReadiness();
     return { lat, lon, accuracy: lastAccuracy, deviceTime: lastDeviceTime };
   }
   const pos = await getLocation();
@@ -450,6 +583,10 @@ async function ensureLocation(){
   lastDeviceTime = new Date().toISOString();
   locStatus.textContent = `${nextLat}, ${nextLon}`;
   locStatus.classList.add("loc-centered");
+  hasLocation = true;
+  setLocationStatus(true);
+  btnLocation?.classList.add("is-ready");
+  updatePresenceReadiness();
   return { lat: nextLat, lon: nextLon, accuracy: lastAccuracy, deviceTime: lastDeviceTime };
 }
 
@@ -462,7 +599,13 @@ async function submitAttendance(url, labelEl){
     return { ok: false };
   }
 
-  const method = attMethod?.value || "gps_selfie";
+  applyAttendanceModes();
+  const enabledModes = getEnabledAttendanceModes();
+  let method = attMethod?.value || "gps_selfie";
+  if (!enabledModes.includes(method)) {
+    method = enabledModes[0];
+    if (attMethod) attMethod.value = method;
+  }
   const file = selfieFile?.files?.[0];
   if (method === "gps_selfie" && !file) {
     showToast("error", "Selfie wajib untuk presensi.", { target: attToast });
@@ -509,6 +652,14 @@ async function handleAttendance(action){
   const activeBtn = isCheckin ? btnCheckin : btnCheckout;
   const badgeText = isCheckin ? "IN" : "OUT";
   if (!activeBtn) return;
+  if (isCheckin && presenceStatusTitle?.textContent === "Belum siap Absen") {
+    showToast("error", "Belum siap absen. Pastikan lokasi aktif dan internet tersambung.", { target: attToast });
+    return;
+  }
+  if (!isCheckin && !hasCheckedIn) {
+    showToast("error", "Belum check-in. Silakan Masuk terlebih dahulu.", { target: attToast });
+    return;
+  }
   if (!isCheckin) {
     const confirmText = window.prompt('Ketik "yes" untuk konfirmasi pulang');
     if (!confirmText || confirmText.trim().toLowerCase() !== "yes") {
@@ -525,7 +676,9 @@ async function handleAttendance(action){
   }
   setPresenceLoading(activeBtn, false);
   if (result.ok) {
+    hasCheckedIn = isCheckin;
     updateLastAction(badgeText);
+    updatePresenceReadiness();
   }
 }
 
@@ -546,6 +699,7 @@ async function loadLeaveStory(){
     const pendingCount = rows.filter((r) => r.status === "pending").length;
     if (leavePendingCount) {
       leavePendingCount.textContent = `Menunggu: ${pendingCount}`;
+      leavePendingCount.classList.toggle("is-pending", pendingCount > 0);
     }
     leaveStory.innerHTML = "";
     if (!rows.length) {
@@ -557,7 +711,8 @@ async function loadLeaveStory(){
     }
     rows.forEach((r) => {
       const range = `${r.date_from} s/d ${r.date_to}`;
-      const typeLabel = (r.type || "").toUpperCase();
+      const rawType = (r.type || "").toLowerCase();
+      const typeLabel = rawType === "izin" ? "Izin" : (r.type || "").toUpperCase();
       const status = (r.status || "pending").toLowerCase();
       const statusClass = status === "approved" ? "badge-approved" : status === "rejected" ? "badge-rejected" : "badge-pending";
 
@@ -566,6 +721,7 @@ async function loadLeaveStory(){
       item.dataset.reason = r.reason || "-";
       item.dataset.note = r.note || "-";
       item.dataset.type = typeLabel || "-";
+      item.dataset.typeRaw = rawType || "";
       item.dataset.range = range;
 
       const rowTop = document.createElement("div");
@@ -573,6 +729,9 @@ async function loadLeaveStory(){
       const typeBadge = document.createElement("span");
       typeBadge.className = "badge";
       typeBadge.textContent = typeLabel || "-";
+      if (rawType) {
+        typeBadge.dataset.leaveType = rawType;
+      }
       const dateSpan = document.createElement("span");
       dateSpan.className = "story-date";
       dateSpan.textContent = range;
@@ -601,13 +760,13 @@ btnLeave?.addEventListener("click", async () => {
     showToast("error", "Tanggal mulai dan akhir wajib diisi.", { target: leaveToast });
     return;
   }
-  const fromDate = new Date(leaveFrom.value);
-  const toDate = new Date(leaveTo.value);
-  if (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime())) {
+  const parsedFrom = parseIsoDate(leaveFrom.value);
+  const parsedTo = parseIsoDate(leaveTo.value);
+  if (!parsedFrom || !parsedTo) {
     showToast("error", "Tanggal tidak valid.", { target: leaveToast });
     return;
   }
-  if (toDate < fromDate) {
+  if (parsedTo.date < parsedFrom.date) {
     showToast("error", "Tanggal akhir harus setelah tanggal mulai.", { target: leaveToast });
     return;
   }
@@ -629,24 +788,22 @@ btnLeave?.addEventListener("click", async () => {
       return;
     }
   }
-  const payload = {
-    type: leaveType.value,
-    date_from: leaveFrom.value,
-    date_to: leaveTo.value,
-    reason: leaveReason.value.trim(),
-    attachment: leaveAttachment.files?.[0]?.name || "",
-    attachment_base64: leaveAttachmentData || "",
-  };
+  const formData = new FormData();
+  formData.append("type", leaveType.value);
+  formData.append("date_from", parsedFrom.iso);
+  formData.append("date_to", parsedTo.iso);
+  formData.append("reason", leaveReason.value.trim());
+  if (file) {
+    formData.append("attachment", file);
+  }
   const result = await safeFetch("/api/leave/request", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+    body: formData,
   });
   showToast(result.ok ? "success" : "error", result.message || "Selesai.", { target: leaveToast });
   if (result.ok) {
     leaveReason.value = "";
     leaveAttachment.value = "";
-    leaveAttachmentData = "";
     closeLeaveSheet();
     loadLeaveStory();
   }
@@ -669,6 +826,32 @@ function setMethod(value){
   }
 }
 
+function isAttendanceModeEnabled(mode){
+  const key = attendanceModeStorage[mode];
+  if (!key) return true;
+  const stored = localStorage.getItem(key);
+  return stored === null ? true : stored === "1";
+}
+
+function getEnabledAttendanceModes(){
+  const modes = [];
+  if (isAttendanceModeEnabled("gps_selfie")) modes.push("gps_selfie");
+  if (isAttendanceModeEnabled("gps")) modes.push("gps");
+  if (isAttendanceModeEnabled("qr")) modes.push("qr");
+  if (!modes.length) {
+    modes.push("gps_selfie");
+  }
+  return modes;
+}
+
+function applyAttendanceModes(){
+  if (!attMethod) return;
+  const enabled = getEnabledAttendanceModes();
+  const current = attMethod.value || enabled[0];
+  const next = enabled.includes(current) ? current : enabled[0];
+  setMethod(next);
+}
+
 function initMethodChips(){
   if (!attMethod || !modeChips.length) return;
   setMethod(attMethod.value || "gps_selfie");
@@ -680,10 +863,11 @@ function initMethodChips(){
 
 function updateOnlineStatus(){
   if (!netStatus) return;
-  const online = navigator.onLine;
-  netStatus.textContent = online ? "Online" : "Offline";
-  netStatus.classList.toggle("online", online);
-  netStatus.classList.toggle("offline", !online);
+  isOnline = navigator.onLine;
+  netStatus.textContent = isOnline ? "Online" : "Offline";
+  netStatus.classList.toggle("online", isOnline);
+  netStatus.classList.toggle("offline", !isOnline);
+  updatePresenceReadiness();
 }
 
 function initHelpModal(){
@@ -731,7 +915,16 @@ function initLeaveActions(){
 
 function openLeaveDetail(item){
   if (!leaveDetailModal) return;
-  if (leaveDetailType) leaveDetailType.textContent = item.dataset.type || "-";
+  if (leaveDetailType) {
+    const rawType = item.dataset.typeRaw || "";
+    const label = rawType === "izin" ? "Izin" : (item.dataset.type || "-");
+    leaveDetailType.textContent = label;
+    if (rawType) {
+      leaveDetailType.dataset.leaveType = rawType;
+    } else {
+      delete leaveDetailType.dataset.leaveType;
+    }
+  }
   if (leaveDetailRange) leaveDetailRange.textContent = item.dataset.range || "-";
   if (leaveDetailReason) leaveDetailReason.textContent = item.dataset.reason || "-";
   if (leaveDetailNote) leaveDetailNote.textContent = item.dataset.note || "-";
@@ -766,8 +959,12 @@ initNavPosition();
 initNavDrag();
 initStatusLabels();
 initMethodChips();
+applyAttendanceModes();
 initHelpModal();
 updateOnlineStatus();
+checkLocationStatus();
+hasLocation = Boolean(latEl?.value && lonEl?.value);
+updatePresenceReadiness();
 initLeaveActions();
 initLeaveDetail();
 loadLeaveStory();

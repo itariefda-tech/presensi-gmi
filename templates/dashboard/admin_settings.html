@@ -8,6 +8,7 @@
   <div class="tabs">
     <a class="tab-btn {% if tab == 'users' %}active{% endif %}" href="{{ url_for('admin.settings', tab='users') }}">Users</a>
     <a class="tab-btn {% if tab == 'roles' %}active{% endif %}" href="{{ url_for('admin.settings', tab='roles') }}">Roles</a>
+    <a class="tab-btn {% if tab == 'hr' %}active{% endif %}" href="{{ url_for('admin.settings', tab='hr') }}">HR Setting</a>
   </div>
 
   {% for msg in get_flashed_messages() %}
@@ -18,6 +19,7 @@
   <div class="card" style="margin-bottom:12px;">
     <div style="font-weight:700; margin-bottom:8px;">Add User</div>
     <form class="inline" method="post" action="{{ url_for('admin.settings_users_create') }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
       <input class="input" type="text" name="name" placeholder="Nama" required />
       <input class="input" type="email" name="email" placeholder="Email" required />
       <select class="input" name="role">
@@ -74,6 +76,7 @@
             <div class="inline">
               <button class="btn secondary" type="button" data-modal-open="user-edit-modal-{{ u.id }}">Edit</button>
               <form method="post" action="{{ url_for('admin.settings_users_delete', user_id=u.id) }}" onsubmit="return confirm('Hapus user ini?');">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                 <button class="btn secondary" type="submit">Hapus</button>
               </form>
             </div>
@@ -89,6 +92,7 @@
       <div class="modal-title" id="user-edit-title-{{ u.id }}">Edit User</div>
       <div class="stack">
         <form id="user-edit-form-{{ u.id }}" method="post" action="{{ url_for('admin.settings_users_update', user_id=u.id) }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
           <div class="form-row">
             <label class="label" for="user-name-{{ u.id }}">Nama</label>
             <input class="input" id="user-name-{{ u.id }}" type="text" name="name" value="{{ u.name }}" required />
@@ -111,10 +115,12 @@
           </div>
         </form>
         <form class="btn-row" method="post" action="{{ url_for('admin.settings_users_toggle', user_id=u.id) }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
           <button class="btn secondary" type="submit">{% if u.is_active %}Disable{% else %}Enable{% endif %}</button>
         </form>
         <div class="divider"></div>
         <form method="post" action="{{ url_for('admin.settings_users_reset_password', user_id=u.id) }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
           <div class="form-row single">
             <div class="form-inline">
               <input class="input" id="user-hr-pass-{{ u.id }}" type="password" name="hr_password" placeholder="Password HR" required />
@@ -126,6 +132,7 @@
         <details>
           <summary>Assign Sites</summary>
           <form method="post" action="{{ url_for('admin.settings_users_assign_sites', user_id=u.id) }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
             <div class="stack" style="margin-top:8px;">
               {% for s in sites %}
               <label class="inline">
@@ -149,8 +156,71 @@
 
   {% if tab == 'roles' %}
   <div class="card">
-    <div style="font-weight:700; margin-bottom:8px;">Roles (Informational)</div>
-    <div class="muted">hr_superadmin, manager_operational, supervisor, admin_asistent, employee</div>
+    <div class="muted">Atur akses fitur per role.</div>
+    {% for role in role_options %}
+    <form class="card" method="post" action="{{ url_for('admin.settings_roles_update') }}" style="margin-top:12px;">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <input type="hidden" name="role" value="{{ role }}" />
+      <div style="font-weight:700; margin-bottom:8px;">{{ role|replace('_',' ')|title }}</div>
+      <div class="form-grid" style="grid-template-columns: repeat(3, minmax(220px, 1fr));">
+        {% for key in permission_keys %}
+        <label class="check">
+          <input type="checkbox" name="{{ key }}" value="1" {% if role_permissions[role][key] %}checked{% endif %} {% if role == 'hr_superadmin' %}disabled{% endif %} />
+          <span>{{ permission_labels[key] }}</span>
+        </label>
+        {% endfor %}
+      </div>
+      <div class="btn-row">
+        <button class="btn primary" type="submit" {% if role == 'hr_superadmin' %}disabled{% endif %}>Simpan</button>
+      </div>
+    </form>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if tab == 'hr' %}
+  <div class="card">
+    <div style="font-weight:700; margin-bottom:8px;">Pemberian Kode Pendaftaran Pegawai</div>
+    <div class="muted" style="margin-bottom:10px;">Format: YYMMGMI-XXXNN (XXX urutan kode bulan ini, NN jumlah pendaftar).</div>
+    <form class="inline" method="post" action="{{ url_for('admin.settings_registration_codes_create') }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <input class="input" type="number" name="registrant_count" min="1" max="20" placeholder="Jumlah pendaftar (1-20)" required />
+      <button class="btn primary" type="submit">Buat Kode</button>
+    </form>
+    <div class="table-wrap" style="margin-top:12px;">
+      <table class="table" aria-label="Kode pendaftaran pegawai">
+        <thead>
+          <tr>
+            <th>Kode</th>
+            <th>Jumlah Pendaftar</th>
+            <th>Terpakai</th>
+            <th>Sisa Kuota</th>
+            <th>Dibuat</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if not registration_codes %}
+          <tr><td colspan="5" class="muted">Belum ada kode.</td></tr>
+          {% endif %}
+          {% for code in registration_codes %}
+          <tr>
+            <td>{{ code.code }}</td>
+            <td>{{ code.registrant_count }}</td>
+            <td>{{ code.used_count or 0 }}</td>
+            <td>{{ (code.registrant_count or 0) - (code.used_count or 0) }}</td>
+            <td>{{ code.created_at or "-" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="card" style="margin-top:12px;">
+    <div style="font-weight:700; margin-bottom:8px;">Security</div>
+    <div class="stack">
+      <div class="muted">Ganti password admin secara berkala untuk keamanan akun.</div>
+      <button class="btn primary" type="button" id="btnOpenChangePassword">Ganti Password</button>
+    </div>
   </div>
   {% endif %}
 </div>

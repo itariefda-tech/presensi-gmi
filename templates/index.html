@@ -1,13 +1,13 @@
 {% extends "base.html" %}
 {% block body %}
 <div class="shell">
-  <main class="auth" aria-label="Authentication">
-    <div class="decor-circles" aria-hidden="true">
-      <span class="circle c1"></span>
-    </div>
+  <main class="auth" aria-label="Autentikasi">
 
     <!-- LEFT PANEL (desktop only by CSS) -->
-    <section class="brand" aria-label="Brand panel">
+    <section class="brand" aria-label="Panel brand">
+      <div class="brand-circles" aria-hidden="true">
+        <span class="brand-circle bc1"></span>
+      </div>
       <div>        
         <div class="headline">
           <h2>Presensi pegawai</h2>
@@ -16,63 +16,118 @@
           </p>
         </div>
 
-        <ul class="features">
-          <li><div class="dot"></div><div><b>GPS + Selfie</b><span> - Bukti presensi lebih kuat.</span></div></li>
-          <li><div class="dot"></div><div><b>Multi-role Admin</b><span> - HR, Supervisor dan Koordinator.</span></div></li>
-          <li><div class="dot"></div><div><b>Daftar pakai Kode Undangan</b><span> - Registrasi rapi.</span></div></li>
-        </ul>
+        <div class="hero-tabs" role="tablist" aria-label="Menu hero">
+          <div class="hero-tabs-main" role="presentation">
+            <button type="button" class="hero-tab active" data-hero-go="0">Fitur</button>
+            <button type="button" class="hero-tab" data-hero-go="2">Galeri</button>
+          </div>
+          <button type="button" class="hero-tab hero-tab-icon" data-hero-go="1" aria-label="Pengaturan" title="Pengaturan">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.11-.2-.36-.28-.57-.2l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.49c-.02-.22-.21-.5-.5-.5h-4c-.29 0-.48.28-.5.5l-.36 2.49c-.59.24-1.13.56-1.62.94l-2.39-.96c-.21-.08-.46 0-.57.2l-1.92 3.32c-.11.2-.06.46.12.61l2.03 1.58c-.04.31-.06.65-.06.94s.02.63.06.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.11.2.36.28.57.2l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.49c.02.22.21.5.5.5h4c.29 0 .48-.28.5-.5l.36-2.49c.59-.24 1.13-.56 1.62-.94l2.39.96c.21.08.46 0 .57-.2l1.92-3.32c.11-.2.06-.46-.12-.61l-2.03-1.58ZM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7Z" fill="currentColor" opacity=".85"/>
+            </svg>
+          </button>
+        </div>
+
+        <div class="hero-viewport">
+          <div class="hero-track" id="heroTrack">
+            <section class="hero-pane" aria-label="Fitur aplikasi">
+              <div class="features-box">
+                <ul class="features">
+                  <li><div class="dot"></div><div><b>GPS + Selfie</b><span> - Bukti presensi lebih kuat.</span></div></li>
+                  <li><div class="dot"></div><div><b>Multi-role Admin</b><span> - HR, Supervisor dan Koordinator.</span></div></li>
+                  <li><div class="dot"></div><div><b>Daftar pakai Kode Undangan</b><span> - Registrasi rapi.</span></div></li>
+                </ul>
+              </div>
+            </section>
+            <section class="hero-pane" aria-label="Pengaturan tampilan">
+              <div class="hero-controls" aria-label="Pengaturan tampilan">
+                <div class="hero-controls-header">
+                  <div class="hero-controls-title">Pengaturan tampilan</div>
+                </div>
+                <div class="hero-controls-body">
+                  <label class="check">
+                    <input type="checkbox" id="toggleLogo" checked />
+                    <span>Logo perusahaan</span>
+                  </label>
+                  <label class="check">
+                    <input type="checkbox" id="toggleLabel" checked />
+                    <span>Label perusahaan</span>
+                  </label>
+                  <div class="hero-input" id="labelInputWrap">
+                    <input type="text" id="companyLabelInput" placeholder="Label perusahaan" value="GroupMitraIndonesia" />
+                  </div>
+                  <label class="check">
+                    <input type="checkbox" id="toggleClock" checked />
+                    <span>Tanggal + jam</span>
+                  </label>
+                  <label class="check">
+                    <input type="checkbox" id="toggleNotice" />
+                    <span>Notifikasi</span>
+                  </label>
+                  <label class="check">
+                    <input type="checkbox" id="toggleHeroCircles" checked />
+                    <span>Lingkaran hero</span>
+                  </label>
+                  <label class="check">
+                    <input type="checkbox" id="toggleFormCircles" checked />
+                    <span>Lingkaran form</span>
+                  </label>
+                  <div class="hero-row hero-row-checks">
+                    <label class="check">
+                      <input type="checkbox" id="toggleLockCircles" />
+                      <span>Stop gerak lingkaran</span>
+                    </label>
+                    <label class="check">
+                      <input type="checkbox" id="toggleInvite" />
+                      <span>Kode undangan</span>
+                    </label>
+                  </div>
+                  <div class="hero-row">
+                    <div class="hero-input">
+                      <label for="primaryKeySelect">Kunci utama</label>
+                      <select id="primaryKeySelect">
+                        <option value="both" selected>Email + No. Telp</option>
+                        <option value="email">Email</option>
+                        <option value="phone">No. Telp</option>
+                      </select>
+                    </div>
+                  </div>
+                  <label class="check">
+                    <input type="checkbox" id="toggleModeGpsSelfie" checked />
+                    <span>GPS + Selfie</span>
+                  </label>
+                  <label class="check">
+                    <input type="checkbox" id="toggleModeGps" checked />
+                    <span>GPS</span>
+                  </label>
+                  <label class="check">
+                    <input type="checkbox" id="toggleModeQr" />
+                    <span>QR</span>
+                  </label>
+                </div>
+              </div>
+            </section>
+            <section class="hero-pane" aria-label="Galeri">
+              <div class="hero-gallery">
+                <div class="hero-shot">
+                  <img src="/static/img/gmi_logo.gif" alt="Logo GMI" />
+                </div>
+                <div class="hero-shot">
+                  <img src="/static/img/00gmi_logo.gif" alt="Logo GMI alternatif" />
+                </div>
+              </div>
+            </section>
+          </div>
+        </div>
       </div>
 
-      <div class="brandActions">
-        <div class="hero-controls is-collapsed" aria-label="Pengaturan hero">
-          <div class="hero-controls-header">
-            <div class="hero-controls-title">Hero Toggle</div>
-            <button class="hero-controls-toggle" type="button" aria-label="Toggle hero controls" data-hero-toggle>
-              <span></span>
-              <span></span>
-              <span></span>
-            </button>
-          </div>
-          <div class="hero-controls-body">
-          <label class="check">
-            <input type="checkbox" id="toggleLogo" checked />
-            <span>Logo perusahaan</span>
-          </label>
-          <label class="check">
-            <input type="checkbox" id="toggleLabel" checked />
-            <span>Label perusahaan</span>
-          </label>
-          <div class="hero-input" id="labelInputWrap">
-            <input type="text" id="companyLabelInput" placeholder="Label perusahaan" value="GroupMitraIndonesia" />
-          </div>
-          <label class="check">
-            <input type="checkbox" id="toggleClock" checked />
-            <span>Tanggal + jam</span>
-          </label>
-          <label class="check">
-            <input type="checkbox" id="toggleNotice" />
-            <span>Notifikasi</span>
-          </label>
-          <div class="hero-input">
-            <label for="primaryKeySelect">Primari key :</label>
-            <select id="primaryKeySelect">
-              <option value="both" selected>Email + No telp</option>
-              <option value="email">Email</option>
-              <option value="phone">No telp</option>
-            </select>
-          </div>
-          </div>
-        </div>
-        <div class="hero-decor" aria-hidden="true">
-          <div class="bounce-track">
-            <span class="ball"></span>
-          </div>
-        </div>
-              </div>
     </section>
 
     <!-- RIGHT CARD -->
-    <section class="card" aria-label="Form panel">
+    <section class="card" aria-label="Panel form">
+      <div class="decor-circles" aria-hidden="true">
+        <span class="circle c1"></span>
+      </div>
 
       <!-- Topbar: Clock + Theme -->
       <div class="topbar">
@@ -92,12 +147,12 @@
         </div>
         
 
-        <div class="themePick" aria-label="Theme picker">
+        <div class="themePick" aria-label="Pemilih tema">
           <div class="themeLabel"></div>
-          <div class="seg" role="group" aria-label="Pilih tema">
-            <button type="button" class="themeBtn active" data-theme="dark">Gelap</button>
-            <button type="button" class="themeBtn" data-theme="light">Terang</button>
-          </div>
+          <button type="button" class="themeToggle toggle" aria-label="Ubah tema" data-theme-toggle>
+            <div class="handle"></div>
+            <span>Ubah tema</span>
+          </button>
         </div>
       </div>
 
@@ -106,10 +161,10 @@
         <div class="track" id="track">
 
           <!-- 0) LOGIN (default, untuk pegawai & admin) -->
-          <section class="pane" aria-label="Login Pegawai atau Admin">
+          <section class="pane" aria-label="Masuk Pegawai atau Admin">
             <div class="title">
               <div>
-                <h3>Login</h3>
+                <h3>Masuk</h3>
                 
               </div>
             </div>
@@ -127,7 +182,6 @@
               <input type="hidden" id="loginMethod" data-login-method-input value="email" />
 
               <div class="login-field" data-login-field="email">
-                <label for="empEmail">Email</label>
                 <div class="field">
                   <svg class="icon" viewBox="0 0 24 24" fill="none">
                     <path d="M20 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2Zm0 4-8 5L4 8V6l8 5 8-5Z" fill="currentColor" opacity=".85"/>
@@ -137,7 +191,6 @@
               </div>
 
               <div class="login-field is-hidden" data-login-field="phone">
-                <label for="empPhone">No Telp</label>
                 <div class="field">
                   <svg class="icon" viewBox="0 0 24 24" fill="none">
                     <path d="M6.6 3h2.7l1.5 4.4-1.6 1.2a14 14 0 0 0 6.2 6.2l1.2-1.6 4.4 1.5v2.7c0 .7-.6 1.3-1.3 1.3C10.4 19.7 4.3 13.6 4.3 6.6c0-.7.6-1.3 1.3-1.3Z" fill="currentColor" opacity=".85"/>
@@ -147,7 +200,6 @@
               </div>
 
               <div>
-                <label for="empPass">Password</label>
                 <div class="field has-toggle">
                   <svg class="icon" viewBox="0 0 24 24" fill="none">
                     <path d="M17 9h-1V7a4 4 0 0 0-8 0v2H7a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2Zm-7-2a2 2 0 0 1 4 0v2h-4Z" fill="currentColor" opacity=".85"/>
@@ -200,7 +252,7 @@
               </div>
               <input type="hidden" id="signupMethod" data-login-method-input value="email" />
 
-              <div>
+              <div id="inviteCodeWrap">
                 <div class="field">
                   <svg class="icon" viewBox="0 0 24 24" fill="none">
                     <path d="M20 12v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-8h16Zm0-2H4V6a2 2 0 0 1 2-2h3a3 3 0 0 1 6 0h3a2 2 0 0 1 2 2v4Zm-9-6a1 1 0 0 0-2 0h2Z" fill="currentColor" opacity=".85"/>

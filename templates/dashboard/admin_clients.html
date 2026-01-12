@@ -4,139 +4,233 @@
 {% set subtitle = "Kelola perusahaan pengguna jasa" %}
 
 {% block body %}
-<div class="card">
-  <table class="table" aria-label="Daftar client">
+{% set can_add = permissions.manage_clients_add %}
+{% set can_view = permissions.manage_clients_view %}
+{% set can_actions = permissions.manage_clients_actions %}
+<div class="card card-collapsible" id="add-client" data-collapsible>
+  <div class="card-header-collapsible">
+    <div>Tambah Client</div>
+    <button class="collapse-toggle" type="button" data-collapse-toggle aria-expanded="true" aria-controls="add-client-body">
+      <span class="icon-burger" aria-hidden="true"><span></span><span></span><span></span></span>
+      <span class="icon-minus" aria-hidden="true"></span>
+    </button>
+  </div>
+  <div class="card-body-collapsible" id="add-client-body">
+    <form class="form-grid" style="grid-template-columns: repeat(2, minmax(260px, 1fr));" method="post" action="{{ url_for('admin.clients_create') }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <div class="form-row">
+      <label class="label" for="client-name">Nama Client :</label>
+      <input class="input" id="client-name" type="text" name="client_name" placeholder="Contoh: PT Sinar Berkah" required {% if not can_add %}disabled{% endif %} />
+    </div>
+    <div class="form-row">
+      <label class="label" for="client-legal-name">Nama Legal (opsional) :</label>
+      <input class="input" id="client-legal-name" type="text" name="legal_name" placeholder="Nama resmi sesuai dokumen" {% if not can_add %}disabled{% endif %} />
+    </div>
+    <div class="form-row">
+      <label class="label" for="client-address">Alamat :</label>
+      <input class="input" id="client-address" type="text" name="address" placeholder="Alamat lengkap kantor" required {% if not can_add %}disabled{% endif %} />
+    </div>
+    <div class="form-row">
+      <label class="label" for="client-office-email">Email Kantor :</label>
+      <input class="input" id="client-office-email" type="email" name="office_email" placeholder="office@perusahaan.com" required {% if not can_add %}disabled{% endif %} />
+    </div>
+    <div class="form-row">
+      <label class="label" for="client-office-phone">No Telp Kantor :</label>
+      <input class="input" id="client-office-phone" type="tel" name="office_phone" placeholder="021-000000" required {% if not can_add %}disabled{% endif %} />
+    </div>
+    <div class="form-row">
+      <label class="label" for="client-pic-name">Nama PIC :</label>
+      <input class="input" id="client-pic-name" type="text" name="pic_name" placeholder="Nama penanggung jawab" required {% if not can_add %}disabled{% endif %} />
+    </div>
+    <div class="form-row">
+      <label class="label" for="client-pic-title">Jabatan PIC :</label>
+      <input class="input" id="client-pic-title" type="text" name="pic_title" placeholder="HRD/GA/Operasional" required {% if not can_add %}disabled{% endif %} />
+    </div>
+    <div class="form-row">
+      <label class="label" for="client-pic-phone">No HP PIC :</label>
+      <input class="input" id="client-pic-phone" type="tel" name="pic_phone" placeholder="08xx-xxxx-xxxx" required {% if not can_add %}disabled{% endif %} />
+    </div>
+    <div class="form-row">
+      <label class="label" for="client-notes">Keterangan :</label>
+      <input class="input" id="client-notes" type="text" name="notes" placeholder="Catatan tambahan (opsional)" {% if not can_add %}disabled{% endif %} />
+    </div>
+    <div class="form-row single" style="grid-column: 1 / -1;">
+      <div class="form-inline">
+        <button class="btn primary" type="submit" {% if not can_add %}disabled{% endif %}>Simpan</button>
+      </div>
+    </div>
+    </form>
+  </div>
+</div>
+<div class="card" style="margin-top:12px;">
+  {% if not can_view %}
+  <div class="muted">Anda tidak memiliki akses melihat daftar client.</div>
+  {% else %}
+  <table class="table table-wide" aria-label="Daftar client">
     <thead>
       <tr>
-        <th>ID</th>
-        <th>Nama</th>
-        <th>Sektor</th>
-        <th>Sejak</th>
+        <th>Nama Perusahaan</th>
+        <th>Email</th>
+        <th>Telp Kantor</th>
+        <th>Nama PIC</th>
+        <th>Status</th>
+        <th>Aksi</th>
       </tr>
     </thead>
     <tbody>
+      {% if not clients %}
+      <tr><td colspan="6" class="muted">Belum ada client.</td></tr>
+      {% endif %}
       {% for c in clients %}
       <tr>
-        <td>{{ c.id }}</td>
         <td>{{ c.name }}</td>
-        <td>{{ c.sector }}</td>
-        <td>{{ c.since }}</td>
+        <td>{{ c.office_email }}</td>
+        <td>{{ c.office_phone }}</td>
+        <td>{{ c.pic_name }}</td>
+        <td>{% if c.is_active %}Aktif{% else %}Non Aktif{% endif %}</td>
+        <td>
+          {% if can_actions %}
+          <details class="dropdown">
+            <summary class="btn secondary icon-btn" aria-label="Aksi">
+              <span></span>
+              <span></span>
+              <span></span>
+            </summary>
+            <div class="dropdown-menu">
+              <a class="btn secondary" href="{{ url_for('admin.client_profile', client_id=c.id) }}">Profile</a>
+              <button class="btn secondary" type="button" data-modal-open="client-edit-{{ c.id }}">Edit</button>
+            </div>
+          </details>
+          {% elif can_view %}
+          <a class="btn secondary" href="{{ url_for('admin.client_profile', client_id=c.id) }}">Profile</a>
+          {% else %}
+          <span class="muted">-</span>
+          {% endif %}
+        </td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
+  {% endif %}
 </div>
-<div class="card" id="sites" style="margin-top:12px;">
-  <div style="font-weight:700; margin-bottom:8px;">Sites (Lokasi Client)</div>
-  <div class="muted" style="margin-bottom:10px;">Kelola lokasi kantor utama/cabang per client (demo).</div>
-  <form class="inline" method="post" action="{{ url_for('admin.settings_sites_create') }}">
-    <select class="input" name="client_name" required>
-      <option value="" selected>Pilih client</option>
-      {% for c in clients %}
-      <option value="{{ c.name }}">{{ c.name }}</option>
-      {% endfor %}
-    </select>
-    <input class="input" type="text" name="name" placeholder="Nama site" required />
-    <input class="input" type="text" name="code" placeholder="Kode (opsional)" />
-    <input class="input" type="text" name="location" placeholder="Lokasi (opsional)" />
-    <input class="input" type="text" name="notes" placeholder="Catatan (opsional)" />
-    <button class="btn primary" type="submit">Tambah</button>
-  </form>
-  <div class="table-wrap">
-    <table class="table" aria-label="Site list">
-      <thead>
-        <tr>
-          <th>Client</th>
-          <th>Nama</th>
-          <th>Kode</th>
-          <th>Lokasi</th>
-          <th>Catatan</th>
-          <th>Status</th>
-          <th>Aksi</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% if not sites %}
-        <tr><td colspan="7" class="muted">Belum ada site.</td></tr>
-        {% endif %}
-        {% for s in sites %}
-        <tr>
-          <td>
-            <select class="input" name="client_name" form="site-form-{{ s.id }}" required>
-              <option value="" {% if not s.client_name %}selected{% endif %}>Pilih client</option>
-              {% for c in clients %}
-              <option value="{{ c.name }}" {% if s.client_name == c.name %}selected{% endif %}>{{ c.name }}</option>
-              {% endfor %}
-            </select>
-          </td>
-          <td><input class="input" type="text" name="name" value="{{ s.name }}" form="site-form-{{ s.id }}" /></td>
-          <td><input class="input" type="text" name="code" value="{{ s.code or '' }}" form="site-form-{{ s.id }}" /></td>
-          <td><input class="input" type="text" name="location" value="{{ s.location or '' }}" form="site-form-{{ s.id }}" /></td>
-          <td><input class="input" type="text" name="notes" value="{{ s.notes or '' }}" form="site-form-{{ s.id }}" /></td>
-          <td>{% if s.is_active %}Active{% else %}Disabled{% endif %}</td>
-          <td>
-            <div class="stack">
-              <form id="site-form-{{ s.id }}" method="post" action="{{ url_for('admin.settings_sites_update', site_id=s.id) }}">
-                <button class="btn primary" type="submit">Save</button>
-              </form>
-              <form method="post" action="{{ url_for('admin.settings_sites_toggle', site_id=s.id) }}">
-                <button class="btn secondary" type="submit">{% if s.is_active %}Disable{% else %}Enable{% endif %}</button>
-              </form>
-            </div>
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+{% if can_actions %}
+{% for c in clients %}
+<div class="modal" id="client-edit-{{ c.id }}" aria-hidden="true">
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="client-edit-title-{{ c.id }}">
+    <div class="modal-title" id="client-edit-title-{{ c.id }}">Edit Client</div>
+    <div class="stack">
+      <form method="post" action="{{ url_for('admin.clients_update', client_id=c.id) }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <div class="form-row">
+          <label class="label" for="client-name-{{ c.id }}">Nama Perusahaan</label>
+          <input class="input" id="client-name-{{ c.id }}" type="text" name="client_name" value="{{ c.name }}" required />
+        </div>
+        <div class="form-row">
+          <label class="label" for="client-legal-name-{{ c.id }}">Nama Legal</label>
+          <input class="input" id="client-legal-name-{{ c.id }}" type="text" name="legal_name" value="{{ c.legal_name or '' }}" />
+        </div>
+        <div class="form-row">
+          <label class="label" for="client-address-{{ c.id }}">Alamat</label>
+          <input class="input" id="client-address-{{ c.id }}" type="text" name="address" value="{{ c.address }}" required />
+        </div>
+        <div class="form-row">
+          <label class="label" for="client-email-{{ c.id }}">Email Kantor</label>
+          <input class="input" id="client-email-{{ c.id }}" type="email" name="office_email" value="{{ c.office_email }}" required />
+        </div>
+        <div class="form-row">
+          <label class="label" for="client-phone-{{ c.id }}">Telp Kantor</label>
+          <input class="input" id="client-phone-{{ c.id }}" type="text" name="office_phone" value="{{ c.office_phone }}" required />
+        </div>
+        <div class="form-row">
+          <label class="label" for="client-pic-{{ c.id }}">Nama PIC</label>
+          <input class="input" id="client-pic-{{ c.id }}" type="text" name="pic_name" value="{{ c.pic_name }}" required />
+        </div>
+        <div class="form-row">
+          <label class="label" for="client-pic-title-{{ c.id }}">Jabatan PIC</label>
+          <input class="input" id="client-pic-title-{{ c.id }}" type="text" name="pic_title" value="{{ c.pic_title }}" required />
+        </div>
+        <div class="form-row">
+          <label class="label" for="client-pic-phone-{{ c.id }}">No HP PIC</label>
+          <input class="input" id="client-pic-phone-{{ c.id }}" type="text" name="pic_phone" value="{{ c.pic_phone }}" required />
+        </div>
+        <div class="form-row">
+          <label class="label" for="client-notes-{{ c.id }}">Keterangan</label>
+          <input class="input" id="client-notes-{{ c.id }}" type="text" name="notes" value="{{ c.notes or '' }}" />
+        </div>
+        <div class="form-row">
+          <label class="label" for="client-status-{{ c.id }}">Status</label>
+          <select class="input" id="client-status-{{ c.id }}" name="is_active">
+            <option value="1" {% if c.is_active %}selected{% endif %}>Aktif</option>
+            <option value="0" {% if not c.is_active %}selected{% endif %}>Non Aktif</option>
+          </select>
+        </div>
+        <div class="btn-row">
+          <button class="btn primary" type="submit">Simpan</button>
+        </div>
+      </form>
+      <form class="btn-row" method="post" action="{{ url_for('admin.clients_delete', client_id=c.id) }}" onsubmit="return confirm('Hapus client ini?');">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <button class="btn secondary" type="submit">Hapus Client</button>
+      </form>
+      <div class="modal-footer">
+        <button class="btn secondary full" type="button" data-modal-close>Tutup</button>
+      </div>
+    </div>
   </div>
 </div>
-<div class="card" id="shifts" style="margin-top:12px;">
-  <div style="font-weight:700; margin-bottom:8px;">Shifts (Jenis Perhitungan)</div>
-  <div class="muted" style="margin-bottom:10px;">Kelola variasi shift per client (demo).</div>
-  <form class="inline" method="post" action="{{ url_for('admin.settings_shifts_create') }}">
-    <input class="input" type="text" name="name" placeholder="Nama shift" required />
-    <input class="input" type="time" name="start_time" />
-    <input class="input" type="time" name="end_time" />
-    <input class="input" type="number" name="grace_minutes" placeholder="Grace (menit)" min="0" />
-    <button class="btn primary" type="submit">Tambah</button>
-  </form>
-  <div class="table-wrap">
-    <table class="table" aria-label="Shift list">
-      <thead>
-        <tr>
-          <th>Nama</th>
-          <th>Mulai</th>
-          <th>Selesai</th>
-          <th>Grace</th>
-          <th>Status</th>
-          <th>Aksi</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% if not shifts %}
-        <tr><td colspan="6" class="muted">Belum ada shift.</td></tr>
-        {% endif %}
-        {% for s in shifts %}
-        <tr>
-          <td><input class="input" type="text" name="name" value="{{ s.name }}" form="shift-form-{{ s.id }}" /></td>
-          <td><input class="input" type="time" name="start_time" value="{{ s.start_time or '' }}" form="shift-form-{{ s.id }}" /></td>
-          <td><input class="input" type="time" name="end_time" value="{{ s.end_time or '' }}" form="shift-form-{{ s.id }}" /></td>
-          <td><input class="input" type="number" name="grace_minutes" value="{{ s.grace_minutes or 0 }}" min="0" form="shift-form-{{ s.id }}" /></td>
-          <td>{% if s.is_active %}Active{% else %}Disabled{% endif %}</td>
-          <td>
-            <div class="stack">
-              <form id="shift-form-{{ s.id }}" method="post" action="{{ url_for('admin.settings_shifts_update', shift_id=s.id) }}">
-                <button class="btn primary" type="submit">Save</button>
-              </form>
-              <form method="post" action="{{ url_for('admin.settings_shifts_toggle', shift_id=s.id) }}">
-                <button class="btn secondary" type="submit">{% if s.is_active %}Disable{% else %}Enable{% endif %}</button>
-              </form>
-            </div>
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</div>
+{% endfor %}
+{% endif %}
+<script>
+  (function(){
+    const openButtons = document.querySelectorAll("[data-modal-open]");
+    const closeButtons = document.querySelectorAll("[data-modal-close]");
+    openButtons.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const targetId = btn.getAttribute("data-modal-open");
+        const modal = document.getElementById(targetId);
+        if (!modal) return;
+        modal.setAttribute("aria-hidden", "false");
+        modal.classList.add("show");
+      });
+    });
+    closeButtons.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const modal = btn.closest(".modal");
+        if (!modal) return;
+        modal.setAttribute("aria-hidden", "true");
+        modal.classList.remove("show");
+      });
+    });
+    document.querySelectorAll(".modal").forEach((modal) => {
+      modal.addEventListener("click", (e) => {
+        if (e.target === modal) {
+          modal.setAttribute("aria-hidden", "true");
+          modal.classList.remove("show");
+        }
+      });
+    });
+    const dropdowns = document.querySelectorAll(".dropdown");
+    dropdowns.forEach((drop) => {
+      drop.addEventListener("toggle", () => {
+        if (!drop.open) return;
+        dropdowns.forEach((other) => {
+          if (other !== drop) other.removeAttribute("open");
+        });
+      });
+    });
+    document.addEventListener("click", (e) => {
+      dropdowns.forEach((drop) => {
+        if (!drop.contains(e.target)) {
+          drop.removeAttribute("open");
+        }
+      });
+    });
+    dropdowns.forEach((drop) => {
+      const menu = drop.querySelector(".dropdown-menu");
+      menu?.addEventListener("mouseleave", () => {
+        drop.removeAttribute("open");
+      });
+    });
+  })();
+</script>
 {% endblock %}

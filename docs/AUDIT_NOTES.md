@@ -1,17 +1,17 @@
 # HRIS GMI - Audit Notes & Technical Debt
 
-Dokumen ini merangkum kondisi teknis untuk menjaga konsistensi demo.
-Fokus: membedakan REAL (SQLite) dan DEMO (in-memory).
+Dokumen ini merangkum kondisi teknis untuk menjaga konsistensi sistem.
+Fokus: storage, alur utama, dan technical debt.
 
 ## Ringkasan Kondisi
 
 | Area | Status | Catatan |
 | --- | --- | --- |
 | Auth (Login/Signup/Forgot) | REAL | Users & roles tersimpan SQLite |
-| Attendance (Checkin/Checkout) | DEMO | Data hilang saat restart |
+| Attendance (Checkin/Checkout) | REAL | SQLite `attendance` |
 | Manual Attendance | REAL | SQLite `manual_attendance_requests` |
-| Leave Management | DEMO | In-memory |
-| Approvals Page | MIXED | Leave DEMO, Manual REAL |
+| Leave Management | REAL | SQLite `leave_requests` |
+| Approvals Page | REAL | Leave + Manual di SQLite |
 
 Kesimpulan: flow end-to-end berjalan, tapi storage masih campuran.
 
@@ -25,7 +25,7 @@ Kesimpulan: flow end-to-end berjalan, tapi storage masih campuran.
 2) Attendance  
 - UI: `employee.html`  
 - API: `/api/attendance/checkin|checkout`  
-- Storage: DEMO `DEMO_ATTENDANCE`
+- Storage: SQLite `attendance`
 
 3) Manual Attendance  
 - UI: `/dashboard/manual_attendance`  
@@ -35,15 +35,13 @@ Kesimpulan: flow end-to-end berjalan, tapi storage masih campuran.
 4) Leave  
 - UI: `employee.html`  
 - API: `/api/leave/*`  
-- Storage: DEMO `DEMO_LEAVE_REQUESTS`
+- Storage: SQLite `leave_requests`
 
 ## Risiko Utama (Jika Dibiarkan)
-- Attendance/leave hilang saat restart
-- Approvals masih campur DEMO/SQLite
+- Data retention dan indexing masih perlu ditinjau
 
 ## Rekomendasi Berikutnya (Post Demo)
-- Migrasi attendance ke SQLite
-- Migrasi leave ke SQLite
 - Role + assignment berbasis site
+- Indexing + retention policy
 
 Dokumen ini sengaja terpisah dari README untuk menjaga roadmap tetap ringkas.

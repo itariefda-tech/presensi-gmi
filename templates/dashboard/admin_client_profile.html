@@ -1,0 +1,300 @@
+{% extends "dashboard/base.html" %}
+{% set active = "clients" %}
+{% set heading = "Client Profile" %}
+{% set subtitle = client.name %}
+
+{% block body %}
+<div class="card">
+  <div class="inline" style="justify-content: space-between; align-items: center;">
+    <div>
+      <div class="muted">Ringkasan client</div>
+      <div style="font-size:20px; font-weight:700;">{{ client.name }}</div>
+    </div>
+    <a class="btn secondary" href="{{ url_for('admin.clients') }}">Kembali ke daftar</a>
+  </div>
+</div>
+
+<div class="card" style="margin-top:12px;">
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="overview" type="button">Overview</button>
+    <button class="tab-btn" data-tab="sites" type="button">Sites</button>
+    <button class="tab-btn" data-tab="assignments" type="button">Assignments</button>
+    <button class="tab-btn" data-tab="policies" type="button">Policies</button>
+    <button class="tab-btn" data-tab="contacts" type="button">Contacts (PIC)</button>
+  </div>
+
+  <div class="tab-panel active" id="tab-overview">
+    <div class="form-grid" style="grid-template-columns: repeat(2, minmax(240px, 1fr));">
+      <div class="form-row">
+        <div class="label">Nama Perusahaan</div>
+        <div>{{ client.name }}</div>
+      </div>
+      <div class="form-row">
+        <div class="label">Nama Legal</div>
+        <div>{{ client.legal_name or '-' }}</div>
+      </div>
+      <div class="form-row">
+        <div class="label">Alamat</div>
+        <div>{{ client.address }}</div>
+      </div>
+      <div class="form-row">
+        <div class="label">Status</div>
+        <div>{% if client.is_active %}Aktif{% else %}Non Aktif{% endif %}</div>
+      </div>
+      <div class="form-row">
+        <div class="label">Email Kantor</div>
+        <div>{{ client.office_email }}</div>
+      </div>
+      <div class="form-row">
+        <div class="label">Telp Kantor</div>
+        <div>{{ client.office_phone }}</div>
+      </div>
+      <div class="form-row" style="grid-column: 1 / -1;">
+        <div class="label">Catatan</div>
+        <div>{{ client.notes or '-' }}</div>
+      </div>
+    </div>
+    <div class="form-grid" style="grid-template-columns: repeat(4, minmax(160px, 1fr)); margin-top:12px;">
+      <div class="form-row">
+        <div class="label">Sites Aktif</div>
+        <div>{{ summary.sites_active }}/{{ summary.sites_total }}</div>
+      </div>
+      <div class="form-row">
+        <div class="label">Assignment Aktif</div>
+        <div>{{ summary.assignments_active }}</div>
+      </div>
+      <div class="form-row">
+        <div class="label">Policy Client</div>
+        <div>{% if summary.client_policy_active %}Aktif{% else %}Belum ada{% endif %}</div>
+      </div>
+      <div class="form-row">
+        <div class="label">Policy Site</div>
+        <div>{{ summary.site_policy_count }}/{{ summary.sites_total }}</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="tab-panel" id="tab-sites">
+    <div class="table-wrap">
+      <table class="table" aria-label="Site list">
+        <thead>
+          <tr>
+            <th>Nama Site</th>
+            <th>Lokasi</th>
+            <th>Radius</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if not sites %}
+          <tr><td colspan="4" class="muted">Belum ada site untuk client ini.</td></tr>
+          {% endif %}
+          {% for s in sites %}
+          <tr>
+            <td>{{ s.name }}</td>
+            <td>{{ s.latitude }}, {{ s.longitude }}</td>
+            <td>{{ s.radius_meters }} m</td>
+            <td>{% if s.is_active %}Aktif{% else %}Non Aktif{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="tab-panel" id="tab-assignments">
+    <div class="form-row">
+      <div class="label">Ringkasan</div>
+      <div>
+        Total: {{ assignments|length }},
+        Aktif: {{ assignments|selectattr("status", "equalto", "ACTIVE")|list|length }}
+      </div>
+    </div>
+    <div class="table-wrap" style="margin-top:8px;">
+      <table class="table" aria-label="Assignments summary">
+        <thead>
+          <tr>
+            <th>Pegawai</th>
+            <th>Site</th>
+            <th>Periode</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if not assignments %}
+          <tr><td colspan="4" class="muted">Belum ada assignment.</td></tr>
+          {% endif %}
+          {% for a in assignments %}
+          <tr>
+            <td>{{ a.employee_name or a.employee_email }}</td>
+            <td>{{ a.site_name or '-' }}</td>
+            <td>{{ a.start_date|ddmmyyyy }}{% if a.end_date %} - {{ a.end_date|ddmmyyyy }}{% endif %}</td>
+            <td>{{ a.status }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="tab-panel" id="tab-policies">
+    <div class="table-wrap">
+      <table class="table" aria-label="Policies list">
+        <thead>
+          <tr>
+            <th>Scope</th>
+            <th>Target</th>
+            <th>Efektif</th>
+            <th>Rules</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if not policies %}
+          <tr><td colspan="4" class="muted">Belum ada policy.</td></tr>
+          {% endif %}
+          {% for p in policies %}
+          <tr>
+            <td>{{ p.scope_type }}</td>
+            <td>{% if p.scope_type == "SITE" %}{{ p.site_name or '-' }}{% else %}{{ p.client_name or '-' }}{% endif %}</td>
+            <td>{{ p.effective_from }}{% if p.effective_to %} - {{ p.effective_to }}{% endif %}</td>
+            <td>
+              GPS: {{ "Ya" if p.allow_gps else "Tidak" }},
+              Selfie: {{ "Ya" if p.require_selfie else "Tidak" }},
+              QR: {{ "Ya" if p.allow_qr else "Tidak" }},
+              Auto CO: {{ "Ya" if p.auto_checkout else "Tidak" }}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="tab-panel" id="tab-contacts">
+    <div class="form-grid" style="grid-template-columns: repeat(2, minmax(240px, 1fr));">
+      <div class="form-row">
+        <div class="label">PIC Legacy</div>
+        <div>{{ client.pic_name }}</div>
+      </div>
+      <div class="form-row">
+        <div class="label">Jabatan</div>
+        <div>{{ client.pic_title }}</div>
+      </div>
+      <div class="form-row">
+        <div class="label">No HP</div>
+        <div>{{ client.pic_phone }}</div>
+      </div>
+      <div class="form-row">
+        <div class="label">Email Kantor</div>
+        <div>{{ client.office_email }}</div>
+      </div>
+    </div>
+    <div class="card" style="margin-top:12px;">
+      <div style="font-weight:700; margin-bottom:8px;">Tambah PIC</div>
+      <form class="form-grid" style="grid-template-columns: repeat(2, minmax(240px, 1fr));" method="post" action="{{ url_for('admin.client_contacts_create', client_id=client.id) }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <div class="form-row">
+          <label class="label" for="contact-type">Tipe PIC</label>
+          <select class="input" id="contact-type" name="contact_type" required>
+            <option value="" selected>Pilih tipe</option>
+            <option value="OPERATIONAL">Operational</option>
+            <option value="BILLING">Billing</option>
+            <option value="HR">HR</option>
+            <option value="OTHER">Other</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label class="label" for="contact-name">Nama PIC</label>
+          <input class="input" id="contact-name" type="text" name="name" required />
+        </div>
+        <div class="form-row">
+          <label class="label" for="contact-title">Jabatan</label>
+          <input class="input" id="contact-title" type="text" name="title" />
+        </div>
+        <div class="form-row">
+          <label class="label" for="contact-phone">No HP</label>
+          <input class="input" id="contact-phone" type="text" name="phone" />
+        </div>
+        <div class="form-row">
+          <label class="label" for="contact-email">Email</label>
+          <input class="input" id="contact-email" type="email" name="email" />
+        </div>
+        <div class="form-row">
+          <label class="label" for="contact-notes">Keterangan</label>
+          <input class="input" id="contact-notes" type="text" name="notes" />
+        </div>
+        <div class="form-row single" style="grid-column: 1 / -1;">
+          <label class="inline" style="gap:8px;">
+            <input type="checkbox" name="is_primary" value="1" />
+            Jadikan primary untuk tipe ini
+          </label>
+        </div>
+        <div class="form-row single" style="grid-column: 1 / -1;">
+          <div class="form-inline">
+            <button class="btn primary" type="submit">Simpan</button>
+          </div>
+        </div>
+      </form>
+    </div>
+    <div class="table-wrap" style="margin-top:12px;">
+      <table class="table" aria-label="Client contacts">
+        <thead>
+          <tr>
+            <th>Tipe</th>
+            <th>Nama</th>
+            <th>Jabatan</th>
+            <th>Kontak</th>
+            <th>Primary</th>
+            <th>Aksi</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if not contacts %}
+          <tr><td colspan="6" class="muted">Belum ada PIC tambahan.</td></tr>
+          {% endif %}
+          {% for c in contacts %}
+          <tr>
+            <td>{{ c.contact_type }}</td>
+            <td>{{ c.name }}</td>
+            <td>{{ c.title or '-' }}</td>
+            <td>
+              <div>{{ c.phone or '-' }}</div>
+              <div class="muted">{{ c.email or '-' }}</div>
+            </td>
+            <td>{% if c.is_primary %}<span class="badge">PRIMARY</span>{% else %}-{% endif %}</td>
+            <td>
+              <div class="inline">
+                {% if not c.is_primary %}
+                <form method="post" action="{{ url_for('admin.client_contacts_primary', contact_id=c.id) }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                  <button class="btn secondary" type="submit">Set Primary</button>
+                </form>
+                {% endif %}
+                <form method="post" action="{{ url_for('admin.client_contacts_delete', contact_id=c.id) }}" onsubmit="return confirm('Hapus kontak ini?');">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                  <button class="btn secondary" type="submit">Hapus</button>
+                </form>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+  (function(){
+    const tabButtons = Array.from(document.querySelectorAll(".tab-btn"));
+    const tabPanels = Array.from(document.querySelectorAll(".tab-panel"));
+    function setActiveTab(name){
+      tabButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.tab === name));
+      tabPanels.forEach((panel) => panel.classList.toggle("active", panel.id === `tab-${name}`));
+    }
+    tabButtons.forEach((btn) => {
+      btn.addEventListener("click", () => setActiveTab(btn.dataset.tab));
+    });
+  })();
+</script>
+{% endblock %}

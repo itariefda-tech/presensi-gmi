@@ -1,0 +1,71 @@
+{% extends "dashboard/base.html" %}
+{% set active = "shifts" %}
+{% set heading = "Shifts" %}
+{% set subtitle = "Kelola variasi jam kerja dan grace time" %}
+
+{% block body %}
+<div class="card card-collapsible" id="add-shift" data-collapsible>
+  <div class="card-header-collapsible">
+    <div>Tambah Shift</div>
+    <button class="collapse-toggle" type="button" data-collapse-toggle aria-expanded="true" aria-controls="add-shift-body">
+      <span class="icon-burger" aria-hidden="true"><span></span><span></span><span></span></span>
+      <span class="icon-minus" aria-hidden="true"></span>
+    </button>
+  </div>
+  <div class="card-body-collapsible" id="add-shift-body">
+    <div class="muted" style="margin-bottom:10px;">Atur jadwal kerja dan toleransi keterlambatan.</div>
+    <form class="inline" method="post" action="{{ url_for('admin.settings_shifts_create') }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <input class="input" type="text" name="name" placeholder="Nama shift" required />
+      <input class="input" type="time" name="start_time" />
+      <input class="input" type="time" name="end_time" />
+      <input class="input" type="number" name="grace_minutes" placeholder="Grace (menit)" min="0" />
+      <button class="btn primary" type="submit">Tambah</button>
+    </form>
+  </div>
+</div>
+
+<div class="card" style="margin-top:12px;">
+  <div style="font-weight:700; margin-bottom:8px;">Daftar Shift</div>
+  <div class="table-wrap">
+    <table class="table" aria-label="Shift list">
+      <thead>
+        <tr>
+          <th>Nama</th>
+          <th>Mulai</th>
+          <th>Selesai</th>
+          <th>Grace</th>
+          <th>Status</th>
+          <th>Aksi</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if not shifts %}
+        <tr><td colspan="6" class="muted">Belum ada shift.</td></tr>
+        {% endif %}
+        {% for s in shifts %}
+        <tr>
+          <td><input class="input" type="text" name="name" value="{{ s.name }}" form="shift-form-{{ s.id }}" /></td>
+          <td><input class="input" type="time" name="start_time" value="{{ s.start_time or '' }}" form="shift-form-{{ s.id }}" /></td>
+          <td><input class="input" type="time" name="end_time" value="{{ s.end_time or '' }}" form="shift-form-{{ s.id }}" /></td>
+          <td><input class="input" type="number" name="grace_minutes" value="{{ s.grace_minutes or 0 }}" min="0" form="shift-form-{{ s.id }}" /></td>
+          <td>{% if s.is_active %}Active{% else %}Disabled{% endif %}</td>
+          <td>
+            <div class="stack">
+              <form id="shift-form-{{ s.id }}" method="post" action="{{ url_for('admin.settings_shifts_update', shift_id=s.id) }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                <button class="btn primary" type="submit">Save</button>
+              </form>
+              <form method="post" action="{{ url_for('admin.settings_shifts_toggle', shift_id=s.id) }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                <button class="btn secondary" type="submit">{% if s.is_active %}Disable{% else %}Enable{% endif %}</button>
+              </form>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

@@ -6,7 +6,10 @@ import re
 import os
 import math
 import sqlite3
-from datetime import datetime
+import secrets
+import hashlib
+import hmac
+from datetime import datetime, timedelta
 from dataclasses import dataclass
 from typing import Dict
 
@@ -22,9 +25,21 @@ class AuthResult:
     next_url: str | None = None
 
 
+APP_BOOT_ID = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+
+
 def create_app() -> Flask:
     app = Flask(__name__)
-    app.secret_key = os.environ.get("FLASK_SECRET", "dev-secret-change-me")
+    secret = os.environ.get("FLASK_SECRET")
+    if not secret:
+        is_dev = (os.environ.get("FLASK_ENV") == "development") or (
+            os.environ.get("FLASK_DEBUG", "").lower() in {"1", "true", "yes"}
+        )
+        if is_dev:
+            secret = secrets.token_urlsafe(32)
+        else:
+            raise RuntimeError("FLASK_SECRET harus diisi untuk menjalankan aplikasi.")
+    app.secret_key = secret
     app.config.update(
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
@@ -43,6 +58,54 @@ def create_app() -> Flask:
         )
         return response
 
+    @app.context_processor
+    def _inject_boot_id():
+        return {"boot_id": APP_BOOT_ID}
+
+    def _ensure_csrf_token() -> str:
+        token = session.get("csrf_token")
+        if not token:
+            token = secrets.token_urlsafe(32)
+            session["csrf_token"] = token
+        return token
+
+    @app.context_processor
+    def _inject_csrf_token():
+        return {"csrf_token": _ensure_csrf_token()}
+
+    @app.before_request
+    def _csrf_guard():
+        if request.method not in {"POST", "PUT", "DELETE"}:
+            return None
+        if not session.get("user"):
+            return None
+        content_type = request.content_type or ""
+        if content_type.startswith("application/json"):
+            return None
+        token = session.get("csrf_token")
+        form_token = (request.form.get("csrf_token") or "").strip()
+        if not token or form_token != token:
+            return abort(403)
+        return None
+
+    @app.template_filter("ddmmyyyy")
+    def _format_ddmmyyyy(value: str | None) -> str:
+        if not value:
+            return ""
+        raw = str(value).strip()
+        if not raw:
+            return ""
+        if "/" in raw:
+            parts = raw.split("/")
+            if len(parts) == 3 and all(part.isdigit() for part in parts):
+                return f"{parts[1]}/{parts[0]}/{parts[2]}"
+            return raw
+        if "-" in raw:
+            parts = raw.split("-")
+            if len(parts) == 3 and len(parts[0]) == 4:
+                return f"{parts[2]}/{parts[1]}/{parts[0]}"
+        return raw
+
     app.register_blueprint(admin_bp())
     _init_db()
 
@@ -50,6 +113,16 @@ def create_app() -> Flask:
     def login():
         data = _get_json()
         result = _validate_login(data)
+        if result.ok:
+            user = _current_user()
+            _log_audit_event(
+                entity_type="auth",
+                entity_id=user.id if user else None,
+                action="LOGIN",
+                actor=user,
+                summary="Login berhasil.",
+                details={"email": user.email if user else None, "role": user.role if user else None},
+            )
         status = 200 if result.ok else 400
         return jsonify(result.__dict__), status
 
@@ -163,7 +236,6 @@ def create_app() -> Flask:
         data = _get_json()
         login_type = (data.get("login_type") or "email").strip().lower()
         identifier = (data.get("identifier") or data.get("email") or data.get("phone") or "").strip()
-        method = data.get("method", "whatsapp_otp")
         email = ""
 
         if login_type == "phone":
@@ -180,9 +252,41 @@ def create_app() -> Flask:
             email = identifier
             if not _looks_like_email(email):
                 return jsonify(ok=False, message="Email wajib diisi."), 400
+        token = None
+        row = _get_user_by_email(email)
+        if row and int(row.get("is_active") or 0) == 1:
+            token = _create_password_reset_token(int(row["id"]))
+        response = {"ok": True, "message": "Jika akun terdaftar, instruksi reset telah dikirim."}
+        if token and (os.environ.get("SHOW_RESET_TOKEN") or "").lower() in {"1", "true", "yes"}:
+            response["reset_token"] = token
+        return jsonify(response), 200
 
-        route = "WhatsApp OTP" if method == "whatsapp_otp" else "Email"
-        return jsonify(ok=True, message=f"Reset (demo) via {route}."), 200
+    @app.route("/api/auth/reset_password", methods=["POST"])
+    def reset_password():
+        data = _get_json()
+        token = (data.get("token") or "").strip()
+        new_password = data.get("new_password", "")
+        new_password2 = data.get("new_password2", "")
+        if not token:
+            return jsonify(ok=False, message="Token reset wajib diisi."), 400
+        if len(new_password) < 6:
+            return jsonify(ok=False, message="Password baru minimal 6 karakter."), 400
+        if new_password != new_password2:
+            return jsonify(ok=False, message="Password baru tidak sama."), 400
+        user_id = _consume_password_reset_token(token)
+        if not user_id:
+            return jsonify(ok=False, message="Token reset tidak valid atau kadaluarsa."), 400
+        _update_user_password(user_id, new_password, 0)
+        user_row = _get_user_by_id(user_id)
+        actor = _user_row_to_user(user_row, "dark") if user_row else None
+        _log_audit_event(
+            entity_type="auth",
+            entity_id=user_id,
+            action="RESET_PASSWORD",
+            actor=actor,
+            summary="Password direset menggunakan token.",
+        )
+        return jsonify(ok=True, message="Password berhasil diperbarui."), 200
 
     @app.route("/api/auth/change_password", methods=["POST"])
     def change_password():
@@ -207,6 +311,13 @@ def create_app() -> Flask:
         _update_user_password(user.id, new_password, 0)
         user.must_change_password = 0
         _persist_user(user)
+        _log_audit_event(
+            entity_type="auth",
+            entity_id=user.id,
+            action="CHANGE_PASSWORD",
+            actor=user,
+            summary="Password diubah.",
+        )
         return jsonify(ok=True, message="Password berhasil diperbarui."), 200
 
     @app.route("/api/user/profile_photo", methods=["POST"])
@@ -240,6 +351,9 @@ def create_app() -> Flask:
             return jsonify(ok=False, message="Email tidak sesuai akun."), 400
         if _employee_by_email(user.email, only_active=False):
             return jsonify(ok=False, message="Data master pegawai sudah terdaftar."), 400
+        conflict = _employee_conflict(payload["email"], payload["nik"], payload["no_hp"])
+        if conflict:
+            return jsonify(ok=False, message=conflict), 400
         _create_employee(**payload)
         return jsonify(ok=True, message="Data pegawai berhasil disimpan."), 200
 
@@ -255,13 +369,15 @@ def create_app() -> Flask:
     def dashboard_employee():
         user = _current_user()
         _require_role(user, EMPLOYEE_ROLES)
-        has_employee_record = bool(_employee_by_email(user.email, only_active=False))
+        employee = _employee_by_email(user.email, only_active=False)
+        has_employee_record = bool(employee)
         assignment = _get_active_assignment(user.id) if user else None
         site = _get_site_by_id(assignment.get("site_id") if assignment else None)
         client = _get_client_by_id(site["client_id"]) if site and site["client_id"] else None
         return render_template(
             "dashboard/employee.html",
             user=user,
+            employee=employee,
             has_employee_record=has_employee_record,
             active_assignment=assignment,
             active_site=site,
@@ -319,7 +435,7 @@ def create_app() -> Flask:
             form=form_data,
         )
 
-    @app.route("/logout", methods=["GET"])
+    @app.route("/logout", methods=["POST"])
     def logout():
         session.clear()
         return redirect("/")
@@ -345,6 +461,11 @@ def create_app() -> Flask:
             site["id"] if site else None,
             site["client_id"] if site else None,
         )
+        today = _today_key()
+        if _attendance_action_exists(user.email, today, "checkin", "app"):
+            return jsonify(ok=False, message="Sudah check-in hari ini."), 400
+        if _attendance_action_exists(user.email, today, "checkout", "app"):
+            return jsonify(ok=False, message="Check-out sudah tercatat hari ini."), 400
         data = request.form or {}
         method = (data.get("method") or "gps_selfie").strip()
         lat = (data.get("lat") or "").strip()
@@ -391,6 +512,15 @@ def create_app() -> Flask:
             method="gps+selfie" if method == "gps_selfie" else method,
             device_time=device_time,
             source="app",
+            selfie_path=selfie_path,
+        )
+        _log_audit_event(
+            entity_type="attendance",
+            entity_id=record.get("id"),
+            action="CHECKIN",
+            actor=user,
+            summary="Check-in tercatat.",
+            details={"method": record.get("method"), "date": record.get("date"), "time": record.get("time")},
         )
         return jsonify(ok=True, message="Presensi tercatat.", data=record), 200
 
@@ -415,6 +545,11 @@ def create_app() -> Flask:
             site["id"] if site else None,
             site["client_id"] if site else None,
         )
+        today = _today_key()
+        if not _attendance_action_exists(user.email, today, "checkin", "app"):
+            return jsonify(ok=False, message="Belum ada check-in hari ini."), 400
+        if _attendance_action_exists(user.email, today, "checkout", "app"):
+            return jsonify(ok=False, message="Check-out sudah tercatat hari ini."), 400
         data = request.form or {}
         method = (data.get("method") or "gps_selfie").strip()
         lat = (data.get("lat") or "").strip()
@@ -461,6 +596,15 @@ def create_app() -> Flask:
             method="gps+selfie" if method == "gps_selfie" else method,
             device_time=device_time,
             source="app",
+            selfie_path=selfie_path,
+        )
+        _log_audit_event(
+            entity_type="attendance",
+            entity_id=record.get("id"),
+            action="CHECKOUT",
+            actor=user,
+            summary="Check-out tercatat.",
+            details={"method": record.get("method"), "date": record.get("date"), "time": record.get("time")},
         )
         return jsonify(ok=True, message="Check-out tercatat.", data=record), 200
 
@@ -480,6 +624,8 @@ def create_app() -> Flask:
         forbidden = _require_api_role(user, {"supervisor", "manager_operational"})
         if forbidden:
             return forbidden
+        if not _can_submit_manual(user):
+            return _json_forbidden()
         data = _get_json()
         employee_email = (data.get("employee_email") or "").strip()
         action = (data.get("action") or "IN").strip().upper()
@@ -572,7 +718,7 @@ def create_app() -> Flask:
         attachment_base64 = data.get("attachment_base64")
         attachment_file = request.files.get("attachment")
 
-        if leave_type not in {"izin", "sakit", "absen"}:
+        if leave_type not in {"izin", "sakit"}:
             return jsonify(ok=False, message="Tipe izin tidak valid."), 400
         if not date_from or not date_to:
             return jsonify(ok=False, message="Tanggal izin wajib diisi."), 400
@@ -624,9 +770,8 @@ def create_app() -> Flask:
     @app.route("/api/leave/pending", methods=["GET"])
     def leave_pending():
         user = _current_user()
-        forbidden = _require_api_role(user, ADMIN_ROLES)
-        if forbidden:
-            return forbidden
+        if not user or not _can_approve_leave(user):
+            return _json_forbidden()
         pending = _list_leave_pending()
         return jsonify(ok=True, data=pending), 200
 
@@ -659,6 +804,14 @@ def create_app() -> Flask:
             status=status,
             approver_email=user.email,
             note=note or None,
+        )
+        _log_audit_event(
+            entity_type="leave_request",
+            entity_id=request_id,
+            action="APPROVE" if status == "approved" else "REJECT",
+            actor=user,
+            summary="Pengajuan izin diproses.",
+            details={"status": status, "note": note or None},
         )
         message = "Pengajuan ditolak." if action == "reject" else "Pengajuan disetujui."
         return jsonify(ok=True, message=message), 200
@@ -735,20 +888,55 @@ DB_PATH = os.environ.get("PRESENSI_DB_PATH") or os.path.join(BASE_DIR, "presensi
 ADMIN_ROLES = {"hr_superadmin", "manager_operational", "supervisor", "admin_asistent"}
 EMPLOYEE_ROLES = {"employee"}
 APPROVER_ROLES = {"hr_superadmin", "manager_operational", "supervisor"}
-SEED_USERS = [
-    {"email": "hr@gmi.com", "name": "HR Superadmin", "role": "hr_superadmin", "password": "hr123456"},
-    {"email": "manager@gmi.com", "name": "Manager Ops", "role": "manager_operational", "password": "gmi@12345"},
-    {"email": "supervisor@gmi.com", "name": "Supervisor", "role": "supervisor", "password": "gmi@12345"},
-    {"email": "asisten@gmi.com", "name": "Admin Asisten", "role": "admin_asistent", "password": "gmi@12345"},
-]
+SEED_USERS: list[dict] = []
+SEED_USERS_JSON = (os.environ.get("SEED_USERS_JSON") or "").strip()
+if SEED_USERS_JSON:
+    try:
+        SEED_USERS = json.loads(SEED_USERS_JSON)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("SEED_USERS_JSON tidak valid.") from exc
 SEED_EMPLOYEES = [
 ]
-DEFAULT_RESET_PASSWORD = "gmi@12345"
+DEFAULT_RESET_PASSWORD = (os.environ.get("ADMIN_RESET_PASSWORD") or "").strip()
 ADMIN_ROLE_OPTIONS = ["hr_superadmin", "manager_operational", "supervisor", "admin_asistent"]
 ROLE_OPTIONS = ADMIN_ROLE_OPTIONS + ["employee"]
+ROLE_PERMISSION_KEYS = [
+    "view_overview",
+    "manage_clients_view",
+    "manage_clients_add",
+    "manage_clients_actions",
+    "manage_sites",
+    "manage_shifts",
+    "manage_employees_view",
+    "manage_employees_add",
+    "manage_employees_actions",
+    "manage_assignments",
+    "manage_policies",
+    "view_attendance",
+    "manage_manual_attendance",
+    "approve_requests",
+    "manage_settings",
+]
+ROLE_PERMISSION_LABELS = {
+    "view_overview": "Overview",
+    "manage_clients_view": "Clients: Lihat",
+    "manage_clients_add": "Clients: Tambah",
+    "manage_clients_actions": "Clients: Aksi (Edit/Hapus)",
+    "manage_sites": "Sites",
+    "manage_shifts": "Shifts",
+    "manage_employees_view": "Employees: Lihat",
+    "manage_employees_add": "Employees: Tambah",
+    "manage_employees_actions": "Employees: Aksi (Edit/Hapus)",
+    "manage_assignments": "Assignments",
+    "manage_policies": "Policies",
+    "view_attendance": "Attendance",
+    "manage_manual_attendance": "Manual Attendance",
+    "approve_requests": "Approvals",
+    "manage_settings": "Settings",
+}
 DEMO_GPS_CENTER = (-6.5706, 107.7603)
 DEMO_GPS_RADIUS_METERS = 100
-DEMO_QR_PREFIX = "GMI-"
+DEMO_QR_PREFIX = "GMI"
 DEFAULT_ATTENDANCE_POLICY = {
     "work_duration_minutes": None,
     "grace_minutes": None,
@@ -772,19 +960,6 @@ class User:
     must_change_password: int = 0
 
 
-def _role_from_email(email: str) -> str:
-    e = email.lower()
-    if "manager" in e:
-        return "manager_operational"
-    if "supervisor" in e:
-        return "supervisor"
-    if "asisten" in e or "assistant" in e:
-        return "admin_asistent"
-    if "hr" in e:
-        return "hr_superadmin"
-    return "employee"
-
-
 def _persist_user(user: User) -> None:
     session["user"] = {
         "id": user.id,
@@ -801,6 +976,12 @@ def _current_user() -> User | None:
     data = session.get("user") or {}
     if not data:
         return None
+    user_id = int(data.get("id") or 0)
+    if user_id:
+        row = _get_user_by_id(user_id)
+        if not row or int(row["is_active"] or 0) != 1:
+            session.pop("user", None)
+            return None
     return User(
         id=int(data.get("id") or 0),
         email=data.get("email", ""),
@@ -838,6 +1019,118 @@ def _require_hr_superadmin(user: User | None) -> None:
 
 def _json_forbidden():
     return jsonify(ok=False, message="Unauthorized."), 403
+
+
+def _default_role_permissions(role: str) -> dict[str, bool]:
+    defaults = {key: True for key in ROLE_PERMISSION_KEYS}
+    if role == "hr_superadmin":
+        return defaults
+    defaults["manage_settings"] = False
+    return defaults
+
+
+def _get_role_permissions(role: str) -> dict[str, bool]:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "role_permissions"):
+            return _default_role_permissions(role)
+        row = conn.execute(
+            "SELECT permissions_json FROM role_permissions WHERE role = ?",
+            (role,),
+        ).fetchone()
+        if not row:
+            return _default_role_permissions(role)
+        try:
+            payload = json.loads(row["permissions_json"] or "{}")
+        except json.JSONDecodeError:
+            return _default_role_permissions(role)
+        merged = _default_role_permissions(role)
+        for key in ROLE_PERMISSION_KEYS:
+            if key in payload:
+                merged[key] = bool(payload[key])
+        return merged
+    finally:
+        conn.close()
+
+
+def _set_role_permissions(role: str, permissions: dict[str, bool]) -> None:
+    if role == "hr_superadmin":
+        permissions = {key: True for key in ROLE_PERMISSION_KEYS}
+    payload = {key: bool(permissions.get(key)) for key in ROLE_PERMISSION_KEYS}
+    conn = _db_connect()
+    try:
+        conn.execute(
+            """
+            INSERT INTO role_permissions (role, permissions_json, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(role) DO UPDATE SET
+                permissions_json = excluded.permissions_json,
+                updated_at = excluded.updated_at
+            """,
+            (role, json.dumps(payload, ensure_ascii=True), _now_ts()),
+        )
+    finally:
+        conn.commit()
+        conn.close()
+
+
+def _has_role_permission(role: str, permission: str) -> bool:
+    if role == "hr_superadmin":
+        return True
+    perms = _get_role_permissions(role)
+    return bool(perms.get(permission))
+
+
+def _permission_for_admin_endpoint(endpoint: str | None) -> str | None:
+    if not endpoint:
+        return None
+    mapping = {
+        "admin.overview": "view_overview",
+        "admin.clients": "manage_clients_view",
+        "admin.client_profile": "manage_clients_view",
+        "admin.clients_create": "manage_clients_add",
+        "admin.clients_update": "manage_clients_actions",
+        "admin.clients_delete": "manage_clients_actions",
+        "admin.client_contacts_create": "manage_clients_actions",
+        "admin.client_contacts_update": "manage_clients_actions",
+        "admin.client_contacts_primary": "manage_clients_actions",
+        "admin.client_contacts_delete": "manage_clients_actions",
+        "admin.sites": "manage_sites",
+        "admin.settings_sites_create": "manage_sites",
+        "admin.settings_sites_update": "manage_sites",
+        "admin.settings_sites_toggle": "manage_sites",
+        "admin.shifts": "manage_shifts",
+        "admin.settings_shifts_create": "manage_shifts",
+        "admin.settings_shifts_update": "manage_shifts",
+        "admin.settings_shifts_toggle": "manage_shifts",
+        "admin.employees": "manage_employees_view",
+        "admin.employees_create": "manage_employees_add",
+        "admin.employees_update": "manage_employees_actions",
+        "admin.employees_delete": "manage_employees_actions",
+        "admin.assignments": "manage_assignments",
+        "admin.assignments_create": "manage_assignments",
+        "admin.assignments_update": "manage_assignments",
+        "admin.assignments_end": "manage_assignments",
+        "admin.policies": "manage_policies",
+        "admin.policies_create": "manage_policies",
+        "admin.policies_update": "manage_policies",
+        "admin.policies_end": "manage_policies",
+        "admin.attendance": "view_attendance",
+        "admin.manual_attendance_admin": "manage_manual_attendance",
+        "admin.manual_attendance_approve": "manage_manual_attendance",
+        "admin.manual_attendance_reject": "manage_manual_attendance",
+        "admin.approvals": "approve_requests",
+        "admin.settings": "manage_settings",
+        "admin.settings_users_create": "manage_settings",
+        "admin.settings_users_update": "manage_settings",
+        "admin.settings_users_toggle": "manage_settings",
+        "admin.settings_users_reset_password": "manage_settings",
+        "admin.settings_users_delete": "manage_settings",
+        "admin.settings_users_assign_sites": "manage_settings",
+        "admin.settings_registration_codes_create": "manage_settings",
+        "admin.settings_roles_update": "manage_settings",
+    }
+    return mapping.get(endpoint)
 
 
 def _now_ts() -> str:
@@ -1411,6 +1704,62 @@ def _get_user_by_id(user_id: int) -> sqlite3.Row | None:
         conn.close()
 
 
+def _hash_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _create_password_reset_token(user_id: int) -> str:
+    token = secrets.token_urlsafe(32)
+    token_hash = _hash_token(token)
+    expires_at = (datetime.now() + timedelta(minutes=30)).strftime("%Y-%m-%d %H:%M:%S")
+    conn = _db_connect()
+    try:
+        conn.execute(
+            "DELETE FROM password_reset_tokens WHERE user_id = ? AND used_at IS NULL",
+            (user_id,),
+        )
+        conn.execute(
+            """
+            INSERT INTO password_reset_tokens (
+                user_id, token_hash, expires_at, created_at, used_at
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            (user_id, token_hash, expires_at, _now_ts(), None),
+        )
+    finally:
+        conn.commit()
+        conn.close()
+    return token
+
+
+def _consume_password_reset_token(token: str) -> int | None:
+    token_hash = _hash_token(token)
+    now_ts = _now_ts()
+    conn = _db_connect()
+    try:
+        row = conn.execute(
+            """
+            SELECT id, user_id, expires_at
+            FROM password_reset_tokens
+            WHERE token_hash = ? AND used_at IS NULL
+            LIMIT 1
+            """,
+            (token_hash,),
+        ).fetchone()
+        if not row:
+            return None
+        if row["expires_at"] < now_ts:
+            return None
+        conn.execute(
+            "UPDATE password_reset_tokens SET used_at = ? WHERE id = ?",
+            (now_ts, row["id"]),
+        )
+        return int(row["user_id"])
+    finally:
+        conn.commit()
+        conn.close()
+
+
 def _get_client_by_id(client_id: int | None) -> sqlite3.Row | None:
     if not client_id:
         return None
@@ -1447,7 +1796,7 @@ def _get_active_assignment(user_id: int) -> dict | None:
               AND status = 'ACTIVE'
               AND start_date <= ?
               AND (end_date IS NULL OR end_date = '' OR end_date >= ?)
-            ORDER BY start_date DESC
+            ORDER BY start_date DESC, created_at DESC, id DESC
             LIMIT 1
             """,
             (user_id, today, today),
@@ -2641,22 +2990,6 @@ def _update_policy(
         conn.close()
 
 
-def _end_policy(policy_id: int) -> None:
-    conn = _db_connect()
-    try:
-        conn.execute(
-            """
-            UPDATE attendance_policies
-            SET effective_to = COALESCE(effective_to, ?),
-                updated_at = ?
-            WHERE id = ?
-            """,
-            (_today_key(), _now_ts(), policy_id),
-        )
-    finally:
-        conn.commit()
-        conn.close()
-
 
 def _create_assignment(
     employee_user_id: int,
@@ -2670,6 +3003,7 @@ def _create_assignment(
         end_date = start_date
     conn = _db_connect()
     try:
+        conn.execute("BEGIN IMMEDIATE")
         if status == "ACTIVE":
             conn.execute(
                 """
@@ -2717,6 +3051,7 @@ def _update_assignment(
         end_date = start_date
     conn = _db_connect()
     try:
+        conn.execute("BEGIN IMMEDIATE")
         if status == "ACTIVE":
             conn.execute(
                 """
@@ -3135,7 +3470,9 @@ def _init_db() -> None:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 supervisor_user_id INTEGER,
                 site_id INTEGER,
-                UNIQUE(supervisor_user_id, site_id)
+                UNIQUE(supervisor_user_id, site_id),
+                FOREIGN KEY (supervisor_user_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE CASCADE
             )
             """
         )
@@ -3145,7 +3482,9 @@ def _init_db() -> None:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 employee_user_id INTEGER,
                 site_id INTEGER,
-                UNIQUE(employee_user_id, site_id)
+                UNIQUE(employee_user_id, site_id),
+                FOREIGN KEY (employee_user_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE CASCADE
             )
             """
         )
@@ -3160,7 +3499,9 @@ def _init_db() -> None:
                 end_date TEXT,
                 status TEXT NOT NULL DEFAULT 'ACTIVE',
                 created_at TEXT,
-                updated_at TEXT
+                updated_at TEXT,
+                FOREIGN KEY (employee_user_id) REFERENCES users(id) ON DELETE RESTRICT,
+                FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE RESTRICT
             )
             """
         )
@@ -3208,6 +3549,22 @@ def _init_db() -> None:
         )
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS password_reset_tokens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                token_hash TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                used_at TEXT,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user ON password_reset_tokens(user_id)"
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS audit_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 entity_type TEXT NOT NULL,
@@ -3239,13 +3596,26 @@ def _init_db() -> None:
                 time TEXT NOT NULL,
                 action TEXT NOT NULL,
                 reason TEXT NOT NULL,
-                created_by_user_id TEXT NOT NULL,
+                created_by_user_id INTEGER NOT NULL,
+                created_by_email TEXT NOT NULL,
                 created_by_role TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 status TEXT NOT NULL DEFAULT 'PENDING',
                 reviewed_by_user_id TEXT,
                 reviewed_at TEXT,
-                review_note TEXT
+                review_note TEXT,
+                FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE SET NULL,
+                FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE RESTRICT
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS role_permissions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                role TEXT NOT NULL UNIQUE,
+                permissions_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL
             )
             """
         )
@@ -3271,15 +3641,19 @@ def _init_db() -> None:
                     time TEXT NOT NULL,
                     action TEXT NOT NULL,
                     method TEXT,
+                    selfie_path TEXT,
                     source TEXT,
                     manual_request_id INTEGER,
-                    created_at TEXT NOT NULL
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE SET NULL,
+                    FOREIGN KEY (manual_request_id) REFERENCES manual_attendance_requests(id) ON DELETE SET NULL
                 )
                 """
             )
         else:
             _ensure_column(conn, "attendance", "source", "source TEXT")
             _ensure_column(conn, "attendance", "manual_request_id", "manual_request_id INTEGER")
+            _ensure_column(conn, "attendance", "selfie_path", "selfie_path TEXT")
             _ensure_column(conn, "sites", "client_name", "client_name TEXT")
             _ensure_column(conn, "sites", "client_id", "client_id INTEGER")
             _ensure_column(conn, "sites", "address", "address TEXT")
@@ -3318,6 +3692,38 @@ def _init_db() -> None:
             _ensure_column(conn, "employees", "notes", "notes TEXT")
             _ensure_column(conn, "employees", "is_active", "is_active INTEGER DEFAULT 1")
             _ensure_column(conn, "employees", "created_at", "created_at TEXT")
+            try:
+                conn.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_employees_unique_email ON employees(lower(email))"
+                )
+                conn.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_employees_unique_nik ON employees(nik)"
+                )
+                conn.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_employees_unique_phone ON employees(no_hp)"
+                )
+            except sqlite3.IntegrityError:
+                pass
+        if _table_exists(conn, "manual_attendance_requests"):
+            _ensure_column(conn, "manual_attendance_requests", "created_by_email", "created_by_email TEXT")
+            conn.execute(
+                """
+                UPDATE manual_attendance_requests
+                SET created_by_email = created_by_user_id
+                WHERE (created_by_email IS NULL OR created_by_email = '')
+                  AND created_by_user_id LIKE '%@%'
+                """
+            )
+        if _table_exists(conn, "attendance"):
+            try:
+                conn.execute(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_attendance_unique_daily
+                    ON attendance(employee_email, date, action)
+                    """
+                )
+            except sqlite3.IntegrityError:
+                pass
         if _table_exists(conn, "employee_registration_codes"):
             _ensure_column(conn, "employee_registration_codes", "year_month", "year_month TEXT")
             _ensure_column(conn, "employee_registration_codes", "seq", "seq INTEGER")
@@ -3574,7 +3980,7 @@ def _can_submit_manual(user: User) -> bool:
     if user.role == "supervisor":
         return True
     if user.role == "manager_operational":
-        return not _has_supervisor_account()
+        return True
     return False
 
 
@@ -3596,7 +4002,7 @@ def _can_approve_manual(user: User) -> bool:
     if user.role in {"hr_superadmin", "supervisor"}:
         return True
     if user.role == "manager_operational":
-        return not _has_supervisor_account()
+        return True
     return False
 
 
@@ -3791,7 +4197,7 @@ def _create_manual_request(
             INSERT INTO manual_attendance_requests (
                 employee_id, employee_name, employee_email,
                 date, time, action, reason,
-                created_by_user_id, created_by_role, created_at, status
+                created_by_user_id, created_by_email, created_by_role, created_at, status
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
@@ -3802,6 +4208,7 @@ def _create_manual_request(
                 time,
                 action,
                 reason,
+                created_by.id,
                 created_by.email,
                 created_by.role,
                 _now_ts(),
@@ -3866,6 +4273,109 @@ def _approve_manual_request(request_id: int, reviewer: User, note: str | None) -
         conn.close()
 
 
+
+
+
+
+
+def _approve_manual_request_atomic(
+    request_id: int,
+    reviewer: User,
+    note: str | None,
+) -> tuple[bool, str]:
+    conn = _db_connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            "SELECT * FROM manual_attendance_requests WHERE id = ?",
+            (request_id,),
+        ).fetchone()
+        if not row:
+            conn.rollback()
+            return False, "Data manual attendance tidak ditemukan."
+        if row["status"] != "PENDING":
+            conn.rollback()
+            return False, "Manual attendance sudah diproses."
+        conn.execute(
+            "UPDATE manual_attendance_requests SET status = ?, reviewed_by_user_id = ?, reviewed_at = ?, review_note = ? WHERE id = ?",
+            ("APPROVED", reviewer.email, _now_ts(), note, request_id),
+        )
+        conn.execute(
+            "INSERT INTO attendance (employee_id, employee_name, employee_email, date, time, action, method, selfie_path, source, manual_request_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                row["employee_id"],
+                row["employee_name"],
+                row["employee_email"],
+                row["date"],
+                row["time"],
+                row["action"],
+                "manual",
+                None,
+                "manual_request",
+                row["id"],
+                _now_ts(),
+            ),
+        )
+        conn.commit()
+        return True, ""
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def _employee_conflict(
+    email: str,
+    nik: str,
+    no_hp: str,
+    exclude_id: int | None = None,
+) -> str | None:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "employees"):
+            return None
+        params = {"exclude_id": exclude_id or 0}
+        if email:
+            row = conn.execute(
+                """
+                SELECT id FROM employees
+                WHERE lower(email) = ? AND id != ?
+                LIMIT 1
+                """,
+                (email.lower(), params["exclude_id"]),
+            ).fetchone()
+            if row:
+                return "Email pegawai sudah terdaftar."
+        if nik:
+            row = conn.execute(
+                """
+                SELECT id FROM employees
+                WHERE nik = ? AND id != ?
+                LIMIT 1
+                """,
+                (nik, params["exclude_id"]),
+            ).fetchone()
+            if row:
+                return "NIK pegawai sudah terdaftar."
+        normalized = _normalize_phone(no_hp)
+        if normalized:
+            cur = conn.execute(
+                """
+                SELECT id, no_hp
+                FROM employees
+                WHERE id != ?
+                """,
+                (params["exclude_id"],),
+            )
+            for row in cur.fetchall():
+                if _normalize_phone(row["no_hp"]) == normalized:
+                    return "No telp pegawai sudah terdaftar."
+        return None
+    finally:
+        conn.close()
+
+
 def _reject_manual_request(request_id: int, reviewer: User, note: str) -> None:
     conn = _db_connect()
     try:
@@ -3889,8 +4399,8 @@ def _insert_manual_attendance_record(request_row: dict) -> None:
             """
             INSERT INTO attendance (
                 employee_id, employee_name, employee_email,
-                date, time, action, method, source, manual_request_id, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                date, time, action, method, selfie_path, source, manual_request_id, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 request_row.get("employee_id"),
@@ -3900,6 +4410,7 @@ def _insert_manual_attendance_record(request_row: dict) -> None:
                 request_row.get("time"),
                 request_row.get("action"),
                 "manual",
+                None,
                 "manual_request",
                 request_row.get("id"),
                 _now_ts(),
@@ -3917,6 +4428,7 @@ def _create_attendance_record(
     method: str,
     device_time: str | None,
     source: str,
+    selfie_path: str | None = None,
 ) -> dict:
     date_value, time_value = _device_time_parts(device_time)
     employee_id = employee.get("id") if employee else None
@@ -3924,12 +4436,12 @@ def _create_attendance_record(
     created_at = _now_ts()
     conn = _db_connect()
     try:
-        conn.execute(
+        cur = conn.execute(
             """
             INSERT INTO attendance (
                 employee_id, employee_name, employee_email,
-                date, time, action, method, source, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                date, time, action, method, selfie_path, source, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 employee_id,
@@ -3939,14 +4451,17 @@ def _create_attendance_record(
                 time_value,
                 action,
                 method,
+                selfie_path,
                 source,
                 created_at,
             ),
         )
+        record_id = int(cur.lastrowid)
     finally:
         conn.commit()
         conn.close()
     return {
+        "id": record_id,
         "employee_email": employee_email,
         "action": action,
         "method": method,
@@ -3972,6 +4487,34 @@ def _list_attendance_today(employee_email: str, today: str, limit: int = 10) -> 
             (employee_email, today, limit),
         )
         return [dict(row) for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def _attendance_action_exists(
+    employee_email: str,
+    date_value: str,
+    action: str,
+    source: str | None = None,
+) -> bool:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "attendance"):
+            return False
+        clause = ""
+        params = [employee_email, date_value, action]
+        if source is not None:
+            clause = "AND source = ?"
+            params.append(source)
+        query = (
+            "SELECT 1 "
+            "FROM attendance "
+            "WHERE employee_email = ? AND date = ? AND action = ? "
+            + clause + " "
+            "LIMIT 1"
+        )
+        cur = conn.execute(query, tuple(params))
+        return cur.fetchone() is not None
     finally:
         conn.close()
 
@@ -4031,10 +4574,25 @@ def _validate_qr_data(qr_data: str) -> tuple[bool, str]:
     payload = (qr_data or "").strip()
     if not payload:
         return False, "QR code wajib di-scan."
-    if len(payload) < 6 or len(payload) > 120:
-        return False, "QR tidak valid (demo)."
-    if not payload.upper().startswith(DEMO_QR_PREFIX):
-        return False, "QR tidak dikenali (demo)."
+    secret = (os.environ.get("QR_SECRET") or "").strip()
+    if not secret:
+        return False, "QR tidak dapat diverifikasi."
+    parts = payload.split("|")
+    if len(parts) != 4:
+        return False, "QR tidak valid."
+    prefix, ts_raw, nonce, sig = parts
+    if prefix.upper() != DEMO_QR_PREFIX:
+        return False, "QR tidak dikenali."
+    if not ts_raw.isdigit():
+        return False, "QR tidak valid."
+    ts = int(ts_raw)
+    now = int(datetime.utcnow().timestamp())
+    if abs(now - ts) > 300:
+        return False, "QR kadaluarsa."
+    data = f"{ts_raw}|{nonce}".encode("utf-8")
+    expected = hmac.new(secret.encode("utf-8"), data, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, sig):
+        return False, "QR tidak valid."
     return True, "ok"
 
 
@@ -4048,6 +4606,10 @@ def admin_bp() -> Blueprint:
             return redirect(url_for("index"))
         if user.role not in ADMIN_ROLES:
             return redirect(url_for("dashboard_employee"))
+        if user.role != "hr_superadmin":
+            permission = _permission_for_admin_endpoint(request.endpoint)
+            if permission and not _has_role_permission(user.role, permission):
+                return abort(403)
 
     @bp.route("/", methods=["GET"])
     def overview():
@@ -4073,10 +4635,12 @@ def admin_bp() -> Blueprint:
     @bp.route("/clients", methods=["GET"])
     def clients():
         user = _current_user()
+        permissions = _get_role_permissions(user.role)
         return render_template(
             "dashboard/admin_clients.html",
             user=user,
             clients=_clients(),
+            permissions=permissions,
         )
 
     @bp.route("/clients/<int:client_id>", methods=["GET"])
@@ -4742,7 +5306,13 @@ def admin_bp() -> Blueprint:
     @bp.route("/employees", methods=["GET"])
     def employees():
         user = _current_user()
-        return render_template("dashboard/admin_employees.html", user=user, employees=_employees())
+        permissions = _get_role_permissions(user.role)
+        return render_template(
+            "dashboard/admin_employees.html",
+            user=user,
+            employees=_employees(),
+            permissions=permissions,
+        )
 
     @bp.route("/employees/create", methods=["POST"])
     def employees_create():
@@ -4751,6 +5321,10 @@ def admin_bp() -> Blueprint:
         payload, error = _parse_employee_form(request.form or {})
         if error:
             flash(error)
+            return redirect(url_for("admin.employees", _anchor="add-employee"))
+        conflict = _employee_conflict(payload["email"], payload["nik"], payload["no_hp"])
+        if conflict:
+            flash(conflict)
             return redirect(url_for("admin.employees", _anchor="add-employee"))
         _create_employee(
             nik=payload["nik"],
@@ -4774,6 +5348,15 @@ def admin_bp() -> Blueprint:
         is_active = 1 if request.form.get("is_active") == "1" else 0
         if error:
             flash(error)
+            return redirect(url_for("admin.employees"))
+        conflict = _employee_conflict(
+            payload["email"],
+            payload["nik"],
+            payload["no_hp"],
+            exclude_id=employee_id,
+        )
+        if conflict:
+            flash(conflict)
             return redirect(url_for("admin.employees"))
         _update_employee(
             employee_id=employee_id,
@@ -4831,8 +5414,10 @@ def admin_bp() -> Blueprint:
             flash("Manual attendance sudah diproses.")
             return redirect(url_for("admin.manual_attendance_admin", status="pending"))
 
-        _approve_manual_request(request_id, user, note or None)
-        _insert_manual_attendance_record(request_row)
+        ok, message = _approve_manual_request_atomic(request_id, user, note or None)
+        if not ok:
+            flash(message)
+            return redirect(url_for("admin.manual_attendance_admin", status="pending"))
         flash("Manual attendance disetujui.")
         return redirect(url_for("admin.manual_attendance_admin", status="pending"))
 
@@ -4871,7 +5456,7 @@ def admin_bp() -> Blueprint:
     @bp.route("/settings", methods=["GET"])
     def settings():
         user = _current_user()
-        _require_admin(user)
+        _require_hr_superadmin(user)
         tab = (request.args.get("tab") or "users").lower()
         if tab not in {"users", "roles", "hr"}:
             tab = "users"
@@ -4879,6 +5464,9 @@ def admin_bp() -> Blueprint:
         sites = _list_sites()
         supervisor_sites = _get_supervisor_sites_map()
         registration_codes = _list_employee_registration_codes()
+        role_permissions = {
+            role: _get_role_permissions(role) for role in ADMIN_ROLE_OPTIONS
+        }
         return render_template(
             "dashboard/admin_settings.html",
             user=user,
@@ -4889,6 +5477,9 @@ def admin_bp() -> Blueprint:
             registration_codes=registration_codes,
             role_options=ADMIN_ROLE_OPTIONS,
             default_password=DEFAULT_RESET_PASSWORD,
+            role_permissions=role_permissions,
+            permission_labels=ROLE_PERMISSION_LABELS,
+            permission_keys=ROLE_PERMISSION_KEYS,
         )
 
     @bp.route("/settings/registration-codes/create", methods=["POST"])
@@ -4982,6 +5573,9 @@ def admin_bp() -> Blueprint:
     def settings_users_reset_password(user_id: int):
         user = _current_user()
         _require_hr_superadmin(user)
+        if not DEFAULT_RESET_PASSWORD:
+            flash("Password reset default belum dikonfigurasi.")
+            return redirect(url_for("admin.settings", tab="users"))
         hr_password = (request.form.get("hr_password") or "").strip()
         row = _get_user_by_id(user.id)
         if not row or not check_password_hash(row["password_hash"], hr_password):
@@ -5025,6 +5619,21 @@ def admin_bp() -> Blueprint:
         _set_supervisor_sites(user_id, site_ids)
         flash("Site assignment diperbarui.")
         return redirect(url_for("admin.settings", tab="users"))
+
+    @bp.route("/settings/roles/update", methods=["POST"])
+    def settings_roles_update():
+        user = _current_user()
+        _require_hr_superadmin(user)
+        role = (request.form.get("role") or "").strip()
+        if role not in ADMIN_ROLE_OPTIONS:
+            flash("Role tidak valid.")
+            return redirect(url_for("admin.settings", tab="roles"))
+        permissions: dict[str, bool] = {}
+        for key in ROLE_PERMISSION_KEYS:
+            permissions[key] = request.form.get(key) == "1"
+        _set_role_permissions(role, permissions)
+        flash("Role permissions diperbarui.")
+        return redirect(url_for("admin.settings", tab="roles"))
 
     @bp.route("/settings/sites/create", methods=["POST"])
     def settings_sites_create():

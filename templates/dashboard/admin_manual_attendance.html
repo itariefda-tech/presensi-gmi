@@ -57,10 +57,12 @@
           <td>
             <div class="inline">
               <form method="post" action="{{ url_for('admin.manual_attendance_approve', request_id=r.id) }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                 <input class="input" type="text" name="note" placeholder="Catatan (opsional)" />
                 <button class="btn primary" type="submit">Approve</button>
               </form>
               <form method="post" action="{{ url_for('admin.manual_attendance_reject', request_id=r.id) }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                 <input class="input" type="text" name="note" placeholder="Alasan tolak" required />
                 <button class="btn secondary" type="submit">Reject</button>
               </form>

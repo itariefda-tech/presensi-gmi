@@ -1,0 +1,14 @@
+{
+  "name": "presensi",
+  "private": true,
+  "scripts": {
+    "dev:flask": "python -m flask --app app:create_app --debug run --host 127.0.0.1 --port 5000",
+    "dev:sync": "wait-on http://127.0.0.1:5000 && browser-sync start --config bs-config.js",
+    "dev": "concurrently -k -r \"npm:dev:flask\" \"npm:dev:sync\""
+  },
+  "devDependencies": {
+    "browser-sync": "^2.29.3",
+    "concurrently": "^8.2.2",
+    "wait-on": "^7.2.0"
+  }
+}

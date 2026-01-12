@@ -4,26 +4,287 @@
 {% set subtitle = "Satpam, cleaning service, operator, supir, dll" %}
 
 {% block body %}
-<div class="card">
-  <table class="table" aria-label="Daftar pegawai outsource">
+{% set can_add = permissions.manage_employees_add %}
+{% set can_view = permissions.manage_employees_view %}
+{% set can_actions = permissions.manage_employees_actions %}
+<div class="card card-collapsible" id="add-employee" data-collapsible>
+  <div class="card-header-collapsible">
+    <div>Tambah Pegawai</div>
+    <button class="collapse-toggle" type="button" data-collapse-toggle aria-expanded="true" aria-controls="add-employee-body">
+      <span class="icon-burger" aria-hidden="true"><span></span><span></span><span></span></span>
+      <span class="icon-minus" aria-hidden="true"></span>
+    </button>
+  </div>
+  <div class="card-body-collapsible" id="add-employee-body">
+    <form class="form-grid" style="grid-template-columns: repeat(2, minmax(260px, 1fr));" method="post" action="{{ url_for('admin.employees_create') }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <div class="form-row">
+      <label class="label" for="employee-nik">NIK :</label>
+      <input class="input" id="employee-nik" type="text" name="nik" placeholder="Nomor induk karyawan" required {% if not can_add %}disabled{% endif %} />
+    </div>
+    <div class="form-row">
+      <label class="label" for="employee-name">Nama :</label>
+      <input class="input" id="employee-name" type="text" name="name" placeholder="Nama lengkap" required {% if not can_add %}disabled{% endif %} />
+    </div>
+    <div class="form-row">
+      <label class="label" for="employee-email">Email :</label>
+      <input class="input" id="employee-email" type="email" name="email" placeholder="nama@perusahaan.com" required {% if not can_add %}disabled{% endif %} />
+    </div>
+    <div class="form-row">
+      <label class="label" for="employee-phone">No_HP :</label>
+      <input class="input" id="employee-phone" type="tel" name="no_hp" placeholder="08xx-xxxx-xxxx" required {% if not can_add %}disabled{% endif %} />
+    </div>
+    <div class="form-row">
+      <label class="label" for="employee-address">Alamat :</label>
+      <input class="input" id="employee-address" type="text" name="address" placeholder="Alamat lengkap" required {% if not can_add %}disabled{% endif %} />
+    </div>
+    <div class="form-row">
+      <label class="label" for="employee-gender">Jenis kelamin :</label>
+      <select class="input" id="employee-gender" name="gender" required {% if not can_add %}disabled{% endif %}>
+        <option value="" selected>Pilih jenis kelamin</option>
+        <option value="Laki-laki">Laki-laki</option>
+        <option value="Perempuan">Perempuan</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <label class="label" for="employee-marital">Status_nikah :</label>
+      <select class="input" id="employee-marital" name="status_nikah" required {% if not can_add %}disabled{% endif %}>
+        <option value="" selected>Pilih status</option>
+        <option value="Belum menikah">Belum menikah</option>
+        <option value="Menikah">Menikah</option>
+        <option value="Cerai">Cerai</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <label class="label" for="employee-notes">Keterangan :</label>
+      <input class="input" id="employee-notes" type="text" name="notes" placeholder="Catatan tambahan (opsional)" {% if not can_add %}disabled{% endif %} />
+    </div>
+    <div class="form-row single" style="grid-column: 1 / -1;">
+      <div class="form-inline">
+        <button class="btn primary" type="submit" {% if not can_add %}disabled{% endif %}>Simpan</button>
+      </div>
+    </div>
+    </form>
+  </div>
+</div>
+<div class="card" style="margin-top:12px;">
+  {% if not can_view %}
+  <div class="muted">Anda tidak memiliki akses melihat daftar pegawai.</div>
+  {% else %}
+  <table class="table table-wide" aria-label="Daftar pegawai outsource">
     <thead>
       <tr>
-        <th>ID</th>
         <th>Nama</th>
-        <th>Posisi</th>
-        <th>Client</th>
+        <th>No HP</th>
+        <th>Jenis Kelamin</th>
+        <th>Email</th>
+        <th>Status</th>
+        <th>Aksi</th>
       </tr>
     </thead>
     <tbody>
+      {% if not employees %}
+      <tr><td colspan="6" class="muted">Belum ada pegawai.</td></tr>
+      {% endif %}
       {% for e in employees %}
       <tr>
-        <td>{{ e.id }}</td>
-        <td>{{ e.name }}</td>
-        <td>{{ e.role }}</td>
-        <td>{{ e.client }}</td>
+        <td>{{ e.name or "-" }}</td>
+        <td>{{ e.no_hp or e.phone or e.phone_number or "-" }}</td>
+        <td>{{ e.gender or "-" }}</td>
+        <td>{{ e.email or "-" }}</td>
+        <td>{% if e.is_active %}Active{% else %}Disabled{% endif %}</td>
+        <td>
+          {% if can_actions %}
+          <details class="dropdown">
+            <summary class="btn secondary icon-btn" aria-label="Aksi">
+              <span></span>
+              <span></span>
+              <span></span>
+            </summary>
+            <div class="dropdown-menu">
+              <button class="btn secondary" type="button" data-modal-open="employee-profile-{{ e.id }}">Profile</button>
+              <button class="btn secondary" type="button" data-modal-open="employee-edit-{{ e.id }}">Edit</button>
+            </div>
+          </details>
+          {% else %}
+          <span class="muted">-</span>
+          {% endif %}
+        </td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
+  {% endif %}
 </div>
+{% if can_actions %}
+{% for e in employees %}
+<div class="modal" id="employee-profile-{{ e.id }}" aria-hidden="true">
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="employee-profile-title-{{ e.id }}">
+    <div class="modal-title" id="employee-profile-title-{{ e.id }}">Profile Pegawai</div>
+    <div class="stack">
+      <div class="form-row">
+        <div class="label">NIK</div>
+        <div>{{ e.nik or '-' }}</div>
+      </div>
+      <div class="form-row">
+        <div class="label">Nama</div>
+        <div>{{ e.name or '-' }}</div>
+      </div>
+      <div class="form-row">
+        <div class="label">Email</div>
+        <div>{{ e.email or '-' }}</div>
+      </div>
+      <div class="form-row">
+        <div class="label">No HP</div>
+        <div>{{ e.no_hp or '-' }}</div>
+      </div>
+      <div class="form-row">
+        <div class="label">Alamat</div>
+        <div>{{ e.address or '-' }}</div>
+      </div>
+      <div class="form-row">
+        <div class="label">Jenis Kelamin</div>
+        <div>{{ e.gender or '-' }}</div>
+      </div>
+      <div class="form-row">
+        <div class="label">Status Nikah</div>
+        <div>{{ e.status_nikah or '-' }}</div>
+      </div>
+      <div class="form-row">
+        <div class="label">Keterangan</div>
+        <div>{{ e.notes or '-' }}</div>
+      </div>
+      <div class="form-row">
+        <div class="label">Status</div>
+        <div>{% if e.is_active %}Active{% else %}Disabled{% endif %}</div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn secondary full" type="button" data-modal-close>Tutup</button>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="modal" id="employee-edit-{{ e.id }}" aria-hidden="true">
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="employee-edit-title-{{ e.id }}">
+    <div class="modal-title" id="employee-edit-title-{{ e.id }}">Edit Pegawai</div>
+    <div class="stack">
+      <form method="post" action="{{ url_for('admin.employees_update', employee_id=e.id) }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <div class="form-row">
+          <label class="label" for="employee-nik-{{ e.id }}">NIK</label>
+          <input class="input" id="employee-nik-{{ e.id }}" type="text" name="nik" value="{{ e.nik or '' }}" required />
+        </div>
+        <div class="form-row">
+          <label class="label" for="employee-name-{{ e.id }}">Nama</label>
+          <input class="input" id="employee-name-{{ e.id }}" type="text" name="name" value="{{ e.name or '' }}" required />
+        </div>
+        <div class="form-row">
+          <label class="label" for="employee-email-{{ e.id }}">Email</label>
+          <input class="input" id="employee-email-{{ e.id }}" type="email" name="email" value="{{ e.email or '' }}" required />
+        </div>
+        <div class="form-row">
+          <label class="label" for="employee-phone-{{ e.id }}">No HP</label>
+          <input class="input" id="employee-phone-{{ e.id }}" type="tel" name="no_hp" value="{{ e.no_hp or '' }}" required />
+        </div>
+        <div class="form-row">
+          <label class="label" for="employee-address-{{ e.id }}">Alamat</label>
+          <input class="input" id="employee-address-{{ e.id }}" type="text" name="address" value="{{ e.address or '' }}" required />
+        </div>
+        <div class="form-row">
+          <label class="label" for="employee-gender-{{ e.id }}">Jenis kelamin</label>
+          <select class="input" id="employee-gender-{{ e.id }}" name="gender" required>
+            <option value="" {% if not e.gender %}selected{% endif %}>Pilih jenis kelamin</option>
+            <option value="Laki-laki" {% if e.gender == "Laki-laki" %}selected{% endif %}>Laki-laki</option>
+            <option value="Perempuan" {% if e.gender == "Perempuan" %}selected{% endif %}>Perempuan</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label class="label" for="employee-marital-{{ e.id }}">Status_nikah</label>
+          <select class="input" id="employee-marital-{{ e.id }}" name="status_nikah" required>
+            <option value="" {% if not e.status_nikah %}selected{% endif %}>Pilih status</option>
+            <option value="Belum menikah" {% if e.status_nikah == "Belum menikah" %}selected{% endif %}>Belum menikah</option>
+            <option value="Menikah" {% if e.status_nikah == "Menikah" %}selected{% endif %}>Menikah</option>
+            <option value="Cerai" {% if e.status_nikah == "Cerai" %}selected{% endif %}>Cerai</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label class="label" for="employee-notes-{{ e.id }}">Keterangan</label>
+          <input class="input" id="employee-notes-{{ e.id }}" type="text" name="notes" value="{{ e.notes or '' }}" />
+        </div>
+        <div class="form-row">
+          <label class="label" for="employee-status-{{ e.id }}">Status</label>
+          <select class="input" id="employee-status-{{ e.id }}" name="is_active">
+            <option value="1" {% if e.is_active %}selected{% endif %}>Active</option>
+            <option value="0" {% if not e.is_active %}selected{% endif %}>Disabled</option>
+          </select>
+        </div>
+        <div class="btn-row">
+          <button class="btn primary" type="submit">Simpan</button>
+        </div>
+      </form>
+      <form class="btn-row" method="post" action="{{ url_for('admin.employees_delete', employee_id=e.id) }}" onsubmit="return confirm('Hapus pegawai ini?');">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <button class="btn secondary" type="submit">Hapus Pegawai</button>
+      </form>
+      <div class="modal-footer">
+        <button class="btn secondary full" type="button" data-modal-close>Tutup</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endfor %}
+{% endif %}
+<script>
+  (function(){
+    const openButtons = document.querySelectorAll("[data-modal-open]");
+    const closeButtons = document.querySelectorAll("[data-modal-close]");
+    openButtons.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const targetId = btn.getAttribute("data-modal-open");
+        const modal = document.getElementById(targetId);
+        if (!modal) return;
+        modal.setAttribute("aria-hidden", "false");
+        modal.classList.add("show");
+      });
+    });
+    closeButtons.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const modal = btn.closest(".modal");
+        if (!modal) return;
+        modal.setAttribute("aria-hidden", "true");
+        modal.classList.remove("show");
+      });
+    });
+    document.querySelectorAll(".modal").forEach((modal) => {
+      modal.addEventListener("click", (e) => {
+        if (e.target === modal) {
+          modal.setAttribute("aria-hidden", "true");
+          modal.classList.remove("show");
+        }
+      });
+    });
+    const dropdowns = document.querySelectorAll(".dropdown");
+    dropdowns.forEach((drop) => {
+      drop.addEventListener("toggle", () => {
+        if (!drop.open) return;
+        dropdowns.forEach((other) => {
+          if (other !== drop) other.removeAttribute("open");
+        });
+      });
+    });
+    document.addEventListener("click", (e) => {
+      dropdowns.forEach((drop) => {
+        if (!drop.contains(e.target)) {
+          drop.removeAttribute("open");
+        }
+      });
+    });
+    dropdowns.forEach((drop) => {
+      const menu = drop.querySelector(".dropdown-menu");
+      menu?.addEventListener("mouseleave", () => {
+        drop.removeAttribute("open");
+      });
+    });
+  })();
+</script>
 {% endblock %}

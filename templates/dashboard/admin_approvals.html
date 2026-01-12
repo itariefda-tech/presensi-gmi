@@ -6,7 +6,7 @@
 {% block body %}
 <div class="card">
   <div class="alert info">
-    Leave tersimpan di memori demo (hilang setelah restart). Manual attendance tersimpan di SQLite.
+    Leave dan manual attendance tersimpan di SQLite.
   </div>
   <div class="tabs">
     <button class="tab-btn active" data-tab="leave">Leave Requests</button>
@@ -70,12 +70,14 @@
             <td><span class="badge pending">PENDING</span></td>
             {% if can_approve_manual %}
             <td>
-              <div class="inline">
+              <div class="inline approval-actions">
                 <form method="post" action="{{ url_for('admin.manual_attendance_approve', request_id=r.id) }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                   <input class="input" type="text" name="note" placeholder="Catatan (opsional)" />
                   <button class="btn primary" type="submit">Approve</button>
                 </form>
                 <form method="post" action="{{ url_for('admin.manual_attendance_reject', request_id=r.id) }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                   <input class="input" type="text" name="note" placeholder="Alasan tolak" required />
                   <button class="btn secondary" type="submit">Reject</button>
                 </form>

@@ -16,6 +16,7 @@
   {% endif %}
 
   <form method="post">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
     <div class="form-grid">
       <div class="field-group">
         <label class="label">Pegawai</label>

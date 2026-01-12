@@ -16,6 +16,7 @@ function go(i){
   }
   randomizeCircles();
   animateCircle();
+  moveAuthCircles();
 }
 
 document.querySelectorAll("[data-go]").forEach(el => {
@@ -29,6 +30,7 @@ document.querySelectorAll("[data-go]").forEach(el => {
    THEME (persist + send to backend)
 ========================= */
 const themeBtns = Array.from(document.querySelectorAll(".themeBtn"));
+const themeToggle = document.querySelector("[data-theme-toggle]");
 const themeInputs = [
   document.getElementById("themeEmp"),
   document.getElementById("themeAdmin"),
@@ -40,12 +42,21 @@ function setTheme(theme){
   document.documentElement.setAttribute("data-theme", theme);
   localStorage.setItem("gmi_theme", theme);
   themeBtns.forEach(b => b.classList.toggle("active", b.dataset.theme === theme));
+  if (themeToggle){
+    themeToggle.classList.toggle("active", theme === "light");
+  }
   themeInputs.forEach(inp => { if (inp) inp.value = theme; });
 }
 
 themeBtns.forEach(btn => {
   btn.addEventListener("click", () => setTheme(btn.dataset.theme));
 });
+if (themeToggle){
+  themeToggle.addEventListener("click", () => {
+    const next = currentTheme() === "dark" ? "light" : "dark";
+    setTheme(next);
+  });
+}
 
 const initialTheme = window.__GMI_INITIAL_THEME || document.documentElement.getAttribute("data-theme") || "dark";
 const savedTheme = localStorage.getItem("gmi_theme") || initialTheme;
@@ -83,14 +94,30 @@ const toggleLogo = document.getElementById("toggleLogo");
 const toggleLabel = document.getElementById("toggleLabel");
 const toggleClock = document.getElementById("toggleClock");
 const toggleNotice = document.getElementById("toggleNotice");
+const toggleInvite = document.getElementById("toggleInvite");
+const toggleHeroCircles = document.getElementById("toggleHeroCircles");
+const toggleFormCircles = document.getElementById("toggleFormCircles");
+const toggleLockCircles = document.getElementById("toggleLockCircles");
 const primaryKeySelect = document.getElementById("primaryKeySelect");
+const toggleModeGpsSelfie = document.getElementById("toggleModeGpsSelfie");
+const toggleModeGps = document.getElementById("toggleModeGps");
+const toggleModeQr = document.getElementById("toggleModeQr");
 
 const heroLogo = document.getElementById("heroLogo");
 const heroLabel = document.getElementById("heroLabel");
 const heroClock = document.getElementById("heroClock");
 const marqueeToasts = Array.from(document.querySelectorAll(".toast[data-marquee]"));
+const inviteCodeWrap = document.getElementById("inviteCodeWrap");
 const labelInputWrap = document.getElementById("labelInputWrap");
 const labelInput = document.getElementById("companyLabelInput");
+const brandCircles = document.querySelector(".brand-circles");
+const formCircles = document.querySelector(".card .decor-circles");
+let circlesLocked = false;
+const attendanceModeStorage = {
+  gps_selfie: "gmi_att_mode_gps_selfie",
+  gps: "gmi_att_mode_gps",
+  qr: "gmi_att_mode_qr",
+};
 
 const defaultLabel = heroLabel ? heroLabel.textContent.trim() : "";
 
@@ -109,11 +136,90 @@ function syncHero(){
   if(toggleNotice){
     marqueeToasts.forEach(t => t.classList.toggle("marquee-hidden", !toggleNotice.checked));
   }
+  if(toggleInvite){
+    setHidden(inviteCodeWrap, !toggleInvite.checked);
+  }
+  if (toggleHeroCircles){
+    setHidden(brandCircles, !toggleHeroCircles.checked);
+  }
+  if (toggleFormCircles){
+    setHidden(formCircles, !toggleFormCircles.checked);
+  }
+  if (toggleLockCircles){
+    circlesLocked = toggleLockCircles.checked;
+    document.querySelectorAll(".brand-circle, .decor-circles .circle").forEach(el => {
+      el.classList.toggle("is-locked", circlesLocked);
+    });
+  }
 }
 
-[toggleLogo, toggleLabel, toggleClock, toggleNotice].forEach(cb => {
+[toggleLogo, toggleLabel, toggleClock, toggleNotice, toggleInvite, toggleHeroCircles, toggleFormCircles, toggleLockCircles].forEach(cb => {
   if(cb) cb.addEventListener("change", syncHero);
 });
+
+function loadAttendanceModeToggle(toggle, key){
+  if (!toggle) return true;
+  const stored = localStorage.getItem(key);
+  const enabled = stored === null ? true : stored === "1";
+  toggle.checked = enabled;
+  return enabled;
+}
+
+function saveAttendanceModeToggle(toggle, key){
+  if (!toggle) return true;
+  const enabled = toggle.checked;
+  localStorage.setItem(key, enabled ? "1" : "0");
+  return enabled;
+}
+
+function syncAttendanceModeToggles(){
+  const enabledSelfie = loadAttendanceModeToggle(toggleModeGpsSelfie, attendanceModeStorage.gps_selfie);
+  const enabledGps = loadAttendanceModeToggle(toggleModeGps, attendanceModeStorage.gps);
+  const enabledQr = loadAttendanceModeToggle(toggleModeQr, attendanceModeStorage.qr);
+  if (enabledSelfie && enabledGps && toggleModeGpsSelfie && toggleModeGps){
+    toggleModeGpsSelfie.checked = false;
+    localStorage.setItem(attendanceModeStorage.gps_selfie, "0");
+  }
+  if (!enabledSelfie && !enabledGps && !enabledQr && toggleModeGpsSelfie){
+    toggleModeGpsSelfie.checked = true;
+    localStorage.setItem(attendanceModeStorage.gps_selfie, "1");
+  }
+}
+
+function enforceGpsExclusive(source){
+  if (!toggleModeGpsSelfie || !toggleModeGps) return;
+  if (source === toggleModeGpsSelfie && toggleModeGpsSelfie.checked) {
+    toggleModeGps.checked = false;
+  } else if (source === toggleModeGps && toggleModeGps.checked) {
+    toggleModeGpsSelfie.checked = false;
+  }
+  if (!toggleModeGpsSelfie.checked && !toggleModeGps.checked) {
+    if (source === toggleModeGpsSelfie) {
+      toggleModeGps.checked = true;
+    } else if (source === toggleModeGps) {
+      toggleModeGpsSelfie.checked = true;
+    } else {
+      toggleModeGpsSelfie.checked = true;
+    }
+  }
+}
+
+function handleAttendanceModeChange(source){
+  enforceGpsExclusive(source);
+  const enabledSelfie = saveAttendanceModeToggle(toggleModeGpsSelfie, attendanceModeStorage.gps_selfie);
+  const enabledGps = saveAttendanceModeToggle(toggleModeGps, attendanceModeStorage.gps);
+  const enabledQr = saveAttendanceModeToggle(toggleModeQr, attendanceModeStorage.qr);
+  if (!enabledSelfie && !enabledGps && !enabledQr && toggleModeGpsSelfie){
+    toggleModeGpsSelfie.checked = true;
+    localStorage.setItem(attendanceModeStorage.gps_selfie, "1");
+  }
+}
+
+[toggleModeGpsSelfie, toggleModeGps, toggleModeQr].forEach(cb => {
+  if (cb) cb.addEventListener("change", () => handleAttendanceModeChange(cb));
+});
+
+syncAttendanceModeToggles();
 
 if(labelInput && heroLabel){
   labelInput.addEventListener("input", () => {
@@ -124,25 +230,28 @@ if(labelInput && heroLabel){
 
 syncHero();
 
-const heroControls = document.querySelector(".hero-controls");
-const heroToggleBtn = document.querySelector("[data-hero-toggle]");
-if (heroControls && heroToggleBtn){
-  heroToggleBtn.setAttribute("aria-expanded", "false");
-  heroToggleBtn.addEventListener("click", () => {
-    const isCollapsed = heroControls.classList.contains("is-collapsed");
-    if (isCollapsed){
-      const pin = window.prompt("Masukkan PIN developer:");
-      if (pin !== "131280"){
-        return;
-      }
-    }
-    heroControls.classList.toggle("is-collapsed");
-    heroToggleBtn.setAttribute(
-      "aria-expanded",
-      heroControls.classList.contains("is-collapsed") ? "false" : "true"
-    );
+const heroTrack = document.getElementById("heroTrack");
+const heroTabs = Array.from(document.querySelectorAll("[data-hero-go]"));
+const heroPaneCount = heroTrack ? heroTrack.children.length : 0;
+let heroIndex = 0;
+
+function heroGo(i){
+  if (!heroTrack || !heroPaneCount) return;
+  heroIndex = Math.max(0, Math.min(heroPaneCount - 1, i));
+  const step = 100 / heroPaneCount;
+  heroTrack.style.transform = `translateX(-${heroIndex * step}%)`;
+  heroTabs.forEach(btn => {
+    btn.classList.toggle("active", parseInt(btn.dataset.heroGo, 10) === heroIndex);
   });
 }
+
+heroTabs.forEach(btn => {
+  btn.addEventListener("click", () => {
+    heroGo(parseInt(btn.dataset.heroGo, 10));
+  });
+});
+
+heroGo(0);
 
 /* =========================
    LOGIN METHOD TOGGLE
@@ -237,7 +346,27 @@ function applyPrimaryKeyMode(mode){
 }
 
 if (primaryKeySelect){
+  const primaryKeyBoot = window.__GMI_BOOT_ID || "";
+  const primaryKeyStorage = "gmi_primary_key";
+  const primaryKeyBootStorage = "gmi_primary_key_boot";
+  const defaultPrimaryKey = primaryKeySelect.value;
+  const savedBoot = localStorage.getItem(primaryKeyBootStorage);
+
+  if (primaryKeyBoot && savedBoot !== primaryKeyBoot){
+    localStorage.removeItem(primaryKeyStorage);
+    localStorage.setItem(primaryKeyBootStorage, primaryKeyBoot);
+    primaryKeySelect.value = defaultPrimaryKey;
+  } else if (primaryKeyBoot && !savedBoot){
+    localStorage.setItem(primaryKeyBootStorage, primaryKeyBoot);
+  }
+
+  const savedPrimaryKey = localStorage.getItem(primaryKeyStorage);
+  if (savedPrimaryKey){
+    primaryKeySelect.value = savedPrimaryKey;
+  }
+
   primaryKeySelect.addEventListener("change", () => {
+    localStorage.setItem(primaryKeyStorage, primaryKeySelect.value);
     applyPrimaryKeyMode(primaryKeySelect.value);
   });
   applyPrimaryKeyMode(primaryKeySelect.value);
@@ -467,6 +596,7 @@ go(0);
    RANDOM DECOR CIRCLES (each load)
 ========================= */
 function randomizeCircles(){
+  if (circlesLocked) return;
   const wrap = document.querySelector(".decor-circles");
   if(!wrap) return;
   const w = wrap.clientWidth;
@@ -493,6 +623,7 @@ function randomizeCircles(){
 window.addEventListener("load", () => {
   randomizeCircles();
   animateCircle();
+  moveAuthCircles();
 });
 
 function animateCircle(){
@@ -501,4 +632,25 @@ function animateCircle(){
   el.classList.remove("animate");
   void el.offsetWidth;
   el.classList.add("animate");
+}
+
+function moveAuthCircles(){
+  if (circlesLocked) return;
+  const wrap = document.querySelector(".brand-circles");
+  if(!wrap) return;
+  const w = wrap.clientWidth;
+  const h = wrap.clientHeight;
+  if(!w || !h) return;
+
+  wrap.querySelectorAll(".brand-circle").forEach(el => {
+    const size = el.offsetWidth || 0;
+    const minX = -0.2 * w;
+    const maxX = w - size * 0.2;
+    const minY = -0.2 * h;
+    const maxY = h - size * 0.2;
+    const x = Math.round(minX + Math.random() * (maxX - minX));
+    const y = Math.round(minY + Math.random() * (maxY - minY));
+    el.style.left = `${x}px`;
+    el.style.top = `${y}px`;
+  });
 }

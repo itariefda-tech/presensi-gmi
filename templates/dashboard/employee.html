@@ -14,7 +14,16 @@
         <div class="header-col header-left">
           <div class="profile-name">  Pegawai GMI</div>
           <div class="profile-email">  {{ user.email }}</div>
-          <div class="site-subtitle">  PT. Papertech (Subang)</div>
+          <div class="profile-email">No Telp : {{ employee.no_hp if employee and employee.no_hp else "-" }}</div>
+          <div class="site-subtitle">
+            {% if active_client and active_site %}
+              {{ active_client.name }} ({{ active_site.name }})
+            {% elif active_site %}
+              {{ active_site.name }}
+            {% else %}
+              Site belum ditetapkan
+            {% endif %}
+          </div>
         </div>
         <div class="header-col header-center">
           <div class="clock-circle" aria-hidden="true"></div>
@@ -22,18 +31,11 @@
         </div>
         <div class="header-col header-right">
           <div class="header-right-stack">
-          <div class="theme-toggle" role="group" aria-label="Tema">
-            <button class="theme-btn active" data-theme="dark" type="button" aria-label="Tema gelap">
-              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                <path d="M12 2a9 9 0 1 0 9 9c0-.34-.02-.68-.06-1.01A7 7 0 1 1 13.01 2.06C12.68 2.02 12.34 2 12 2z"/>
-              </svg>
-              <span class="sr-only">Gelap</span>
-            </button>
-            <button class="theme-btn" data-theme="light" type="button" aria-label="Tema terang">
-              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                <path d="M12 4a1 1 0 0 1 1 1v1.5a1 1 0 0 1-2 0V5a1 1 0 0 1 1-1zm0 12.5a1 1 0 0 1 1 1V19a1 1 0 0 1-2 0v-1.5a1 1 0 0 1 1-1zM5.64 6.64a1 1 0 0 1 1.41 0l1.06 1.06a1 1 0 1 1-1.41 1.41L5.64 8.05a1 1 0 0 1 0-1.41zm10.24 10.24a1 1 0 0 1 1.41 0l1.06 1.06a1 1 0 0 1-1.41 1.41l-1.06-1.06a1 1 0 0 1 0-1.41zM4 11a1 1 0 0 1 1-1h1.5a1 1 0 1 1 0 2H5a1 1 0 0 1-1-1zm12.5 0a1 1 0 0 1 1-1H19a1 1 0 1 1 0 2h-1.5a1 1 0 0 1-1-1zM6.64 18.36a1 1 0 0 1 0-1.41l1.06-1.06a1 1 0 1 1 1.41 1.41l-1.06 1.06a1 1 0 0 1-1.41 0zm10.24-10.24a1 1 0 0 1 0-1.41l1.06-1.06a1 1 0 1 1 1.41 1.41l-1.06 1.06a1 1 0 0 1-1.41 0zM12 8a4 4 0 1 1-4 4 4 4 0 0 1 4-4z"/>
-              </svg>
-              <span class="sr-only">Terang</span>
+          <div class="themePick" aria-label="Pemilih tema">
+            <div class="themeLabel"></div>
+            <button type="button" class="themeToggle toggle" aria-label="Ubah tema" data-theme-toggle>
+              <div class="handle"></div>
+              <span>Ubah tema</span>
             </button>
           </div>
             <div class="clock-site-row" aria-label="Jam digital">
@@ -50,25 +52,64 @@
     <div class="alert info">Silakan ganti password sebelum melanjutkan aktivitas.</div>
     {% endif %}
 
-    
+    {% if not has_employee_record %}
+    <div class="alert info">
+      Data anda belum diinput. Silakan lengkapi data pegawai terlebih dahulu.
+      <button class="btn secondary" type="button" id="btnEmployeeProfile">Next</button>
+    </div>
+    {% endif %}
 
     <div class="swipe-viewport">
       <div class="swipe-track" id="swipeTrack">
         <section class="swipe-pane" data-pane="0" aria-label="Presensi">
           <div class="card mobile-card presence-card">
+            <div class="decor-circles presence-decor" aria-hidden="true">
+              <span class="circle c1"></span>
+            </div>
             <div class="presence-status">
-              <div class="status-left">
-                <span class="status-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" role="img" aria-hidden="true">
-                    <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5A2.5 2.5 0 1 1 12 6a2.5 2.5 0 0 1 0 5.5z"/>
-                  </svg>
-                </span>
-                <div class="status-text">
-                  <div class="status-title">Siap presensi</div>
-                  <div class="status-sub">Lokasi aktif</div>
+              <div class="status-main">
+                <div class="status-left">
+                  <span class="status-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" role="img" aria-hidden="true">
+                      <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5A2.5 2.5 0 1 1 12 6a2.5 2.5 0 0 1 0 5.5z"/>
+                    </svg>
+                  </span>
+                  <div class="status-text">
+                    <div class="status-sub status-sub-location">
+                      <span class="status-icon-mini status-icon-warning" id="presenceLocationIcon" aria-hidden="true"></span>
+                      <span id="presenceStatusSub">Lokasi aktif</span>
+                    </div>
+                  </div>
                 </div>
+                <div class="status-badge online" id="netStatus">Online</div>
               </div>
-              <div class="status-badge online" id="netStatus">Online</div>
+              <div class="tool-row tool-row-location">
+                <button class="btn secondary btn-location" id="btnLocation" type="button"><span class="btn-location-line">Get</span><span class="btn-location-line">Location</span></button>
+                <div class="muted" id="locStatus">Belum ada lokasi.</div>
+                <button class="help-btn help-btn-inline" id="btnHelp" type="button">Bantuan?</button>
+                <input type="hidden" id="lat" />
+                <input type="hidden" id="lon" />
+              </div>
+            </div>
+
+            <div class="tool-row tool-selfie">
+              <div class="selfie-box">
+                <label class="label" for="selfieFile">Wajib Selfie</label>
+                <label class="selfie-pick" for="selfieFile" aria-label="Ambil selfie">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M3 7a2 2 0 0 1 2-2h3l1-2h6l1 2h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Zm9 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z" fill="currentColor" opacity=".85"/>
+                  </svg>
+                </label>
+                <img id="selfiePreview" class="preview selfie-preview" alt="" />
+              </div>
+              <div class="selfie-reset-wrap">
+              <button class="btn secondary selfie-reset is-hidden" id="btnSelfieReset" type="button">Ulangi foto</button>
+              </div>
+              <input type="file" id="selfieFile" class="input is-hidden" accept="image/*" capture="user" />
+            </div>
+
+            <div class="presence-ready-card">
+              <div class="status-title status-title-ready" id="presenceStatusTitle">Siap Absen</div>
             </div>
 
             <div class="presence-actions">
@@ -92,19 +133,13 @@
               </button>
             </div>
 
-            <div class="presence-last">
-              <span class="last-label">Terakhir:</span>
-              <span id="lastActionTime">--:--</span>
-              <span id="lastActionBadge" class="last-badge">-</span>
+            <div class="presence-ready-card presence-last-card">
+              <div class="presence-last">
+                <span class="last-label">Terakhir:</span>
+                <span id="lastActionTime">--:--</span>
+                <span id="lastActionBadge" class="last-badge">-</span>
+              </div>
             </div>
-
-            <div class="mode-chips" role="group" aria-label="Metode presensi">
-              <button class="chip active" data-mode="gps_selfie" type="button">GPS+Selfie</button>
-              <button class="chip" data-mode="gps" type="button">GPS</button>
-              <button class="chip" data-mode="qr" type="button">QR</button>
-            </div>
-
-            <button class="help-btn" id="btnHelp" type="button">Butuh Bantuan?</button>
 
             <div class="presence-tools">
               <select id="attMethod" class="input hidden">
@@ -112,19 +147,6 @@
                 <option value="gps">GPS saja</option>
                 <option value="qr">QR / Barcode</option>
               </select>
-
-              <div class="tool-row">
-                <button class="btn secondary full btn-location" id="btnLocation" type="button">Ambil Lokasi</button>
-                <div class="muted" id="locStatus">Belum ada lokasi.</div>
-                <input type="hidden" id="lat" />
-                <input type="hidden" id="lon" />
-              </div>
-
-              <div class="tool-row tool-selfie">
-                <label class="label">Selfie</label>
-                <input type="file" id="selfieFile" class="input" accept="image/*" capture="user" />
-                <img id="selfiePreview" class="preview" alt="" />
-              </div>
 
               <div class="tool-row tool-qr">
                 <label class="label">QR / Barcode</label>
@@ -142,8 +164,17 @@
 
           <div class="help-modal" id="helpModal" aria-hidden="true">
             <div class="help-card" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
-              <div class="help-title" id="helpTitle">Panduan singkat</div>
-              <div class="help-text">Tekan Masuk untuk mulai kerja, tekan Pulang saat selesai.</div>
+              <div class="help-title" id="helpTitle">Panduan Singkat</div>
+              <div class="help-text">
+                <ol class="help-list">
+                  <li>Status lokasi harus aktif,</li>
+                  <li>Status data/internet harus &quot;online&quot;</li>
+                  <li>Klik Get Location sampai keluar kordinat map</li>
+                  <li>Foto Selfie</li>
+                  <li>Pastikan status menjadi &quot;Siap Abesen&quot;</li>
+                  <li>Jika sudah Siap Absen klik Masuk/Pulang</li>
+                </ol>
+              </div>
               <button class="btn primary full" id="btnHelpClose" type="button">Tutup</button>
             </div>
           </div>
@@ -155,7 +186,14 @@
               <h4>Ajukan</h4>
               <div class="leave-summary">
                 <span id="leavePendingCount">Menunggu: 0</span>
-                <button class="icon-btn" id="btnLeaveRefresh" type="button" aria-label="Refresh">?Y3</button>
+                <button class="icon-btn" id="btnLeaveRefresh" type="button" aria-label="Refresh">
+                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path d="M4 12a8 8 0 0 1 13.66-5.66" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M20 4v5h-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M20 12a8 8 0 0 1-13.66 5.66" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M4 20v-5h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                </button>
               </div>
             </div>
             <div class="leave-quick-actions">
@@ -175,14 +213,6 @@
                 </span>
                 <span>Sakit</span>
               </button>
-              <button class="leave-action-btn" data-type="absen" type="button">
-                <span class="action-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" role="img" aria-hidden="true">
-                    <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/>
-                  </svg>
-                </span>
-                <span>Absen</span>
-              </button>
             </div>
 
             <div class="leave-sheet" id="leaveSheet" aria-hidden="true">
@@ -191,12 +221,11 @@
                 <select id="leaveType" class="input hidden">
                   <option value="izin">Izin</option>
                   <option value="sakit">Sakit</option>
-                  <option value="absen">Absen</option>
                 </select>
                 <div class="field-group">
                   <label class="label">Tanggal</label>
-                  <input type="date" id="leaveFrom" class="input" />
-                  <input type="date" id="leaveTo" class="input" />
+                  <input type="text" id="leaveFrom" class="input" placeholder="dd/mm/yyyy" />
+                  <input type="text" id="leaveTo" class="input" placeholder="dd/mm/yyyy" />
                 </div>
                 <div class="field-group">
                   <label class="label">Alasan</label>
@@ -204,7 +233,7 @@
                 </div>
                 <div class="field-group">
                   <label class="label">Lampiran (opsional)</label>
-                  <input type="file" id="leaveAttachment" class="input" accept="image/*" />
+                  <input type="file" id="leaveAttachment" class="input" accept="image/*,application/pdf" />
                 </div>
                 <button class="btn primary full" id="btnLeave" type="button">Kirim</button>
                 <button class="btn secondary full" id="leaveSheetClose" type="button">Tutup</button>
@@ -212,13 +241,21 @@
             </div>
           </div>
 
-          <div class="card mobile-card">
-            <div class="leave-story-header">
-              <h4>Story</h4>
-              <div class="muted">Riwayat singkat</div>
+          <div class="card mobile-card card-collapsible is-collapsed" id="leave-story-card" data-collapsible>
+            <div class="card-header-collapsible">
+              <div class="leave-story-header" style="margin:0;">
+                <h4 style="margin:0;">Story</h4>
+                <div class="muted">Riwayat singkat</div>
+              </div>
+              <button class="collapse-toggle" type="button" data-collapse-toggle aria-expanded="false" aria-controls="leave-story-body">
+                <span class="icon-burger" aria-hidden="true"><span></span><span></span><span></span></span>
+                <span class="icon-minus" aria-hidden="true"></span>
+              </button>
             </div>
-            <div id="leaveStory" class="story-list">
-              <div class="muted">Memuat data...</div>
+            <div class="card-body-collapsible" id="leave-story-body">
+              <div id="leaveStory" class="story-list">
+                <div class="muted">Memuat data...</div>
+              </div>
             </div>
           </div>
 
@@ -252,22 +289,30 @@
               <div class="report-item"><span>Sakit</span><strong>0</strong></div>
             </div>
           </div>
-          <div class="card mobile-card">
-            <h4>Laporan Harian (Mock)</h4>
-            <table class="table compact">
-              <thead>
-                <tr>
-                  <th>Tanggal</th>
-                  <th>Status</th>
-                  <th>Metode</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr><td>20/12</td><td>Hadir</td><td>GPS</td></tr>
-                <tr><td>19/12</td><td>Hadir</td><td>QR</td></tr>
-                <tr><td>18/12</td><td>Telat</td><td>GPS</td></tr>
-              </tbody>
-            </table>
+          <div class="card mobile-card card-collapsible is-collapsed" id="daily-report-card" data-collapsible>
+            <div class="card-header-collapsible">
+              <h4 style="margin:0;">Laporan Harian (Mock)</h4>
+              <button class="collapse-toggle" type="button" data-collapse-toggle aria-expanded="false" aria-controls="daily-report-body">
+                <span class="icon-burger" aria-hidden="true"><span></span><span></span><span></span></span>
+                <span class="icon-minus" aria-hidden="true"></span>
+              </button>
+            </div>
+            <div class="card-body-collapsible" id="daily-report-body">
+              <table class="table compact">
+                <thead>
+                  <tr>
+                    <th>Tanggal</th>
+                    <th>Status</th>
+                    <th>Metode</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr><td>20/12</td><td>Hadir</td><td>GPS</td></tr>
+                  <tr><td>19/12</td><td>Hadir</td><td>QR</td></tr>
+                  <tr><td>18/12</td><td>Telat</td><td>GPS</td></tr>
+                </tbody>
+              </table>
+            </div>
           </div>
           <div class="card mobile-card">
             <h4>Keamanan Akun</h4>
@@ -278,14 +323,72 @@
       </div>
     </div>
 
-    <div class="floating-nav bottom-nav-floating" id="floatingNav">
+  <div class="floating-nav bottom-nav-floating" id="floatingNav">
       <div class="drag-handle" id="navHandle" aria-hidden="true">??</div>
       <button class="nav-btn active" data-tab="0" type="button">Presensi</button>
       <button class="nav-btn" data-tab="1" type="button">Izin</button>
       <button class="nav-btn" data-tab="2" type="button">Laporan</button>
-      <a class="nav-btn nav-logout" href="/logout">Keluar</a>
+      <form method="post" action="{{ url_for('logout') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <button class="nav-btn nav-logout" type="submit">Keluar</button>
+      </form>
     </div>
   </div>
+
+  {% if not has_employee_record %}
+  <div class="modal" id="employee-profile-modal" aria-hidden="true">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="employee-profile-title">
+      <div class="modal-title" id="employee-profile-title">Lengkapi Data Pegawai</div>
+      <div class="alert info" id="employee-profile-msg" style="display:none;"></div>
+      <form id="employee-profile-form" class="stack">
+        <div class="form-row">
+          <label class="label" for="emp-nik">NIK</label>
+          <input class="input" id="emp-nik" type="text" name="nik" placeholder="Nomor induk karyawan" required />
+        </div>
+        <div class="form-row">
+          <label class="label" for="emp-name">Nama</label>
+          <input class="input" id="emp-name" type="text" name="name" placeholder="Nama lengkap" required />
+        </div>
+        <div class="form-row">
+          <label class="label" for="emp-email">Email</label>
+          <input class="input" id="emp-email" type="email" name="email" value="{{ user.email }}" readonly />
+        </div>
+        <div class="form-row">
+          <label class="label" for="emp-phone">No HP</label>
+          <input class="input" id="emp-phone" type="tel" name="no_hp" placeholder="08xx-xxxx-xxxx" required />
+        </div>
+        <div class="form-row">
+          <label class="label" for="emp-address">Alamat</label>
+          <input class="input" id="emp-address" type="text" name="address" placeholder="Alamat lengkap" required />
+        </div>
+        <div class="form-row">
+          <label class="label" for="emp-gender">Jenis kelamin</label>
+          <select class="input" id="emp-gender" name="gender" required>
+            <option value="" selected>Pilih jenis kelamin</option>
+            <option value="Laki-laki">Laki-laki</option>
+            <option value="Perempuan">Perempuan</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label class="label" for="emp-marital">Status_nikah</label>
+          <select class="input" id="emp-marital" name="status_nikah" required>
+            <option value="" selected>Pilih status</option>
+            <option value="Belum menikah">Belum menikah</option>
+            <option value="Menikah">Menikah</option>
+            <option value="Cerai">Cerai</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label class="label" for="emp-notes">Keterangan</label>
+          <input class="input" id="emp-notes" type="text" name="notes" placeholder="Catatan tambahan (opsional)" />
+        </div>
+        <div class="btn-row">
+          <button class="btn primary" type="submit">Selesai</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  {% endif %}
 
   <div class="modal" id="changePasswordModal" aria-hidden="true">
     <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="changePasswordTitle">
@@ -303,7 +406,65 @@
     </div>
   </div>
 
+  {% if not has_employee_record %}
+  <script>
+    (function(){
+      const openBtn = document.getElementById("btnEmployeeProfile");
+      const modal = document.getElementById("employee-profile-modal");
+      const form = document.getElementById("employee-profile-form");
+      const msg = document.getElementById("employee-profile-msg");
+
+      function openModal(){
+        if (!modal) return;
+        modal.setAttribute("aria-hidden", "false");
+        modal.classList.add("show");
+      }
+
+      openBtn?.addEventListener("click", openModal);
+
+      openModal();
+
+      form?.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        if (!form) return;
+        const formData = new FormData(form);
+        msg.style.display = "none";
+        try {
+          const res = await fetch("/api/employee/profile", { method: "POST", body: formData });
+          const data = await res.json().catch(() => ({}));
+          const ok = res.ok && data.ok !== false;
+          msg.textContent = data.message || (ok ? "Berhasil." : "Gagal.");
+          msg.className = `alert ${ok ? "success" : "error"}`;
+          msg.style.display = "block";
+          if (ok) {
+            setTimeout(() => { window.location.reload(); }, 400);
+          }
+        } catch (err) {
+          msg.textContent = "Terjadi masalah jaringan.";
+          msg.className = "alert error";
+          msg.style.display = "block";
+        }
+      });
+    })();
+  </script>
+  {% endif %}
+
   <script src="{{ url_for('static', filename='js/dashboard_employee_mobile.js') }}"></script>
   <script src="{{ url_for('static', filename='js/change_password.js') }}"></script>
+  <script>
+    (function(){
+      const collapsibleCards = document.querySelectorAll("[data-collapsible]");
+      collapsibleCards.forEach((card) => {
+        const toggle = card.querySelector("[data-collapse-toggle]");
+        const body = card.querySelector(".card-body-collapsible");
+        if (!toggle || !body) return;
+        toggle.addEventListener("click", () => {
+          const isCollapsed = card.classList.toggle("is-collapsed");
+          toggle.setAttribute("aria-expanded", String(!isCollapsed));
+        });
+      });
+    })();
+  </script>
 </body>
 </html>
+

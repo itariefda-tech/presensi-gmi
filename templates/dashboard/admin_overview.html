@@ -20,9 +20,124 @@
 </div>
 
 <div class="card" style="margin-top:16px;">
+  <div style="font-weight:700; margin-bottom:8px;">Summary per Client</div>
+  <div class="table-wrap">
+    <table class="table" aria-label="Ringkasan client">
+      <thead>
+        <tr>
+          <th>Client</th>
+          <th>Telat</th>
+          <th>Absen</th>
+          <th>Leave Pending</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if not client_summaries %}
+        <tr><td colspan="4" class="muted">Belum ada data.</td></tr>
+        {% endif %}
+        {% for item in client_summaries %}
+        <tr>
+          <td>{{ item.client_name }}</td>
+          <td>{{ item.late_count }}</td>
+          <td>{{ item.absent_count }}</td>
+          <td>{{ item.leave_pending_count }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card" style="margin-top:12px;">
+  <div style="font-weight:700; margin-bottom:8px;">Alerts Operasional</div>
+  <div class="form-grid" style="grid-template-columns: repeat(3, minmax(220px, 1fr));">
+    <div>
+      <div class="label">Site tanpa policy</div>
+      <div style="margin:6px 0;">
+        <span class="badge {{ alerts.sites_without_policy.badge_class }}">{{ alerts.sites_without_policy.count }}</span>
+      </div>
+      <div class="muted">
+        {% for item in alerts.sites_without_policy["items"] %}
+        <div>{{ item }}</div>
+        {% endfor %}
+        {% if alerts.sites_without_policy["extra"] %}
+        <div>+{{ alerts.sites_without_policy["extra"] }} lainnya</div>
+        {% endif %}
+      </div>
+    </div>
+    <div>
+      <div class="label">Pegawai tanpa assignment aktif</div>
+      <div style="margin:6px 0;">
+        <span class="badge {{ alerts.employees_without_assignment.badge_class }}">{{ alerts.employees_without_assignment.count }}</span>
+      </div>
+      <div class="muted">
+        {% for item in alerts.employees_without_assignment["items"] %}
+        <div>{{ item }}</div>
+        {% endfor %}
+        {% if alerts.employees_without_assignment["extra"] %}
+        <div>+{{ alerts.employees_without_assignment["extra"] }} lainnya</div>
+        {% endif %}
+      </div>
+    </div>
+    <div>
+      <div class="label">Assignment expired</div>
+      <div style="margin:6px 0;">
+        <span class="badge {{ alerts.assignments_expired.badge_class }}">{{ alerts.assignments_expired.count }}</span>
+      </div>
+      <div class="muted">
+        {% for item in alerts.assignments_expired["items"] %}
+        <div>{{ item }}</div>
+        {% endfor %}
+        {% if alerts.assignments_expired["extra"] %}
+        <div>+{{ alerts.assignments_expired["extra"] }} lainnya</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card" style="margin-top:12px;">
+  <div style="font-weight:700; margin-bottom:8px;">Audit Log (Policy/Assignment)</div>
+  <div class="table-wrap">
+    <table class="table" aria-label="Audit log">
+      <thead>
+        <tr>
+          <th>Waktu</th>
+          <th>Entitas</th>
+          <th>Aksi</th>
+          <th>Pelaku</th>
+          <th>Ringkas</th>
+          <th>Detail</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if not audit_logs %}
+        <tr><td colspan="6" class="muted">Belum ada audit log.</td></tr>
+        {% endif %}
+        {% for log in audit_logs %}
+        <tr>
+          <td>{{ log.created_at }}</td>
+          <td>{{ log.entity_type }} #{{ log.entity_id or '-' }}</td>
+          <td>{{ log.action }}</td>
+          <td>{{ log.actor_email }}</td>
+          <td>{{ log.summary }}</td>
+          <td>
+            <details>
+              <summary class="btn secondary">Detail</summary>
+              <pre style="white-space:pre-wrap; margin-top:8px;">{{ log.details_json }}</pre>
+            </details>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card" style="margin-top:12px;">
   <h4 style="margin-top:0;">Catatan</h4>
   <p style="margin:8px 0; color:var(--muted); font-size:14px;">
-    Pembuatan akun admin hanya bisa dilakukan di dashboard ini (belum diimplementasi, siapkan endpoint nanti).
+    Pembuatan akun admin hanya bisa dilakukan di dashboard ini.
     Halaman attendance adalah prioritas utama; daftar client dan pegawai disediakan untuk referensi cepat.
   </p>
 </div>

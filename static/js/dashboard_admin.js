@@ -62,7 +62,7 @@ function renderLeave(rows){
       <td>${shortReason}</td>
       <td><span class="badge pending">pending</span></td>
       ${canApproveLeave ? `<td>
-        <div class="inline">
+        <div class="inline approval-actions">
           <button class="btn primary" data-approve-leave="${r.id}">Approve</button>
           <button class="btn secondary" data-reject-leave="${r.id}">Reject</button>
         </div>

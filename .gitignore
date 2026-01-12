@@ -9,6 +9,7 @@ venv/
 
 # Database & runtime
 presensi.db
+app.db
 *.sqlite
 *.sqlite3
 
@@ -26,3 +27,8 @@ Thumbs.db
 
 # Secrets
 .env
+node_modules
+
+# OneDrive conflict files
+*-AlarifiPC.*
+presensi-*.db
