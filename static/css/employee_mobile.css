@@ -395,6 +395,10 @@ html[data-theme="light"] .themeToggle.active::before{
   font-size: 13px;
   color: var(--muted);
 }
+.shift-subtitle{
+  text-align: right;
+  margin-top: 2px;
+}
 
 .swipe-viewport{
   overflow: hidden;

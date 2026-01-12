@@ -39,6 +39,7 @@ const netStatus = document.getElementById("netStatus");
 const helpModal = document.getElementById("helpModal");
 const btnHelp = document.getElementById("btnHelp");
 const btnHelpClose = document.getElementById("btnHelpClose");
+const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || "";
 
 const leaveType = document.getElementById("leaveType");
 const leaveFrom = document.getElementById("leaveFrom");
@@ -100,6 +101,11 @@ function parseIsoDate(value){
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return null;
   return { iso, date };
+}
+
+function appendCsrf(formData){
+  if (!formData || !csrfToken) return;
+  formData.append("csrf_token", csrfToken);
 }
 
 function updatePresenceReadiness(){
@@ -430,6 +436,12 @@ btnLocation?.addEventListener("click", async () => {
   }
 });
 
+if (btnLocation) {
+  window.addEventListener("load", () => {
+    btnLocation.click();
+  });
+}
+
 selfieFile?.addEventListener("change", (e) => {
   const file = e.target.files?.[0];
   if (!file) {
@@ -624,6 +636,7 @@ async function submitAttendance(url, labelEl){
   }
 
   const formData = new FormData();
+  appendCsrf(formData);
   formData.append("method", method);
   formData.append("lat", locationData.lat);
   formData.append("lng", locationData.lon);
@@ -789,6 +802,7 @@ btnLeave?.addEventListener("click", async () => {
     }
   }
   const formData = new FormData();
+  appendCsrf(formData);
   formData.append("type", leaveType.value);
   formData.append("date_from", parsedFrom.iso);
   formData.append("date_to", parsedTo.iso);

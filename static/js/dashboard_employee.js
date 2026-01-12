@@ -11,6 +11,7 @@ const qrVideo = document.getElementById("qrVideo");
 const qrData = document.getElementById("qrData");
 const btnCheckin = document.getElementById("btnCheckin");
 const attToast = document.getElementById("attToast");
+const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || "";
 
 const leaveType = document.getElementById("leaveType");
 const leaveFrom = document.getElementById("leaveFrom");
@@ -40,6 +41,11 @@ function toIsoDate(value){
     return `${match[3]}-${match[2]}-${match[1]}`;
   }
   return raw;
+}
+
+function appendCsrf(formData){
+  if (!formData || !csrfToken) return;
+  formData.append("csrf_token", csrfToken);
 }
 
 async function safeFetch(url, options = {}){
@@ -79,6 +85,12 @@ btnLocation?.addEventListener("click", () => {
     { enableHighAccuracy: true, timeout: 10000 }
   );
 });
+
+if (btnLocation) {
+  window.addEventListener("load", () => {
+    btnLocation.click();
+  });
+}
 
 selfieFile?.addEventListener("change", (e) => {
   const file = e.target.files?.[0];
@@ -170,6 +182,7 @@ btnCheckin?.addEventListener("click", async () => {
   }
 
   const formData = new FormData();
+  appendCsrf(formData);
   formData.append("method", method);
   formData.append("lat", lat);
   formData.append("lng", lon);
@@ -199,6 +212,7 @@ btnLeave?.addEventListener("click", async () => {
   const fromIso = toIsoDate(leaveFrom.value);
   const toIso = toIsoDate(leaveTo.value);
   const formData = new FormData();
+  appendCsrf(formData);
   formData.append("type", leaveType.value);
   formData.append("date_from", fromIso);
   formData.append("date_to", toIso);
