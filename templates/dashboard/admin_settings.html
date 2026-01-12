@@ -28,7 +28,7 @@
         {% endfor %}
       </select>
       <input class="input" type="text" name="password" placeholder="Password awal (default {{ default_password }})" />
-      <button class="btn primary" type="submit">Tambah</button>
+      <button class="btn primary btn-fixed-100" type="submit">Tambah</button>
     </form>
   </div>
 
@@ -140,7 +140,7 @@
                 <span>{{ s.name }}</span>
               </label>
               {% endfor %}
-              <button class="btn primary" type="submit">Simpan</button>
+              <button class="btn primary btn-fixed-100" type="submit">Simpan</button>
             </div>
           </form>
         </details>
@@ -171,7 +171,7 @@
         {% endfor %}
       </div>
       <div class="btn-row">
-        <button class="btn primary" type="submit" {% if role == 'hr_superadmin' %}disabled{% endif %}>Simpan</button>
+        <button class="btn primary btn-fixed-100" type="submit" {% if role == 'hr_superadmin' %}disabled{% endif %}>Simpan</button>
       </div>
     </form>
     {% endfor %}

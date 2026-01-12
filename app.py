@@ -9,7 +9,7 @@ import sqlite3
 import secrets
 import hashlib
 import hmac
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass
 from typing import Dict
 
@@ -25,7 +25,7 @@ class AuthResult:
     next_url: str | None = None
 
 
-APP_BOOT_ID = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+APP_BOOT_ID = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
 
 
 def create_app() -> Flask:
@@ -4586,7 +4586,7 @@ def _validate_qr_data(qr_data: str) -> tuple[bool, str]:
     if not ts_raw.isdigit():
         return False, "QR tidak valid."
     ts = int(ts_raw)
-    now = int(datetime.utcnow().timestamp())
+    now = int(datetime.now(timezone.utc).timestamp())
     if abs(now - ts) > 300:
         return False, "QR kadaluarsa."
     data = f"{ts_raw}|{nonce}".encode("utf-8")

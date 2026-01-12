@@ -61,7 +61,7 @@
     </div>
     <div class="form-row single" style="grid-column: 1 / -1;">
       <div class="form-inline">
-        <button class="btn primary" type="submit" {% if not can_add %}disabled{% endif %}>Simpan</button>
+        <button class="btn primary btn-fixed-100" type="submit" {% if not can_add %}disabled{% endif %}>Simpan</button>
       </div>
     </div>
     </form>
@@ -219,7 +219,7 @@
           </select>
         </div>
         <div class="btn-row">
-          <button class="btn primary" type="submit">Simpan</button>
+          <button class="btn primary btn-fixed-100" type="submit">Simpan</button>
         </div>
       </form>
       <form class="btn-row" method="post" action="{{ url_for('admin.employees_delete', employee_id=e.id) }}" onsubmit="return confirm('Hapus pegawai ini?');">

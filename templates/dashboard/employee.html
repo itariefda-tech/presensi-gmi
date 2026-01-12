@@ -3,6 +3,14 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <script>
+    (function(){
+      try {
+        var saved = localStorage.getItem("gmi_theme") || "dark";
+        document.documentElement.setAttribute("data-theme", saved);
+      } catch (e) {}
+    })();
+  </script>
   <title>Pegawai GMI</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/employee_mobile.css') }}" />
@@ -398,7 +406,7 @@
         <input class="input" type="password" name="new_password" placeholder="Password baru" required />
         <input class="input" type="password" name="new_password2" placeholder="Ulangi password baru" required />
         <div class="inline">
-          <button class="btn primary" type="submit">Simpan</button>
+          <button class="btn primary btn-fixed-100" type="submit">Simpan</button>
           <button class="btn secondary" type="button" id="btnCloseChangePassword">Batal</button>
         </div>
       </form>
