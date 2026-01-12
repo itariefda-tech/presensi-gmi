@@ -397,6 +397,7 @@ def create_app() -> Flask:
         assignment = _get_active_assignment(user.id) if user else None
         site = _get_site_by_id(assignment.get("site_id") if assignment else None)
         client = _get_client_by_id(site["client_id"]) if site and site["client_id"] else None
+        shift = _get_shift_by_id(assignment.get("shift_id") if assignment else None)
         return render_template(
             "dashboard/employee.html",
             user=user,
@@ -405,6 +406,7 @@ def create_app() -> Flask:
             active_assignment=assignment,
             active_site=site,
             active_client=client,
+            active_shift=shift,
         )
 
     @app.route("/dashboard/manual_attendance", methods=["GET", "POST"])
@@ -483,6 +485,7 @@ def create_app() -> Flask:
         policy = _resolve_attendance_policy(
             site["id"] if site else None,
             site["client_id"] if site else None,
+            assignment.get("shift_id") if assignment else None,
         )
         today = _today_key()
         if _attendance_action_exists(user.email, today, "checkin", "app"):
@@ -567,6 +570,7 @@ def create_app() -> Flask:
         policy = _resolve_attendance_policy(
             site["id"] if site else None,
             site["client_id"] if site else None,
+            assignment.get("shift_id") if assignment else None,
         )
         today = _today_key()
         if not _attendance_action_exists(user.email, today, "checkin", "app"):
@@ -1154,6 +1158,37 @@ def _today_key() -> str:
     return datetime.now().strftime("%Y-%m-%d")
 
 
+def _normalize_date_input(value: str | None) -> str | None:
+    if not value:
+        return None
+    raw = str(value).strip()
+    if not raw:
+        return None
+    if "/" in raw:
+        parts = raw.split("/")
+        if len(parts) == 3 and all(part.isdigit() for part in parts):
+            day, month, year = parts
+            if len(year) == 4:
+                try:
+                    dt = datetime(int(year), int(month), int(day))
+                    return dt.strftime("%Y-%m-%d")
+                except ValueError:
+                    return None
+        return None
+    try:
+        dt = datetime.fromisoformat(raw)
+        return dt.strftime("%Y-%m-%d")
+    except ValueError:
+        return None
+
+
+def _date_from_input(value: str | None) -> datetime.date | None:
+    normalized = _normalize_date_input(value)
+    if not normalized:
+        return None
+    return datetime.fromisoformat(normalized).date()
+
+
 def _device_time_parts(device_time: str | None) -> tuple[str, str]:
     if device_time:
         value = device_time.strip()
@@ -1293,7 +1328,11 @@ def _attendance_checkins_for_date(
 def _is_late_checkin(checkin_minutes: int | None, assignment: dict) -> bool:
     if checkin_minutes is None:
         return False
-    policy = _resolve_attendance_policy(assignment.get("site_id"), assignment.get("client_id"))
+    policy = _resolve_attendance_policy(
+        assignment.get("site_id"),
+        assignment.get("client_id"),
+        assignment.get("shift_id"),
+    )
     cutoff_minutes = _parse_hhmm(policy.get("cutoff_time"))
     # Default start time when policy doesn't define a cutoff.
     start_minutes = cutoff_minutes if cutoff_minutes is not None else 9 * 60
@@ -1800,22 +1839,39 @@ def _get_active_assignment(user_id: int) -> dict | None:
     try:
         if not _table_exists(conn, "assignments"):
             return None
-        today = _today_key()
         cur = conn.execute(
             """
             SELECT *
             FROM assignments
             WHERE employee_user_id = ?
               AND status = 'ACTIVE'
-              AND start_date <= ?
-              AND (end_date IS NULL OR end_date = '' OR end_date >= ?)
             ORDER BY start_date DESC, created_at DESC, id DESC
-            LIMIT 1
             """,
-            (user_id, today, today),
+            (user_id,),
         )
-        row = cur.fetchone()
-        return dict(row) if row else None
+        rows = [dict(row) for row in cur.fetchall()]
+        if not rows:
+            return None
+        today = datetime.fromisoformat(_today_key()).date()
+        for row in rows:
+            start_dt = _date_from_input(row.get("start_date"))
+            if not start_dt:
+                continue
+            end_dt = _date_from_input(row.get("end_date")) if row.get("end_date") else None
+            if start_dt <= today and (not end_dt or end_dt >= today):
+                return row
+        return rows[0]
+    finally:
+        conn.close()
+
+
+def _get_shift_by_id(shift_id: int | None) -> sqlite3.Row | None:
+    if not shift_id:
+        return None
+    conn = _db_connect()
+    try:
+        cur = conn.execute("SELECT * FROM shifts WHERE id = ?", (shift_id,))
+        return cur.fetchone()
     finally:
         conn.close()
 
@@ -1842,19 +1898,40 @@ def _policy_with_defaults(row: sqlite3.Row | None) -> dict:
     return policy
 
 
-def _resolve_attendance_policy(site_id: int | None, client_id: int | None) -> dict:
+def _resolve_attendance_policy(
+    site_id: int | None, client_id: int | None, shift_id: int | None
+) -> dict:
     conn = _db_connect()
     try:
         if not _table_exists(conn, "attendance_policies"):
             return DEFAULT_ATTENDANCE_POLICY.copy()
         today = _today_key()
         if site_id:
+            if shift_id:
+                cur = conn.execute(
+                    """
+                    SELECT *
+                    FROM attendance_policies
+                    WHERE scope_type = 'SITE'
+                      AND site_id = ?
+                      AND shift_id = ?
+                      AND effective_from <= ?
+                      AND (effective_to IS NULL OR effective_to = '' OR effective_to >= ?)
+                    ORDER BY effective_from DESC
+                    LIMIT 1
+                    """,
+                    (site_id, shift_id, today, today),
+                )
+                row = cur.fetchone()
+                if row:
+                    return _policy_with_defaults(row)
             cur = conn.execute(
                 """
                 SELECT *
                 FROM attendance_policies
                 WHERE scope_type = 'SITE'
                   AND site_id = ?
+                  AND (shift_id IS NULL OR shift_id = '')
                   AND effective_from <= ?
                   AND (effective_to IS NULL OR effective_to = '' OR effective_to >= ?)
                 ORDER BY effective_from DESC
@@ -1866,12 +1943,31 @@ def _resolve_attendance_policy(site_id: int | None, client_id: int | None) -> di
             if row:
                 return _policy_with_defaults(row)
         if client_id:
+            if shift_id:
+                cur = conn.execute(
+                    """
+                    SELECT *
+                    FROM attendance_policies
+                    WHERE scope_type = 'CLIENT'
+                      AND client_id = ?
+                      AND shift_id = ?
+                      AND effective_from <= ?
+                      AND (effective_to IS NULL OR effective_to = '' OR effective_to >= ?)
+                    ORDER BY effective_from DESC
+                    LIMIT 1
+                    """,
+                    (client_id, shift_id, today, today),
+                )
+                row = cur.fetchone()
+                if row:
+                    return _policy_with_defaults(row)
             cur = conn.execute(
                 """
                 SELECT *
                 FROM attendance_policies
                 WHERE scope_type = 'CLIENT'
                   AND client_id = ?
+                  AND (shift_id IS NULL OR shift_id = '')
                   AND effective_from <= ?
                   AND (effective_to IS NULL OR effective_to = '' OR effective_to >= ?)
                 ORDER BY effective_from DESC
@@ -2801,6 +2897,8 @@ def _list_assignments_by_client(client_id: int) -> list[dict]:
                 a.site_id,
                 s.name AS site_name,
                 COALESCE(c.name, s.client_name) AS client_name,
+                a.shift_id,
+                sh.name AS shift_name,
                 a.job_title,
                 a.start_date,
                 a.end_date,
@@ -2811,6 +2909,7 @@ def _list_assignments_by_client(client_id: int) -> list[dict]:
             JOIN users u ON u.id = a.employee_user_id
             JOIN sites s ON s.id = a.site_id
             LEFT JOIN clients c ON c.id = s.client_id
+            LEFT JOIN shifts sh ON sh.id = a.shift_id
             WHERE s.client_id = ?
             ORDER BY a.created_at DESC
             """,
@@ -2836,6 +2935,8 @@ def _list_assignments() -> list[dict]:
                 a.site_id,
                 s.name AS site_name,
                 COALESCE(c.name, s.client_name) AS client_name,
+                a.shift_id,
+                sh.name AS shift_name,
                 a.job_title,
                 a.start_date,
                 a.end_date,
@@ -2846,6 +2947,7 @@ def _list_assignments() -> list[dict]:
             JOIN users u ON u.id = a.employee_user_id
             JOIN sites s ON s.id = a.site_id
             LEFT JOIN clients c ON c.id = s.client_id
+            LEFT JOIN shifts sh ON sh.id = a.shift_id
             ORDER BY a.created_at DESC
             """
         )
@@ -2865,11 +2967,13 @@ def _list_policies_by_client(client_id: int) -> list[dict]:
                 p.*,
                 c.name AS direct_client_name,
                 s.name AS site_name,
-                COALESCE(c.name, cs.name, s.client_name) AS client_name
+                COALESCE(c.name, cs.name, s.client_name) AS client_name,
+                sh.name AS shift_name
             FROM attendance_policies p
             LEFT JOIN clients c ON c.id = p.client_id
             LEFT JOIN sites s ON s.id = p.site_id
             LEFT JOIN clients cs ON cs.id = s.client_id
+            LEFT JOIN shifts sh ON sh.id = p.shift_id
             WHERE p.client_id = ? OR s.client_id = ?
             ORDER BY p.created_at DESC
             """,
@@ -2891,11 +2995,13 @@ def _list_policies() -> list[dict]:
                 p.*,
                 c.name AS direct_client_name,
                 s.name AS site_name,
-                COALESCE(c.name, cs.name, s.client_name) AS client_name
+                COALESCE(c.name, cs.name, s.client_name) AS client_name,
+                sh.name AS shift_name
             FROM attendance_policies p
             LEFT JOIN clients c ON c.id = p.client_id
             LEFT JOIN sites s ON s.id = p.site_id
             LEFT JOIN clients cs ON cs.id = s.client_id
+            LEFT JOIN shifts sh ON sh.id = p.shift_id
             ORDER BY p.created_at DESC
             """
         )
@@ -2908,6 +3014,7 @@ def _create_policy(
     scope_type: str,
     client_id: int | None,
     site_id: int | None,
+    shift_id: int | None,
     effective_from: str,
     effective_to: str | None,
     work_duration_minutes: int | None,
@@ -2929,16 +3036,17 @@ def _create_policy(
         cur = conn.execute(
             """
             INSERT INTO attendance_policies (
-                scope_type, client_id, site_id, effective_from, effective_to,
+                scope_type, client_id, site_id, shift_id, effective_from, effective_to,
                 work_duration_minutes, grace_minutes, late_threshold_minutes,
                 allow_gps, require_selfie, allow_qr, auto_checkout, cutoff_time,
                 created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 scope,
                 client_id,
                 site_id,
+                shift_id,
                 effective_from,
                 effective_to or None,
                 work_duration_minutes,
@@ -2965,6 +3073,7 @@ def _update_policy(
     scope_type: str,
     client_id: int | None,
     site_id: int | None,
+    shift_id: int | None,
     effective_from: str,
     effective_to: str | None,
     work_duration_minutes: int | None,
@@ -2986,7 +3095,7 @@ def _update_policy(
         conn.execute(
             """
             UPDATE attendance_policies
-            SET scope_type = ?, client_id = ?, site_id = ?, effective_from = ?, effective_to = ?,
+            SET scope_type = ?, client_id = ?, site_id = ?, shift_id = ?, effective_from = ?, effective_to = ?,
                 work_duration_minutes = ?, grace_minutes = ?, late_threshold_minutes = ?,
                 allow_gps = ?, require_selfie = ?, allow_qr = ?, auto_checkout = ?, cutoff_time = ?,
                 updated_at = ?
@@ -2996,6 +3105,7 @@ def _update_policy(
                 scope,
                 client_id,
                 site_id,
+                shift_id,
                 effective_from,
                 effective_to or None,
                 work_duration_minutes,
@@ -3019,6 +3129,7 @@ def _update_policy(
 def _create_assignment(
     employee_user_id: int,
     site_id: int,
+    shift_id: int | None,
     job_title: str | None,
     start_date: str,
     end_date: str | None,
@@ -3041,13 +3152,14 @@ def _create_assignment(
         cur = conn.execute(
             """
             INSERT INTO assignments (
-                employee_user_id, site_id, job_title, start_date, end_date,
+                employee_user_id, site_id, shift_id, job_title, start_date, end_date,
                 status, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 employee_user_id,
                 site_id,
+                shift_id,
                 job_title,
                 start_date,
                 end_date,
@@ -3067,6 +3179,7 @@ def _update_assignment(
     assignment_id: int,
     employee_user_id: int,
     site_id: int,
+    shift_id: int | None,
     job_title: str | None,
     start_date: str,
     end_date: str | None,
@@ -3089,13 +3202,14 @@ def _update_assignment(
         conn.execute(
             """
             UPDATE assignments
-            SET employee_user_id = ?, site_id = ?, job_title = ?, start_date = ?, end_date = ?,
+            SET employee_user_id = ?, site_id = ?, shift_id = ?, job_title = ?, start_date = ?, end_date = ?,
                 status = ?, updated_at = ?
             WHERE id = ?
             """,
             (
                 employee_user_id,
                 site_id,
+                shift_id,
                 job_title,
                 start_date,
                 end_date,
@@ -3519,6 +3633,7 @@ def _init_db() -> None:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 employee_user_id INTEGER NOT NULL,
                 site_id INTEGER NOT NULL,
+                shift_id INTEGER,
                 job_title TEXT,
                 start_date TEXT NOT NULL,
                 end_date TEXT,
@@ -3526,7 +3641,8 @@ def _init_db() -> None:
                 created_at TEXT,
                 updated_at TEXT,
                 FOREIGN KEY (employee_user_id) REFERENCES users(id) ON DELETE RESTRICT,
-                FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE RESTRICT
+                FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE RESTRICT,
+                FOREIGN KEY (shift_id) REFERENCES shifts(id) ON DELETE RESTRICT
             )
             """
         )
@@ -3537,6 +3653,7 @@ def _init_db() -> None:
                 scope_type TEXT NOT NULL,
                 client_id INTEGER,
                 site_id INTEGER,
+                shift_id INTEGER,
                 effective_from TEXT NOT NULL,
                 effective_to TEXT,
                 work_duration_minutes INTEGER,
@@ -3548,7 +3665,10 @@ def _init_db() -> None:
                 auto_checkout INTEGER DEFAULT 0,
                 cutoff_time TEXT,
                 created_at TEXT,
-                updated_at TEXT
+                updated_at TEXT,
+                FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE RESTRICT,
+                FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE RESTRICT,
+                FOREIGN KEY (shift_id) REFERENCES shifts(id) ON DELETE RESTRICT
             )
             """
         )
@@ -3729,6 +3849,10 @@ def _init_db() -> None:
                 )
             except sqlite3.IntegrityError:
                 pass
+        if _table_exists(conn, "assignments"):
+            _ensure_column(conn, "assignments", "shift_id", "shift_id INTEGER")
+        if _table_exists(conn, "attendance_policies"):
+            _ensure_column(conn, "attendance_policies", "shift_id", "shift_id INTEGER")
         if _table_exists(conn, "manual_attendance_requests"):
             _ensure_column(conn, "manual_attendance_requests", "created_by_email", "created_by_email TEXT")
             conn.execute(
@@ -4821,6 +4945,7 @@ def admin_bp() -> Blueprint:
             user=user,
             employees=_list_employee_users(),
             sites=_list_sites(),
+            shifts=_list_shifts(),
             assignments=_list_assignments(),
         )
 
@@ -4832,6 +4957,7 @@ def admin_bp() -> Blueprint:
             user=user,
             clients=_clients(),
             sites=_list_sites(),
+            shifts=_list_shifts(),
             policies=_list_policies(),
         )
 
@@ -4968,6 +5094,7 @@ def admin_bp() -> Blueprint:
         _require_hr_superadmin(user)
         employee_id_raw = (request.form.get("employee_user_id") or "").strip()
         site_id_raw = (request.form.get("site_id") or "").strip()
+        shift_id_raw = (request.form.get("shift_id") or "").strip()
         job_title = (request.form.get("job_title") or "").strip()
         start_date = (request.form.get("start_date") or "").strip()
         end_date = (request.form.get("end_date") or "").strip()
@@ -4985,15 +5112,35 @@ def admin_bp() -> Blueprint:
         except ValueError:
             flash("Pegawai atau site tidak valid.")
             return redirect(url_for("admin.assignments", _anchor="add-assignment"))
+        shift_id = None
+        if shift_id_raw:
+            if not shift_id_raw.isdigit():
+                flash("Shift tidak valid.")
+                return redirect(url_for("admin.assignments", _anchor="add-assignment"))
+            shift_id = int(shift_id_raw)
+            shift_row = _get_shift_by_id(shift_id)
+            if not shift_row or int(shift_row["is_active"] or 0) != 1:
+                flash("Shift tidak ditemukan atau nonaktif.")
+                return redirect(url_for("admin.assignments", _anchor="add-assignment"))
         if status not in {"ACTIVE", "ENDED"}:
             status = "ACTIVE"
+
+        normalized_start = _normalize_date_input(start_date)
+        if not normalized_start:
+            flash("Tanggal mulai wajib format dd/mm/yyyy.")
+            return redirect(url_for("admin.assignments", _anchor="add-assignment"))
+        normalized_end = _normalize_date_input(end_date) if end_date else None
+        if end_date and not normalized_end:
+            flash("Tanggal selesai wajib format dd/mm/yyyy.")
+            return redirect(url_for("admin.assignments", _anchor="add-assignment"))
 
         assignment_id = _create_assignment(
             employee_user_id=employee_id,
             site_id=site_id,
+            shift_id=shift_id,
             job_title=job_title or None,
-            start_date=start_date,
-            end_date=end_date or None,
+            start_date=normalized_start,
+            end_date=normalized_end,
             status=status,
         )
         _log_audit_event(
@@ -5005,9 +5152,10 @@ def admin_bp() -> Blueprint:
             details={
                 "employee_user_id": employee_id,
                 "site_id": site_id,
+                "shift_id": shift_id,
                 "job_title": job_title or None,
-                "start_date": start_date,
-                "end_date": end_date or None,
+                "start_date": normalized_start,
+                "end_date": normalized_end,
                 "status": status,
             },
         )
@@ -5020,6 +5168,7 @@ def admin_bp() -> Blueprint:
         _require_hr_superadmin(user)
         employee_id_raw = (request.form.get("employee_user_id") or "").strip()
         site_id_raw = (request.form.get("site_id") or "").strip()
+        shift_id_raw = (request.form.get("shift_id") or "").strip()
         job_title = (request.form.get("job_title") or "").strip()
         start_date = (request.form.get("start_date") or "").strip()
         end_date = (request.form.get("end_date") or "").strip()
@@ -5037,8 +5186,27 @@ def admin_bp() -> Blueprint:
         except ValueError:
             flash("Pegawai atau site tidak valid.")
             return redirect(url_for("admin.assignments"))
+        shift_id = None
+        if shift_id_raw:
+            if not shift_id_raw.isdigit():
+                flash("Shift tidak valid.")
+                return redirect(url_for("admin.assignments"))
+            shift_id = int(shift_id_raw)
+            shift_row = _get_shift_by_id(shift_id)
+            if not shift_row or int(shift_row["is_active"] or 0) != 1:
+                flash("Shift tidak ditemukan atau nonaktif.")
+                return redirect(url_for("admin.assignments"))
         if status not in {"ACTIVE", "ENDED"}:
             status = "ACTIVE"
+
+        normalized_start = _normalize_date_input(start_date)
+        if not normalized_start:
+            flash("Tanggal mulai wajib format dd/mm/yyyy.")
+            return redirect(url_for("admin.assignments"))
+        normalized_end = _normalize_date_input(end_date) if end_date else None
+        if end_date and not normalized_end:
+            flash("Tanggal selesai wajib format dd/mm/yyyy.")
+            return redirect(url_for("admin.assignments"))
 
         current = _get_assignment_by_id(assignment_id)
         if not current:
@@ -5049,14 +5217,22 @@ def admin_bp() -> Blueprint:
             current_status = (current.get("status") or "").upper()
             current_employee_id = int(current.get("employee_user_id") or 0)
             current_site_id = int(current.get("site_id") or 0)
-            current_start_date = (current.get("start_date") or "").strip()
+            current_shift_id = current.get("shift_id")
+            current_shift_id = int(current_shift_id) if current_shift_id not in (None, "") else None
+            current_start_date_raw = (current.get("start_date") or "").strip()
+            current_start_date = _normalize_date_input(current_start_date_raw) or current_start_date_raw
             needs_new = current_status != "ACTIVE"
             if not needs_new:
-                if current_employee_id != employee_id or current_site_id != site_id or current_start_date != start_date:
+                if (
+                    current_employee_id != employee_id
+                    or current_site_id != site_id
+                    or current_shift_id != shift_id
+                    or current_start_date != normalized_start
+                ):
                     needs_new = True
             if needs_new:
                 if current_status == "ACTIVE":
-                    _end_assignment_with_date(assignment_id, start_date)
+                    _end_assignment_with_date(assignment_id, normalized_start)
                     _log_audit_event(
                         entity_type="assignment",
                         entity_id=assignment_id,
@@ -5065,15 +5241,16 @@ def admin_bp() -> Blueprint:
                         summary=f"Assignment ditutup untuk user_id {current_employee_id}.",
                         details={
                             "before": current,
-                            "end_date": start_date,
+                            "end_date": normalized_start,
                         },
                     )
                 new_assignment_id = _create_assignment(
                     employee_user_id=employee_id,
                     site_id=site_id,
+                    shift_id=shift_id,
                     job_title=job_title or None,
-                    start_date=start_date,
-                    end_date=end_date or None,
+                    start_date=normalized_start,
+                    end_date=normalized_end,
                     status=status,
                 )
                 _log_audit_event(
@@ -5085,9 +5262,10 @@ def admin_bp() -> Blueprint:
                     details={
                         "employee_user_id": employee_id,
                         "site_id": site_id,
+                        "shift_id": shift_id,
                         "job_title": job_title or None,
-                        "start_date": start_date,
-                        "end_date": end_date or None,
+                        "start_date": normalized_start,
+                        "end_date": normalized_end,
                         "status": status,
                         "previous_assignment_id": assignment_id,
                     },
@@ -5099,9 +5277,10 @@ def admin_bp() -> Blueprint:
             assignment_id=assignment_id,
             employee_user_id=employee_id,
             site_id=site_id,
+            shift_id=shift_id,
             job_title=job_title or None,
-            start_date=start_date,
-            end_date=end_date or None,
+            start_date=normalized_start,
+            end_date=normalized_end,
             status=status,
         )
         _log_audit_event(
@@ -5115,9 +5294,10 @@ def admin_bp() -> Blueprint:
                 "after": {
                     "employee_user_id": employee_id,
                     "site_id": site_id,
+                    "shift_id": shift_id,
                     "job_title": job_title or None,
-                    "start_date": start_date,
-                    "end_date": end_date or None,
+                    "start_date": normalized_start,
+                    "end_date": normalized_end,
                     "status": status,
                 },
             },
@@ -5152,11 +5332,11 @@ def admin_bp() -> Blueprint:
         scope_type = (request.form.get("scope_type") or "CLIENT").strip().upper()
         client_id_raw = (request.form.get("client_id") or "").strip()
         site_id_raw = (request.form.get("site_id") or "").strip()
+        shift_id_raw = (request.form.get("shift_id") or "").strip()
         effective_from = (request.form.get("effective_from") or "").strip()
         effective_to = (request.form.get("effective_to") or "").strip()
         work_duration_raw = (request.form.get("work_duration_minutes") or "").strip()
         grace_raw = (request.form.get("grace_minutes") or "").strip()
-        late_raw = (request.form.get("late_threshold_minutes") or "").strip()
         allow_gps = 1 if request.form.get("allow_gps") == "1" else 0
         require_selfie = 1 if request.form.get("require_selfie") == "1" else 0
         allow_qr = 1 if request.form.get("allow_qr") == "1" else 0
@@ -5178,14 +5358,26 @@ def admin_bp() -> Blueprint:
             flash("Site wajib dipilih untuk scope SITE.")
             return redirect(url_for("admin.policies", _anchor="add-policy"))
 
+        shift_id = None
+        if shift_id_raw:
+            if not shift_id_raw.isdigit():
+                flash("Shift tidak valid.")
+                return redirect(url_for("admin.policies", _anchor="add-policy"))
+            shift_id = int(shift_id_raw)
+            shift_row = _get_shift_by_id(shift_id)
+            if not shift_row or int(shift_row["is_active"] or 0) != 1:
+                flash("Shift tidak ditemukan atau nonaktif.")
+                return redirect(url_for("admin.policies", _anchor="add-policy"))
+
         work_duration = int(work_duration_raw) if work_duration_raw.isdigit() else None
         grace_minutes = int(grace_raw) if grace_raw.isdigit() else None
-        late_minutes = int(late_raw) if late_raw.isdigit() else None
+        late_minutes = None
 
         policy_id = _create_policy(
             scope_type=scope_type,
             client_id=client_id,
             site_id=site_id,
+            shift_id=shift_id,
             effective_from=effective_from,
             effective_to=effective_to or None,
             work_duration_minutes=work_duration,
@@ -5207,6 +5399,7 @@ def admin_bp() -> Blueprint:
                 "scope_type": scope_type,
                 "client_id": client_id,
                 "site_id": site_id,
+                "shift_id": shift_id,
                 "effective_from": effective_from,
                 "effective_to": effective_to or None,
                 "work_duration_minutes": work_duration,
@@ -5230,11 +5423,11 @@ def admin_bp() -> Blueprint:
         scope_type = (request.form.get("scope_type") or "CLIENT").strip().upper()
         client_id_raw = (request.form.get("client_id") or "").strip()
         site_id_raw = (request.form.get("site_id") or "").strip()
+        shift_id_raw = (request.form.get("shift_id") or "").strip()
         effective_from = (request.form.get("effective_from") or "").strip()
         effective_to = (request.form.get("effective_to") or "").strip()
         work_duration_raw = (request.form.get("work_duration_minutes") or "").strip()
         grace_raw = (request.form.get("grace_minutes") or "").strip()
-        late_raw = (request.form.get("late_threshold_minutes") or "").strip()
         allow_gps = 1 if request.form.get("allow_gps") == "1" else 0
         require_selfie = 1 if request.form.get("require_selfie") == "1" else 0
         allow_qr = 1 if request.form.get("allow_qr") == "1" else 0
@@ -5256,15 +5449,27 @@ def admin_bp() -> Blueprint:
             flash("Site wajib dipilih untuk scope SITE.")
             return redirect(url_for("admin.policies"))
 
+        shift_id = None
+        if shift_id_raw:
+            if not shift_id_raw.isdigit():
+                flash("Shift tidak valid.")
+                return redirect(url_for("admin.policies"))
+            shift_id = int(shift_id_raw)
+            shift_row = _get_shift_by_id(shift_id)
+            if not shift_row or int(shift_row["is_active"] or 0) != 1:
+                flash("Shift tidak ditemukan atau nonaktif.")
+                return redirect(url_for("admin.policies"))
+
         work_duration = int(work_duration_raw) if work_duration_raw.isdigit() else None
         grace_minutes = int(grace_raw) if grace_raw.isdigit() else None
-        late_minutes = int(late_raw) if late_raw.isdigit() else None
+        late_minutes = None if not before else before.get("late_threshold_minutes")
 
         _update_policy(
             policy_id=policy_id,
             scope_type=scope_type,
             client_id=client_id,
             site_id=site_id,
+            shift_id=shift_id,
             effective_from=effective_from,
             effective_to=effective_to or None,
             work_duration_minutes=work_duration,
@@ -5288,6 +5493,7 @@ def admin_bp() -> Blueprint:
                     "scope_type": scope_type,
                     "client_id": client_id,
                     "site_id": site_id,
+                    "shift_id": shift_id,
                     "effective_from": effective_from,
                     "effective_to": effective_to or None,
                     "work_duration_minutes": work_duration,

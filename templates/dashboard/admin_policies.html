@@ -41,6 +41,15 @@
       </select>
     </div>
     <div class="form-row">
+      <label class="label" for="policy-shift">Shift :</label>
+      <select class="input" id="policy-shift" name="shift_id">
+        <option value="" selected>Rolling(semuanya)</option>
+        {% for sh in shifts %}
+        <option value="{{ sh.id }}">{{ sh.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-row">
       <label class="label" for="policy-from">Berlaku Mulai :</label>
       <input class="input" id="policy-from" type="date" name="effective_from" required />
     </div>
@@ -55,10 +64,6 @@
     <div class="form-row">
       <label class="label" for="policy-grace">Toleransi Telat (menit) :</label>
       <input class="input" id="policy-grace" type="number" name="grace_minutes" min="0" placeholder="Contoh: 10" />
-    </div>
-    <div class="form-row">
-      <label class="label" for="policy-late">Batas Telat (menit) :</label>
-      <input class="input" id="policy-late" type="number" name="late_threshold_minutes" min="0" placeholder="Contoh: 30" />
     </div>
     <div class="form-row">
       <label class="label" for="policy-cutoff">Cutoff Time :</label>
@@ -108,6 +113,7 @@
         <th>Scope</th>
         <th>Client</th>
         <th>Site</th>
+        <th>Shift</th>
         <th>Periode</th>
         <th>Aturan</th>
         <th>Aksi</th>
@@ -115,13 +121,14 @@
     </thead>
     <tbody>
       {% if not policies %}
-      <tr><td colspan="6" class="muted">Belum ada policy.</td></tr>
+      <tr><td colspan="7" class="muted">Belum ada policy.</td></tr>
       {% endif %}
       {% for p in policies %}
       <tr>
         <td>{{ p.scope_type }}</td>
         <td>{{ p.client_name or '-' }}</td>
         <td>{{ p.site_name or '-' }}</td>
+        <td>{{ p.shift_name or '-' }}</td>
         <td>{{ p.effective_from }}{% if p.effective_to %} - {{ p.effective_to }}{% endif %}</td>
         <td>
           GPS: {{ 'Ya' if p.allow_gps else 'Tidak' }},
@@ -183,6 +190,15 @@
           </select>
         </div>
         <div class="form-row">
+          <label class="label" for="policy-shift-{{ p.id }}">Shift</label>
+          <select class="input" id="policy-shift-{{ p.id }}" name="shift_id">
+            <option value="" {% if not p.shift_id %}selected{% endif %}>Rolling(semuanya)</option>
+            {% for sh in shifts %}
+            <option value="{{ sh.id }}" {% if p.shift_id == sh.id %}selected{% endif %}>{{ sh.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-row">
           <label class="label" for="policy-from-{{ p.id }}">Berlaku Mulai</label>
           <input class="input" id="policy-from-{{ p.id }}" type="date" name="effective_from" value="{{ p.effective_from }}" required />
         </div>
@@ -197,10 +213,6 @@
         <div class="form-row">
           <label class="label" for="policy-grace-{{ p.id }}">Toleransi Telat (menit)</label>
           <input class="input" id="policy-grace-{{ p.id }}" type="number" name="grace_minutes" min="0" value="{{ p.grace_minutes or '' }}" />
-        </div>
-        <div class="form-row">
-          <label class="label" for="policy-late-{{ p.id }}">Batas Telat (menit)</label>
-          <input class="input" id="policy-late-{{ p.id }}" type="number" name="late_threshold_minutes" min="0" value="{{ p.late_threshold_minutes or '' }}" />
         </div>
         <div class="form-row">
           <label class="label" for="policy-cutoff-{{ p.id }}">Cutoff Time</label>
