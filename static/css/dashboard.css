@@ -148,7 +148,7 @@ a:hover{ text-decoration:underline; }
 }
 .nav{
   display:grid;
-  gap:12px;
+  gap:10px;
   width: max-content;
 }
 .nav a{
@@ -157,7 +157,7 @@ a:hover{ text-decoration:underline; }
   align-items:center;
   gap:10px;
   width: 100%;
-  padding:10px;
+  padding:7.5px 10px;
   border-radius:12px;
   color: var(--text);
   border:1px solid transparent;
@@ -210,8 +210,8 @@ a:hover{ text-decoration:underline; }
   white-space: nowrap;
 }
 .collapse-btn{
-  width: 45px;
-  height: 45px;
+  width: 41px;
+  height: 36px;
   padding: 0;
   display:inline-flex;
   align-items:center;
@@ -234,7 +234,7 @@ a:hover{ text-decoration:underline; }
 }
 .shell.sidebar-collapsed .nav a{
   justify-content:center;
-  padding:10px;
+  padding:7.5px;
 }
 .shell.sidebar-collapsed .nav a::after{
   left: 6px;
@@ -389,6 +389,29 @@ a:hover{ text-decoration:underline; }
   border-bottom:1px solid var(--border);
   text-align:left;
 }
+.shift-table th,
+.shift-table td{
+  padding: 10px 2px;
+}
+.shift-table .shift-col-status{
+  width: 110px;
+  white-space: nowrap;
+}
+.shift-table .shift-col-actions{
+  width: 190px;
+  white-space: nowrap;
+}
+.shift-table .shift-actions{
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+.shift-table .shift-actions form{
+  margin: 0;
+}
+.shift-table .shift-actions .btn{
+  white-space: nowrap;
+}
 .table th{
   color: var(--muted);
   font-weight:700;
@@ -464,6 +487,10 @@ a:hover{ text-decoration:underline; }
 }
 .site-table-wrap{
   overflow: visible;
+}
+.shift-grace-input{
+  width: 50%;
+  min-width: 70px;
 }
 
 .alert{

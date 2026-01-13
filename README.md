@@ -234,3 +234,19 @@ SHIFT + OVERTIME (optional, tied to policy)
 - Roadmap: `docs/roadmap.md`
 - focus detail : `register_issue.md` dan `client_entity.md`
 - edukasi : `glosarium` dan `template_investigasi`
+
+## Panduan Pull
+
+Jika belum ada repo di perangkat lain:
+
+```bash
+git clone https://github.com/itariefda-tech/presensi-gmi.git
+cd presensi-gmi
+```
+
+Jika repo sudah ada:
+
+```bash
+cd presensi-gmi
+git pull origin main
+```

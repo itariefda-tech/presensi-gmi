@@ -4823,7 +4823,7 @@ def admin_bp() -> Blueprint:
             "client_policy_active": any(
                 p.get("scope_type") == "CLIENT"
                 and int(p.get("client_id") or 0) == client_id
-                and _policy_active(p)
+                and _policy_active_for_date(p, today)
                 for p in policies
             ),
             "site_policy_count": len(site_policy_ids),

@@ -28,15 +28,15 @@
 <div class="card" style="margin-top:12px;">
   <div style="font-weight:700; margin-bottom:8px;">Daftar Shift</div>
   <div class="table-wrap">
-    <table class="table" aria-label="Shift list">
+    <table class="table shift-table" aria-label="Shift list">
       <thead>
         <tr>
           <th>Nama</th>
           <th>Mulai</th>
           <th>Selesai</th>
           <th>Grace</th>
-          <th>Status</th>
-          <th>Aksi</th>
+          <th class="shift-col-status">Status</th>
+          <th class="shift-col-actions">Aksi</th>
         </tr>
       </thead>
       <tbody>
@@ -48,10 +48,10 @@
           <td><input class="input" type="text" name="name" value="{{ s.name }}" form="shift-form-{{ s.id }}" /></td>
           <td><input class="input" type="time" name="start_time" value="{{ s.start_time or '' }}" form="shift-form-{{ s.id }}" /></td>
           <td><input class="input" type="time" name="end_time" value="{{ s.end_time or '' }}" form="shift-form-{{ s.id }}" /></td>
-          <td><input class="input" type="number" name="grace_minutes" value="{{ s.grace_minutes or 0 }}" min="0" form="shift-form-{{ s.id }}" /></td>
-          <td>{% if s.is_active %}Active{% else %}Disabled{% endif %}</td>
-          <td>
-            <div class="stack">
+          <td><input class="input shift-grace-input" type="number" name="grace_minutes" value="{{ s.grace_minutes or 0 }}" min="0" form="shift-form-{{ s.id }}" /></td>
+          <td class="shift-col-status">{% if s.is_active %}Active{% else %}Disabled{% endif %}</td>
+          <td class="shift-col-actions">
+            <div class="stack shift-actions">
               <form id="shift-form-{{ s.id }}" method="post" action="{{ url_for('admin.settings_shifts_update', shift_id=s.id) }}">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                 <button class="btn primary" type="submit">Save</button>

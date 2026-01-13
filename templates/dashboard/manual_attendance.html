@@ -23,7 +23,7 @@
         <select class="input" name="employee_id" required>
           <option value="">Pilih pegawai</option>
           {% for e in employees %}
-          <option value="{{ e.id }}" {% if form.employee_id|int == e.id %}selected{% endif %}>
+          <option value="{{ e.id }}" {% if (form.get('employee_id') or '')|int == e.id %}selected{% endif %}>
             {{ e.name }} - {{ e.client }}
           </option>
           {% endfor %}
@@ -31,23 +31,23 @@
       </div>
       <div class="field-group">
         <label class="label">Tanggal</label>
-        <input class="input" type="date" name="date" value="{{ form.date or '' }}" required />
+        <input class="input" type="date" name="date" value="{{ form.get('date') or '' }}" required />
       </div>
       <div class="field-group">
         <label class="label">Waktu</label>
-        <input class="input" type="time" name="time" value="{{ form.time or '' }}" required />
+        <input class="input" type="time" name="time" value="{{ form.get('time') or '' }}" required />
       </div>
       <div class="field-group">
         <label class="label">Tipe</label>
         <select class="input" name="action" required>
           <option value="">Pilih tipe</option>
-          <option value="IN" {% if form.action == "IN" %}selected{% endif %}>IN</option>
-          <option value="OUT" {% if form.action == "OUT" %}selected{% endif %}>OUT</option>
+          <option value="IN" {% if form.get('action') == "IN" %}selected{% endif %}>IN</option>
+          <option value="OUT" {% if form.get('action') == "OUT" %}selected{% endif %}>OUT</option>
         </select>
       </div>
       <div class="field-group" style="grid-column:1/-1;">
         <label class="label">Alasan</label>
-        <textarea class="input" name="reason" rows="3" placeholder="Jelaskan alasan pengajuan manual" required>{{ form.reason or '' }}</textarea>
+        <textarea class="input" name="reason" rows="3" placeholder="Jelaskan alasan pengajuan manual" required>{{ form.get('reason') or '' }}</textarea>
       </div>
     </div>
     <div class="actions">
