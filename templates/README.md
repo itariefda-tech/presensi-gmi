@@ -12,8 +12,8 @@ Dokumen ini menjadi ringkasan singkat untuk template dashboard.
 
 ## Login (Seed)
 
-Seed user hanya aktif jika `SEED_USERS_JSON` di-set via environment.
-Password reset default hanya aktif jika `ADMIN_RESET_PASSWORD` di-set.
+Seed user hanya aktif jika `ENABLE_SEED_DATA=1` dan `SEED_USERS_JSON` di-set.
+Reset password admin meminta password baru secara manual (tanpa default password).
 
 ## Catatan
 

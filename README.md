@@ -16,12 +16,10 @@ App: `http://localhost:5020/`
 
 ## Demo Accounts (Seed)
 
-Password default untuk seed: `gmi@12345`
+Seed data nonaktif secara default. Untuk mengaktifkan:
 
-- hr_superadmin: `hr@gmi.com` / `hr123456`
-- manager_operational: `manager@gmi.com` / `gmi@12345`
-- supervisor: `supervisor@gmi.com` / `gmi@12345`
-- admin_asistent: `asisten@gmi.com` / `gmi@12345`
+- `ENABLE_SEED_DATA=1`
+- `SEED_USERS_JSON` berisi array user (email, name, role, password)
 
 ## Roles (Final)
 

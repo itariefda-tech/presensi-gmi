@@ -34,7 +34,7 @@
         <option value="{{ role }}">{{ role|replace('_',' ')|title }}</option>
         {% endfor %}
       </select>
-      <input class="input" type="text" name="password" placeholder="Password awal (default {{ default_password }})" />
+      <input class="input" type="password" name="password" placeholder="Password awal" required />
       <button class="btn primary btn-fixed-100" type="submit">Tambah</button>
     </form>
   </div>
@@ -131,6 +131,8 @@
           <div class="form-row single">
             <div class="form-inline">
               <input class="input" id="user-hr-pass-{{ u.id }}" type="password" name="hr_password" placeholder="Password HR" required />
+              <input class="input" id="user-new-pass-{{ u.id }}" type="password" name="new_password" placeholder="Password baru" required />
+              <input class="input" id="user-new-pass2-{{ u.id }}" type="password" name="new_password2" placeholder="Konfirmasi password" required />
               <button class="btn secondary" type="submit">Reset Password</button>
             </div>
           </div>

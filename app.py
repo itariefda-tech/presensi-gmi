@@ -907,6 +907,7 @@ def _get_json() -> Dict[str, str]:
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.environ.get("PRESENSI_DB_PATH") or os.path.join(BASE_DIR, "presensi.db")
+ENABLE_SEED_DATA = (os.environ.get("ENABLE_SEED_DATA") or "").lower() in {"1", "true", "yes"}
 
 
 # =========================
@@ -924,7 +925,6 @@ if SEED_USERS_JSON:
         raise RuntimeError("SEED_USERS_JSON tidak valid.") from exc
 SEED_EMPLOYEES = [
 ]
-DEFAULT_RESET_PASSWORD = (os.environ.get("ADMIN_RESET_PASSWORD") or "").strip()
 ADMIN_ROLE_OPTIONS = ["hr_superadmin", "manager_operational", "supervisor", "admin_asistent"]
 ROLE_OPTIONS = ADMIN_ROLE_OPTIONS + ["employee"]
 ROLE_PERMISSION_KEYS = [
@@ -4025,8 +4025,9 @@ def _init_db() -> None:
                             ),
                         )
 
-        _seed_users(conn)
-        _seed_employees(conn)
+        if ENABLE_SEED_DATA:
+            _seed_users(conn)
+            _seed_employees(conn)
     finally:
         conn.commit()
         conn.close()
@@ -5722,7 +5723,6 @@ def admin_bp() -> Blueprint:
             supervisor_sites=supervisor_sites,
             registration_codes=registration_codes,
             role_options=ADMIN_ROLE_OPTIONS,
-            default_password=DEFAULT_RESET_PASSWORD,
             role_permissions=role_permissions,
             permission_labels=ROLE_PERMISSION_LABELS,
             permission_keys=ROLE_PERMISSION_KEYS,
@@ -5752,7 +5752,7 @@ def admin_bp() -> Blueprint:
         name = (request.form.get("name") or "").strip()
         email = (request.form.get("email") or "").strip().lower()
         role = (request.form.get("role") or "admin_asistent").strip()
-        password = (request.form.get("password") or DEFAULT_RESET_PASSWORD).strip()
+        password = (request.form.get("password") or "").strip()
 
         if not _looks_like_email(email):
             flash("Email tidak valid.")
@@ -5765,6 +5765,9 @@ def admin_bp() -> Blueprint:
             return redirect(url_for("admin.settings", tab="users"))
         if _get_user_by_email(email):
             flash("Email sudah terdaftar.")
+            return redirect(url_for("admin.settings", tab="users"))
+        if len(password) < 6:
+            flash("Password awal minimal 6 karakter.")
             return redirect(url_for("admin.settings", tab="users"))
 
         _create_user(name=name, email=email, role=role, password=password)
@@ -5831,15 +5834,20 @@ def admin_bp() -> Blueprint:
     def settings_users_reset_password(user_id: int):
         user = _current_user()
         _require_hr_superadmin(user)
-        if not DEFAULT_RESET_PASSWORD:
-            flash("Password reset default belum dikonfigurasi.")
-            return redirect(url_for("admin.settings", tab="users"))
         hr_password = (request.form.get("hr_password") or "").strip()
+        new_password = (request.form.get("new_password") or "").strip()
+        new_password2 = (request.form.get("new_password2") or "").strip()
         row = _get_user_by_id(user.id)
         if not row or not check_password_hash(row["password_hash"], hr_password):
             flash("Konfirmasi password HR gagal.")
             return redirect(url_for("admin.settings", tab="users"))
-        _update_user_password(user_id, DEFAULT_RESET_PASSWORD, 1)
+        if len(new_password) < 6:
+            flash("Password baru minimal 6 karakter.")
+            return redirect(url_for("admin.settings", tab="users"))
+        if new_password != new_password2:
+            flash("Konfirmasi password baru tidak sama.")
+            return redirect(url_for("admin.settings", tab="users"))
+        _update_user_password(user_id, new_password, 1)
         flash("Password berhasil di-reset.")
         return redirect(url_for("admin.settings", tab="users"))
 
