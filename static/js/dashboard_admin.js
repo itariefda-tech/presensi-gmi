@@ -2,7 +2,9 @@ const tabButtons = Array.from(document.querySelectorAll(".tab-btn"));
 const tabPanels = Array.from(document.querySelectorAll(".tab-panel"));
 const leaveRows = document.getElementById("leaveRows");
 const canApproveLeave = leaveRows?.dataset?.canApproveLeave === "1";
+const pendingLimit = Number(leaveRows?.dataset?.limit || 0) || 0;
 const approvalAlert = document.getElementById("approvalAlert");
+const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || "";
 
 function setActiveTab(name){
   tabButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.tab === name));
@@ -16,6 +18,10 @@ tabButtons.forEach((btn) => {
 async function safeFetch(url, options = {}){
   let res = null;
   try {
+    if (csrfToken) {
+      options.headers = options.headers || {};
+      options.headers["X-CSRF-Token"] = csrfToken;
+    }
     res = await fetch(url, options);
   } catch (err) {
     return { ok: false, data: null, message: "Koneksi bermasalah. Coba lagi." };
@@ -102,7 +108,8 @@ function renderLeave(rows){
 
 async function loadApprovals(){
   if (!leaveRows) return;
-  const result = await safeFetch("/api/leave/pending");
+  const limitQuery = pendingLimit > 0 ? `?limit=${pendingLimit}` : "";
+  const result = await safeFetch(`/api/leave/pending${limitQuery}`);
   if (!result.ok) {
     showToast("error", result.message || "Gagal memuat data.");
     const colspan = canApproveLeave ? 7 : 6;
@@ -110,6 +117,9 @@ async function loadApprovals(){
     return;
   }
   renderLeave(result.data?.data || []);
+  if (pendingLimit > 0 && result.data?.data?.length >= pendingLimit) {
+    showToast("info", `Menampilkan terbaru ${pendingLimit} pengajuan.`);
+  }
 }
 
 if (leaveRows) {

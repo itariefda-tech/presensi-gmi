@@ -29,6 +29,12 @@ Thumbs.db
 .env
 node_modules
 
+# Capacitor/mobile
+mobile-capacitor/node_modules/
+mobile-capacitor/android/
+mobile-capacitor/android/.gradle/
+mobile-capacitor/android/app/build/
+
 # OneDrive conflict files
 *-AlarifiPC.*
 presensi-*.db

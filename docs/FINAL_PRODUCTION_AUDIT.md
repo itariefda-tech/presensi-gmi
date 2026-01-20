@@ -25,7 +25,7 @@
 ## 5. Sistem File & Kebersihan Kode
 - [x] Masalah: File database runtime tersimpan di repo (`app.db`, `presensi.db`). Lokasi: root repository. Keparahan: high. Dampak: kebocoran data dan drift konfigurasi antar environment. Rekomendasi perbaikan: keluarkan dari repo, tambahkan ke `.gitignore`, dan kelola data di luar version control.
 - [x] Masalah: Helper `_role_from_email` tidak digunakan (dead code). Lokasi: `app.py:802`. Keparahan: low. Dampak: beban pemeliharaan dan kebingungan soal penentuan role. Rekomendasi perbaikan: hapus atau hubungkan ke alur yang terdokumentasi.
-- [x] Masalah: Asset gambar demo dipakai di UI produksi. Lokasi: `templates/index.html:116` (gambar `static/img/arief.jpg`). Keparahan: low. Dampak: branding tidak profesional atau risiko IP. Rekomendasi perbaikan: ganti dengan aset produksi atau hapus.
+- [x] Masalah: Asset gambar demo dipakai di UI produksi. Lokasi: `templates/dashboard/employee.html` dan `templates/dashboard/base.html` (avatar default). Keparahan: low. Dampak: branding tidak profesional atau risiko IP. Rekomendasi perbaikan: ganti dengan aset produksi atau hapus.
 
 ## 6. Kesiapan UI & UX
 - [x] Masalah: Teks di admin overview menyatakan fitur belum diimplementasi padahal dashboard sudah menyediakan pembuatan user. Lokasi: `templates/dashboard/admin_overview.html:140`. Keparahan: low. Dampak: kebingungan pengguna dan ketidakjelasan status readiness. Rekomendasi perbaikan: sesuaikan copy dengan fungsi yang ada.
@@ -37,3 +37,24 @@
 - [x] Masalah: Validasi QR memakai prefix statis dan aturan demo. Lokasi: `app.py:4057` (`_validate_qr_data`). Keparahan: high. Dampak: QR mudah dipalsukan. Rekomendasi perbaikan: gunakan token QR yang ditandatangani dan time-bound.
 - [x] Masalah: Logout menggunakan endpoint GET. Lokasi: `app.py:350` (`logout`). Keparahan: low. Dampak: logout tidak sengaja atau dipicu CSRF. Rekomendasi perbaikan: ubah ke POST dengan proteksi CSRF.
 - [x] Masalah: Audit log tidak mencakup alur kritikal (login, attendance, approval cuti, perubahan password). Lokasi: `app.py:1239` (`_log_audit_event`) dan tidak digunakan di route auth/attendance. Keparahan: medium. Dampak: jejak audit untuk insiden keamanan terbatas. Rekomendasi perbaikan: tambahkan audit event untuk auth, attendance, dan approval.
+
+## 8. Runbook Operasional
+
+- Masalah operasional: Saat running image di NAS, pastikan akun seed tersedia. Default seed menyediakan `hrd@gmi.com / hrd123`. Jika ingin override, jalankan container dengan `SEED_USERS_JSON`:
+  1. Build image dari root repo: `docker build -t presensi-app .`.
+  2. Jalankan container (opsional: override seed):
+     ```
+     docker run -d \
+       --name presensi-app \
+       -e ENABLE_SEED_DATA=1 \
+       -e SEED_USERS_JSON='[{"email":"hrd@gmi.com","name":"HR Superadmin","role":"hr_superadmin","password":"hrd123"}]' \
+       -p 5050:5050 \
+       presensi-app
+     ```
+  3. Login pertama pakai `hrd@gmi.com / hrd123`, lalu segera ubah password melalui menu profil.
+
+- Masalah networking: reverse proxy (hosting_web) perlu bisa reach container, sehingga setelah container jalan pastikan ia terhubung ke network itu:
+  ```
+  docker network connect hosting_web presensi-app
+  ```
+  Setelah koneksi, Cloudflare atau Nginx yang run di `hosting_web` akan melihat service dan akses `absensi.gajiku.online` tidak lagi mengembalikan 502.

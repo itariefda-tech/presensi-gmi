@@ -68,6 +68,26 @@
   </div>
 </div>
 <div class="card" style="margin-top:12px;">
+  <form class="form-grid" style="grid-template-columns: repeat(3, minmax(200px, 1fr)); margin-bottom:12px;" method="get">
+    <div class="form-row">
+      <label class="label" for="employee-search">Cari</label>
+      <input class="input" id="employee-search" type="text" name="q" placeholder="Nama atau email" value="{{ employee_filters.q if employee_filters else '' }}" />
+    </div>
+    <div class="form-row">
+      <label class="label" for="employee-limit">Limit</label>
+      <input class="input" id="employee-limit" type="number" name="limit" min="20" max="1000" value="{{ employee_filters.limit if employee_filters else '' }}" />
+    </div>
+    <div class="form-row">
+      <label class="label" for="employee-offset">Offset</label>
+      <input class="input" id="employee-offset" type="number" name="offset" min="0" value="{{ employee_filters.offset if employee_filters else 0 }}" />
+    </div>
+    <div class="form-row single" style="grid-column: 1 / -1;">
+      <div class="form-inline">
+        <button class="btn primary btn-fixed-100" type="submit">Filter</button>
+        <a class="btn secondary btn-fixed-100" href="{{ url_for('admin.employees') }}">Reset</a>
+      </div>
+    </div>
+  </form>
   {% if not can_view %}
   <div class="muted">Anda tidak memiliki akses melihat daftar pegawai.</div>
   {% else %}
@@ -114,6 +134,18 @@
       {% endfor %}
     </tbody>
   </table>
+  {% endif %}
+  {% if employee_filters and employee_filters.limit %}
+  <div class="form-inline" style="margin-top:12px; gap:8px;">
+    {% set prev_offset = (employee_filters.offset - employee_filters.limit) if employee_filters.offset >= employee_filters.limit else 0 %}
+    {% set next_offset = employee_filters.offset + employee_filters.limit %}
+    {% if employee_filters.offset > 0 %}
+    <a class="btn secondary btn-fixed-100" href="{{ url_for('admin.employees', q=employee_filters.q, limit=employee_filters.limit, offset=prev_offset) }}">Prev</a>
+    {% endif %}
+    {% if employee_filters.has_next %}
+    <a class="btn secondary btn-fixed-100" href="{{ url_for('admin.employees', q=employee_filters.q, limit=employee_filters.limit, offset=next_offset) }}">Next</a>
+    {% endif %}
+  </div>
   {% endif %}
 </div>
 {% if can_actions %}

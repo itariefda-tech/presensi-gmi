@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="csrf-token" content="{{ csrf_token }}" />
   <script>
     (function(){
       try {
@@ -87,6 +88,12 @@
           <span class="nav-label">Policies</span>
         </a>
         {% endif %}
+        <a href="{{ url_for('admin.qr_page') }}" class="{% if active == 'qr' %}active{% endif %}" title="QR Absensi">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M4 4h6v6H4V4Zm10 0h6v6h-6V4ZM4 14h6v6H4v-6Zm10 4h2m4-4v6h-6v-6h6Z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          </span>
+          <span class="nav-label">QR Absensi</span>
+        </a>
         {% if permissions.get("view_attendance") %}
         <a href="{{ url_for('admin.attendance') }}" class="{% if active == 'attendance' %}active{% endif %}" title="Attendance">
           <span class="nav-icon" aria-hidden="true">
@@ -137,7 +144,7 @@
           {% if subtitle %}<div style="color:var(--muted); font-size:14px;">{{ subtitle }}</div>{% endif %}
         </div>
         <div class="user">
-          {% set avatar_src = user.selfie_path and url_for('static', filename=user.selfie_path) or url_for('static', filename='img/arief.jpg') %}
+          {% set avatar_src = user.selfie_path and url_for('static', filename=user.selfie_path) or url_for('static', filename='img/gmi_logo.gif') %}
           <label class="avatar-upload" for="avatarInput" title="Upload foto profil">
             <div class="user-avatar" id="userAvatar" style="background-image:url('{{ avatar_src }}');" aria-hidden="true"></div>
           </label>

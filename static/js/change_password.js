@@ -3,6 +3,7 @@ const closeBtn = document.getElementById("btnCloseChangePassword");
 const modal = document.getElementById("changePasswordModal");
 const form = document.getElementById("changePasswordForm");
 const alertBox = document.getElementById("changePasswordAlert");
+const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || "";
 
 function setModalOpen(isOpen){
   if (!modal) return;
@@ -21,6 +22,10 @@ function showAlert(type, message){
 async function safeFetch(url, options = {}){
   let res = null;
   try {
+    if (csrfToken) {
+      options.headers = options.headers || {};
+      options.headers["X-CSRF-Token"] = csrfToken;
+    }
     res = await fetch(url, options);
   } catch (err) {
     return { ok: false, data: null, message: "Koneksi bermasalah. Coba lagi." };

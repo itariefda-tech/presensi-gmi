@@ -1,8 +1,12 @@
 const avatarInput = document.getElementById("avatarInput");
 const avatarEl = document.getElementById("userAvatar");
+const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || "";
 
 async function uploadProfilePhoto(file){
   const formData = new FormData();
+  if (csrfToken) {
+    formData.append("csrf_token", csrfToken);
+  }
   formData.append("avatar", file);
   const res = await fetch("/api/user/profile_photo", {
     method: "POST",

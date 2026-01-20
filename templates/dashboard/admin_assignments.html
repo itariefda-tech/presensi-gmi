@@ -71,6 +71,34 @@
 </div>
 
 <div class="card" style="margin-top:12px;">
+  <form class="form-grid" style="grid-template-columns: repeat(4, minmax(180px, 1fr)); margin-bottom:12px;" method="get">
+    <div class="form-row">
+      <label class="label" for="assignment-email">Email</label>
+      <input class="input" id="assignment-email" type="text" name="employee_email" placeholder="pegawai@email.com" value="{{ assignment_filters.employee_email if assignment_filters else '' }}" />
+    </div>
+    <div class="form-row">
+      <label class="label" for="assignment-client">Client ID</label>
+      <input class="input" id="assignment-client" type="number" name="client_id" min="1" value="{{ assignment_filters.client_id if assignment_filters else '' }}" />
+    </div>
+    <div class="form-row">
+      <label class="label" for="assignment-status">Status</label>
+      <select class="input" id="assignment-status" name="status">
+        <option value="" {% if not assignment_filters or not assignment_filters.status %}selected{% endif %}>Semua</option>
+        <option value="ACTIVE" {% if assignment_filters and assignment_filters.status == "ACTIVE" %}selected{% endif %}>ACTIVE</option>
+        <option value="ENDED" {% if assignment_filters and assignment_filters.status == "ENDED" %}selected{% endif %}>ENDED</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <label class="label" for="assignment-limit">Limit</label>
+      <input class="input" id="assignment-limit" type="number" name="limit" min="20" max="1000" value="{{ assignment_filters.limit if assignment_filters else '' }}" />
+    </div>
+    <div class="form-row single" style="grid-column: 1 / -1;">
+      <div class="form-inline">
+        <button class="btn primary btn-fixed-100" type="submit">Filter</button>
+        <a class="btn secondary btn-fixed-100" href="{{ url_for('admin.assignments') }}">Reset</a>
+      </div>
+    </div>
+  </form>
   <table class="table table-wide" aria-label="Daftar assignment">
     <thead>
       <tr>
@@ -115,6 +143,18 @@
       {% endfor %}
     </tbody>
   </table>
+  {% if assignment_filters and assignment_filters.limit %}
+  <div class="form-inline" style="margin-top:12px; gap:8px;">
+    {% set prev_offset = (assignment_filters.offset - assignment_filters.limit) if assignment_filters.offset >= assignment_filters.limit else 0 %}
+    {% set next_offset = assignment_filters.offset + assignment_filters.limit %}
+    {% if assignment_filters.offset > 0 %}
+    <a class="btn secondary btn-fixed-100" href="{{ url_for('admin.assignments', employee_email=assignment_filters.employee_email, client_id=assignment_filters.client_id, status=assignment_filters.status, limit=assignment_filters.limit, offset=prev_offset) }}">Prev</a>
+    {% endif %}
+    {% if assignment_filters.has_next %}
+    <a class="btn secondary btn-fixed-100" href="{{ url_for('admin.assignments', employee_email=assignment_filters.employee_email, client_id=assignment_filters.client_id, status=assignment_filters.status, limit=assignment_filters.limit, offset=next_offset) }}">Next</a>
+    {% endif %}
+  </div>
+  {% endif %}
 </div>
 
 {% for a in assignments %}

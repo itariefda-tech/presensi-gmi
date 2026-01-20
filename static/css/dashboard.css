@@ -609,6 +609,15 @@ a:hover{ text-decoration:underline; }
   0%, 100% { transform: scale(1); opacity: 1; }
   50% { transform: scale(1.25); opacity: 0.4; }
 }
+
+@media (prefers-reduced-motion: reduce){
+  *, *::before, *::after{
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
 .logout-btn{
   width: 40px;
   height: 40px;
@@ -628,6 +637,20 @@ a:hover{ text-decoration:underline; }
 }
 .tab-panel{ display:none; }
 .tab-panel.active{ display:block; }
+.spinner{
+  display:inline-block;
+  width:14px;
+  height:14px;
+  margin-right:6px;
+  border:2px solid rgba(148,163,184,.35);
+  border-top-color: rgba(148,163,184,.9);
+  border-radius:50%;
+  animation: spin .8s linear infinite;
+  vertical-align:-2px;
+}
+@keyframes spin{
+  to{ transform: rotate(360deg); }
+}
 
 .modal{
   position: fixed;
@@ -972,4 +995,86 @@ html[data-theme="light"] .themeToggle.active::before{
     inset 0 -1px 1px 0 #fffa,
     0 0 2px 1px #4443,
     1px 3px 6px 1px #0004;
+}
+
+.qr-card{
+  display:flex;
+  flex-direction:column;
+  gap:16px;
+}
+.qr-header{
+  display:flex;
+  flex-wrap:wrap;
+  gap:16px;
+  align-items:flex-end;
+  justify-content:space-between;
+}
+.qr-field{
+  min-width: 220px;
+  flex: 1 1 240px;
+}
+.qr-meta{
+  text-align:right;
+}
+.qr-expiry{
+  font-weight: 700;
+  font-size: 16px;
+  color: var(--text);
+}
+.qr-remaining{
+  font-size: 12px;
+}
+.qr-toggle{
+  display:flex;
+  gap:8px;
+  background: rgba(255,255,255,.06);
+  border: 1px solid var(--border);
+  padding: 6px;
+  border-radius: 999px;
+}
+.qr-toggle-btn{
+  flex:1;
+  border:none;
+  border-radius: 999px;
+  padding: 8px 12px;
+  font-weight: 700;
+  font-size: 13px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+.qr-toggle-btn.active{
+  background: linear-gradient(135deg, rgba(56,189,248,.22), rgba(34,197,94,.18));
+  color: var(--text);
+}
+.qr-canvas-wrap{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding: 18px;
+  background: rgba(255,255,255,.04);
+  border: 1px dashed var(--border);
+  border-radius: 16px;
+}
+#qrCanvas{
+  width: 260px;
+  height: 260px;
+  background: #fff;
+  border-radius: 12px;
+}
+.qr-actions{
+  display:flex;
+  justify-content:flex-end;
+}
+@media (max-width: 720px){
+  .qr-meta{
+    text-align:left;
+  }
+  .qr-actions{
+    justify-content:stretch;
+  }
+  #qrCanvas{
+    width: 220px;
+    height: 220px;
+  }
 }

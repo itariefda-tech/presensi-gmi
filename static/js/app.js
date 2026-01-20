@@ -76,6 +76,7 @@ const dateText = document.getElementById("dateText");
 function pad2(n){ return String(n).padStart(2,"0"); }
 
 function tick(){
+  if (document.hidden) return;
   const d = new Date();
   hhEl.textContent = pad2(d.getHours());
   mmEl.textContent = pad2(d.getMinutes());

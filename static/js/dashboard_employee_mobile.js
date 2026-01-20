@@ -192,6 +192,7 @@ if (themeToggle) {
 }
 
 function tickClock(){
+  if (document.hidden) return;
   const d = new Date();
   clockHH.textContent = pad2(d.getHours());
   clockMM.textContent = pad2(d.getMinutes());
@@ -405,13 +406,23 @@ function getLocation(){
 function validateQrPayload(value){
   const payload = (value || "").trim();
   if (!payload) return { ok: false, message: "QR code wajib di-scan." };
-  if (payload.length < 6 || payload.length > 120) {
-    return { ok: false, message: "QR tidak valid (demo)." };
+  if (payload.includes("|")) {
+    const parts = payload.split("|");
+    if (parts.length !== 4 && parts.length !== 5) {
+      return { ok: false, message: "QR tidak valid." };
+    }
+    if (parts[0].toUpperCase() !== "GMI") {
+      return { ok: false, message: "QR tidak dikenali." };
+    }
+    if (!/^\d+$/.test(parts[1] || "")) {
+      return { ok: false, message: "QR tidak valid." };
+    }
+    return { ok: true, message: "ok" };
   }
-  if (!payload.toUpperCase().startsWith("GMI-")) {
-    return { ok: false, message: "QR tidak dikenali (demo)." };
+  if (payload.toUpperCase().startsWith("GMI-")) {
+    return { ok: true, message: "ok" };
   }
-  return { ok: true, message: "ok" };
+  return { ok: false, message: "QR tidak dikenali." };
 }
 
 btnLocation?.addEventListener("click", async () => {
@@ -964,10 +975,16 @@ function initLeaveDetail(){
   });
 }
 
+let clockTimer = null;
+function startClock(){
+  if (clockTimer) window.clearInterval(clockTimer);
+  tickClock();
+  clockTimer = window.setInterval(tickClock, 1000);
+}
+
 initTheme();
 initProfile();
-tickClock();
-setInterval(tickClock, 500);
+startClock();
 initSwipe();
 initNavPosition();
 initNavDrag();
@@ -984,10 +1001,19 @@ initLeaveDetail();
 loadLeaveStory();
 go(0);
 
-window.addEventListener("resize", initNavPosition);
+let navResizeTimer = null;
+window.addEventListener("resize", () => {
+  if (navResizeTimer) window.clearTimeout(navResizeTimer);
+  navResizeTimer = window.setTimeout(initNavPosition, 150);
+});
 window.addEventListener("online", updateOnlineStatus);
 window.addEventListener("offline", updateOnlineStatus);
 window.addEventListener("pagehide", stopScan);
 document.addEventListener("visibilitychange", () => {
-  if (document.hidden) stopScan();
+  if (document.hidden) {
+    stopScan();
+    if (clockTimer) window.clearInterval(clockTimer);
+  } else {
+    startClock();
+  }
 });

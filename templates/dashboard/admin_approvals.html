@@ -24,8 +24,13 @@
             {% if can_approve_leave %}<th>Aksi</th>{% endif %}
           </tr>
         </thead>
-        <tbody id="leaveRows" data-can-approve-leave="{{ '1' if can_approve_leave else '0' }}">
-          <tr><td colspan="{% if can_approve_leave %}7{% else %}6{% endif %}" class="muted">Memuat data...</td></tr>
+        <tbody id="leaveRows" data-can-approve-leave="{{ '1' if can_approve_leave else '0' }}" data-limit="200">
+          <tr>
+            <td colspan="{% if can_approve_leave %}7{% else %}6{% endif %}" class="muted">
+              <span class="spinner" aria-hidden="true"></span>
+              Memuat data...
+            </td>
+          </tr>
         </tbody>
       </table>
     </div>
