@@ -1,0 +1,4 @@
+ingress:
+  - hostname: absensi.gajiku.online
+    service: http://presensi-app:5050
+  - service: "http_status:404"

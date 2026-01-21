@@ -5,6 +5,12 @@
 ```md
 # HRIS GMI - Development Roadmap
 
+## DEMO DEPLOY NOTES (2026-01-21)
+- Client edit: konflik nama/legal hanya dicek jika field identitas berubah.
+- Flash alert global dipasang agar validasi server terlihat di dashboard.
+- QR generator: wajib set `QR_SECRET` di env dan restart app dari shell baru.
+- QR library: halaman QR bergantung CDN; jika CDN diblok, QR tidak tampil (perlu file lokal).
+
 ## PHASE 1 - FOUNDATION
 - [x] Login system & role demo
 - [x] Dashboard admin (overview, clients, employees)

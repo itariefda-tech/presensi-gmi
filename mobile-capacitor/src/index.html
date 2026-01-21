@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>HRIS GMI Mobile</title>
+    <style>
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: "Segoe UI", system-ui, sans-serif;
+        background: #051321;
+        color: #e0f2fe;
+        text-align: center;
+        padding: 2rem;
+      }
+      a {
+        color: #7dd3fc;
+      }
+    </style>
+  </head>
+  <body>
+    <div>
+      <h1>HRIS GMI Mobile</h1>
+      <p>Redirecting to the hosted experience…</p>
+      <p id="target">Loading based on capacitor config.</p>
+    </div>
+    <script>
+      const DEFAULT_URL = "https://absensi.gajiku.online";
+      const queryTarget = new URLSearchParams(location.search).get("target");
+      const destination = queryTarget || DEFAULT_URL;
+      document.getElementById("target").textContent = destination;
+      window.location.replace(destination);
+    </script>
+  </body>
+</html>

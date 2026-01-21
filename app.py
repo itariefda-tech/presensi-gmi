@@ -5541,6 +5541,10 @@ def admin_bp() -> Blueprint:
     def clients_update(client_id: int):
         user = _current_user()
         _require_admin(user)
+        client = _get_client_by_id(client_id)
+        if not client:
+            flash("Client tidak ditemukan.")
+            return redirect(url_for("admin.clients"))
         name = (request.form.get("client_name") or "").strip()
         legal_name = (request.form.get("legal_name") or "").strip()
         address = (request.form.get("address") or "").strip()
@@ -5572,10 +5576,21 @@ def admin_bp() -> Blueprint:
         if not pic_phone:
             flash("No HP PIC wajib diisi.")
             return redirect(url_for("admin.clients"))
-        conflict = _find_client_identity_conflict(name, legal_name, exclude_client_id=client_id)
-        if conflict:
-            flash("Nama client atau nama legal sudah digunakan.")
-            return redirect(url_for("admin.clients"))
+        current_name = _normalize_client_identity(client["name"] if "name" in client.keys() else None) or ""
+        current_legal = _normalize_client_identity(client["legal_name"] if "legal_name" in client.keys() else None) or ""
+        next_name = _normalize_client_identity(name) or ""
+        next_legal = _normalize_client_identity(legal_name) or ""
+        identity_changed = (
+            current_name.lower() != next_name.lower()
+            or current_legal.lower() != next_legal.lower()
+        )
+        if identity_changed:
+            conflict = _find_client_identity_conflict(
+                name, legal_name, exclude_client_id=client_id
+            )
+            if conflict:
+                flash("Nama client atau nama legal sudah digunakan.")
+                return redirect(url_for("admin.clients"))
         _update_client(
             client_id=client_id,
             name=name,

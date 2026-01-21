@@ -1,0 +1,245 @@
+networks:
+  web:
+    driver: bridge
+
+  hosting_web:
+    external: true
+
+services:
+  # =======================================================
+  # NGINX PROXY MANAGER (FIX: mount ke data lama)
+  # =======================================================
+  npm:
+    image: jc21/nginx-proxy-manager:latest
+    container_name: npm
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Jakarta
+    ports:
+      - "81:81"   # NPM UI only
+    volumes:
+      - /mnt/ssd/hosting/npm:/data
+      - /mnt/ssd/hosting/npm/letsencrypt:/etc/letsencrypt
+    networks:
+      - hosting_web
+
+  # =======================================================
+  # APP: Ngajiku
+  # =======================================================
+  ngajiku-app:
+    build:
+      context: /mnt/ssd/ngajiku/app
+    container_name: ngajiku-app
+    restart: unless-stopped
+    expose:
+      - "3000"
+    ports:
+      - "3000:3000"  # LAN test (opsional)
+    networks:
+      - hosting_web
+
+  # =======================================================
+  # APP: HRIS (Flask run style - sesuai pola lama kamu)
+  # =======================================================
+  hrisapp:
+    image: python:3.11-slim
+    container_name: hrisapp
+    restart: unless-stopped
+    working_dir: /app
+    environment:
+      FLASK_APP: app.py
+      FLASK_RUN_HOST: 0.0.0.0
+      FLASK_RUN_PORT: "3030"
+      TZ: Asia/Jakarta
+    command: bash -lc "pip install -r requirements.txt && python -m flask run"
+    volumes:
+      - /mnt/ssd/hosting/hris-app:/app
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+    ports:
+      - "3030:3030"
+    networks:
+      - hosting_web
+
+  # =======================================================
+  # DB STACK
+  # =======================================================
+  mariadb:
+    image: mariadb:10.11
+    container_name: mariadb
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: change-this-root-pass
+      MYSQL_DATABASE: wordpress_db
+      MYSQL_USER: wpuser
+      MYSQL_PASSWORD: change-this-wp-pass
+    volumes:
+      - /mnt/ssd/hosting/db:/var/lib/mysql
+    networks:
+      - hosting_web
+
+  phpmyadmin:
+    image: phpmyadmin:latest
+    container_name: phpmyadmin
+    restart: unless-stopped
+    environment:
+      PMA_HOST: mariadb
+      UPLOAD_LIMIT: 256M
+    ports:
+      - "8081:80"
+    depends_on:
+      - mariadb
+    networks:
+      - hosting_web
+
+  wordpress:
+    image: wordpress:latest
+    container_name: wordpress
+    restart: unless-stopped
+    environment:
+      WORDPRESS_DB_HOST: mariadb:3306
+      WORDPRESS_DB_NAME: wordpress_db
+      WORDPRESS_DB_USER: wpuser
+      WORDPRESS_DB_PASSWORD: change-this-wp-pass
+    volumes:
+      - /mnt/ssd/hosting/wordpress:/var/www/html
+    ports:
+      - "8082:80"
+    depends_on:
+      - mariadb
+    networks:
+      - hosting_web
+
+  # =======================================================
+  # APP: tarikgaji-app (ganti dari flaskapp)
+  # =======================================================
+  tarikgaji-app:
+    build:
+      context: /mnt/ssd/hosting/tarikgaji-app
+    container_name: tarikgaji-app
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Jakarta
+      PORT: "5001"
+      DB_PATH: /app/data/tarikgaji.db
+      EXPORT_CSV_ENABLED: "1"
+      # SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, EMAIL_FROM, EMAIL_ADMIN_LIST
+    volumes:
+      - /mnt/ssd/hosting/tarikgaji-app/data:/app/data
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+    ports:
+      - "5001:5001"
+    networks:
+      - hosting_web
+
+  # =======================================================
+  # CLOUDFLARED: (yang lama kamu punya)
+  # =======================================================
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared
+    restart: unless-stopped
+    environment:
+      TUNNEL_TOKEN: "PASTE_TUNNEL_TOKEN_UTAMA_KAMU"
+    command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml run
+    volumes:
+      - /mnt/ssd/hosting/cloudflared:/etc/cloudflared
+    networks:
+      - hosting_web
+
+  cloudflared-ngajiku:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared-ngajiku
+    restart: unless-stopped
+    environment:
+      TUNNEL_TOKEN: "PASTE_TUNNEL_TOKEN_NGAJIKU_KAMU"
+    command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml run
+    volumes:
+      - /mnt/ssd/hosting/cloudflared-ngajiku:/etc/cloudflared
+    networks:
+      - hosting_web
+
+  cloudflared-hris:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared-hris
+    restart: unless-stopped
+    environment:
+      TUNNEL_TOKEN: "PASTE_TUNNEL_TOKEN_HRIS_KAMU"
+    command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml run
+    volumes:
+      - /mnt/ssd/hosting/cloudflared-hris:/etc/cloudflared
+    networks:
+      - hosting_web
+  
+  cloudflared-chips:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared-chips
+    restart: unless-stopped
+    command: >
+      tunnel --no-autoupdate run
+      --token "eyJhIjoiZjlmMTU0YzMyZDI0NDYyZTU2MmFmNWMwY2JlZjBkZTkiLCJ0IjoiYWI4NTZmZWUtZWUzNy00YzgwLTlmN2MtOWM4NzI0NTY0M2M2IiwicyI6Ik5qZGhNMkV3TkRndE1HTXlaQzAwWmpOakxXRTNZMlF0T1RnMll6VXlZVGN5WTJFMCJ9"
+    networks:
+      - hosting_web
+
+  # =======================================================
+  # NEW: TARO (Named Tunnel via TOKEN)
+  # =======================================================
+  cloudflared-taro:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared-taro
+    restart: unless-stopped
+    command: >
+      tunnel --no-autoupdate --config /etc/cloudflared/config.yml run
+      --token "eyJhIjoiZjlmMTU0YzMyZDI0NDYyZTU2MmFmNWMwY2JlZjBkZTkiLCJ0IjoiY2UwZTA0OTYtMzZkMy00ZGNmLTk5ODUtNThiMTYyOGQ5ZWU4IiwicyI6IlpHWm1PREl6WkRZdE1UWmlZUzAwTWpOaUxXSTBNVE10TVRkbFptRm1NVGcxTWpOaCJ9"
+    volumes:
+      - /mnt/ssd/hosting/cloudflared-taro:/etc/cloudflared
+    depends_on:
+      - npm
+    networks:
+      - hosting_web
+
+  cookiestaro-landing:
+    build:
+      context: /mnt/ssd/hosting/cookiestaro-landing
+      dockerfile: Dockerfile
+    container_name: cookiestaro-landing
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Jakarta
+      PORT: "6012"
+    expose:
+      - "6012"
+    ports:
+      - "6012:6012"  # LAN access juga
+    networks:
+      - hosting_web
+
+  # =======================================================
+  # NEW APP: gajiku-app (BARU) - jangan sentuh ngajiku yang lama
+  # =======================================================
+  gajiku-app:
+    build:
+      context: /mnt/ssd/hosting/gajiku-app
+    container_name: gajiku-app
+    restart: unless-stopped
+    expose:
+      - "5010"
+    networks:
+      - hosting_web
+
+  # =======================================================
+  # NEW TUNNEL: tarik.gajiku.net -> NPM (npm:80)
+  # Token ditaruh langsung disini (metode lama kamu)
+  # =======================================================
+  cloudflared-tarik:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared-tarik
+    restart: unless-stopped
+    command: >
+      tunnel --no-autoupdate run
+      --token eyJhIjoiZjlmMTU0YzMyZDI0NDYyZTU2MmFmNWMwY2JlZjBkZTkiLCJ0IjoiNzA1OTA2NzQtOTMzZS00Y2RlLTlmOTAtNjk1M2QxNjAzZWFmIiwicyI6IllqQXdOamRtTnpFdE1XVXpOUzAwWlRZd0xUZzFaakV0TkRsaFpHSmtZemt3WTJObCJ9
+    depends_on:
+      - npm
+    networks:
+      - hosting_web

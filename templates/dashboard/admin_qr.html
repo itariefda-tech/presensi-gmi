@@ -1,0 +1,47 @@
+{% extends "dashboard/base.html" %}
+{% set active = "qr" %}
+{% set heading = "QR Absensi" %}
+{% set subtitle = "QR berganti otomatis setiap 12 jam untuk check-in dan check-out" %}
+
+{% block body %}
+<div class="card qr-card">
+  <div class="qr-header">
+    <div class="qr-field">
+      <div class="label">Pilih Client</div>
+      <select id="qrClientSelect" class="input" {% if not clients %}disabled{% endif %}>
+        {% if not clients %}
+        <option value="">Belum ada client</option>
+        {% endif %}
+        {% for client in clients %}
+        <option value="{{ client.id }}" {% if selected_client_id and selected_client_id|string == client.id|string %}selected{% endif %}>
+          {{ client.name }}
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="qr-meta">
+      <div class="muted">Berlaku sampai</div>
+      <div class="qr-expiry" id="qrExpiry">-</div>
+      <div class="qr-remaining muted" id="qrRemaining">-</div>
+    </div>
+  </div>
+
+  <div class="qr-toggle" role="tablist" aria-label="Pilihan QR">
+    <button class="qr-toggle-btn active" type="button" data-qr-action="IN" aria-pressed="true">Masuk</button>
+    <button class="qr-toggle-btn" type="button" data-qr-action="OUT" aria-pressed="false">Pulang</button>
+  </div>
+
+  <div class="qr-canvas-wrap">
+    <canvas id="qrCanvas" width="260" height="260" aria-label="QR absensi"></canvas>
+  </div>
+
+  <div class="muted" id="qrStatus">Memuat QR...</div>
+
+  <div class="qr-actions">
+    <button class="btn secondary" type="button" id="btnCopyQr">Salin kode</button>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+<script src="{{ url_for('static', filename='js/admin_qr.js') }}"></script>
+{% endblock %}

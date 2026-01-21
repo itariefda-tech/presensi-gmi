@@ -679,6 +679,8 @@ a:hover{ text-decoration:underline; }
   padding: 20px;
   width: 100%;
   max-width: 520px;
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
   color: #e2e8f0;
   box-shadow: 0 22px 48px rgba(2,6,23,.55);
   transform: translateY(8px) scale(.98);
