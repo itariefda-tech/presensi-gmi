@@ -842,7 +842,15 @@ function initStatusLabels(){
 function setMethod(value){
   if (!attMethod) return;
   attMethod.value = value;
-  modeChips.forEach((chip) => chip.classList.toggle("active", chip.dataset.mode === value));
+  modeChips.forEach((chip) => {
+    const isActive = chip.dataset.mode === value;
+    chip.classList.toggle("active", isActive);
+    chip.setAttribute("aria-pressed", isActive ? "true" : "false");
+  });
+  const chipsContainer = document.querySelector(".mode-chips");
+  if (chipsContainer) {
+    chipsContainer.dataset.activeMode = value;
+  }
   if (selfieBlock) selfieBlock.classList.toggle("is-hidden", value !== "gps_selfie");
   if (qrBlock) qrBlock.classList.toggle("is-hidden", value !== "qr");
   if (value !== "qr") {
