@@ -2,48 +2,16 @@ const clientSelect = document.getElementById("qrClientSelect");
 const statusEl = document.getElementById("qrStatus");
 const expiryEl = document.getElementById("qrExpiry");
 const remainingEl = document.getElementById("qrRemaining");
-const canvas = document.getElementById("qrCanvas");
+const qrImage = document.getElementById("qrCanvas");
 const copyBtn = document.getElementById("btnCopyQr");
 const actionButtons = Array.from(document.querySelectorAll("[data-qr-action]"));
 
 let payloads = { IN: "", OUT: "" };
+let payloadImages = { IN: "", OUT: "" };
 let activeAction = "IN";
 let windowEnd = 0;
 let serverOffset = 0;
 let tickTimer = null;
-let qrLibPromise = null;
-
-function ensureQrLib(){
-  if (window.QRCode) return Promise.resolve(true);
-  if (qrLibPromise) return qrLibPromise;
-  const sources = [
-    "/static/js/vendor/qrcode.min.js",
-    "https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js",
-    "https://unpkg.com/qrcode@1.5.3/build/qrcode.min.js",
-    "https://cdnjs.cloudflare.com/ajax/libs/qrcode/1.5.3/qrcode.min.js",
-  ];
-  qrLibPromise = new Promise((resolve) => {
-    const tryNext = (idx) => {
-      if (window.QRCode) {
-        resolve(true);
-        return;
-      }
-      if (idx >= sources.length) {
-        resolve(false);
-        return;
-      }
-      const src = sources[idx];
-      const script = document.createElement("script");
-      script.src = src;
-      script.async = true;
-      script.onload = () => resolve(!!window.QRCode);
-      script.onerror = () => tryNext(idx + 1);
-      document.head.appendChild(script);
-    };
-    tryNext(0);
-  });
-  return qrLibPromise;
-}
 
 function setStatus(message, isError = false){
   if (!statusEl) return;
@@ -62,28 +30,15 @@ function setActiveAction(action){
 }
 
 function renderQr(){
-  if (!canvas) return;
-  const payload = payloads[activeAction] || "";
-  if (!payload) {
+  const imageData = payloadImages[activeAction];
+  if (!qrImage) return;
+  if (!imageData) {
+    qrImage.removeAttribute("src");
     setStatus("QR belum siap.", true);
     return;
   }
-  if (!window.QRCode) {
-    setStatus("Library QR belum tersedia. Coba muat ulang halaman.", true);
-    return;
-  }
-  QRCode.toCanvas(
-    canvas,
-    payload,
-    { width: 260, margin: 1 },
-    (err) => {
-      if (err) {
-        setStatus("Gagal membuat QR.", true);
-      } else {
-        setStatus("QR siap untuk dipindai.");
-      }
-    }
-  );
+  qrImage.src = `data:image/png;base64,${imageData}`;
+  setStatus("QR siap untuk dipindai.");
 }
 
 function formatLocal(ts){
@@ -119,15 +74,11 @@ async function fetchPayload(){
       return;
     }
     payloads = { IN: data.data.payload_in, OUT: data.data.payload_out };
+    payloadImages = { IN: data.data.image_in, OUT: data.data.image_out };
     windowEnd = data.data.window_end;
     serverOffset = data.data.server_ts - Math.floor(Date.now() / 1000);
     if (expiryEl) {
       expiryEl.textContent = formatLocal(windowEnd);
-    }
-    const libReady = await ensureQrLib();
-    if (!libReady) {
-      setStatus("Library QR belum tersedia. Periksa koneksi internet.", true);
-      return;
     }
     renderQr();
     updateCountdown();

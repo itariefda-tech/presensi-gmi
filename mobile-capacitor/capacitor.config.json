@@ -1,9 +1,0 @@
-{
-  "appId": "online.absensi.app",
-  "appName": "Absensi-ar",
-  "webDir": "src",
-  "bundledWebRuntime": false,
-  "server": {
-    "androidScheme": "https"
-  }
-}

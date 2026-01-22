@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import io
 import json
 import re
 import os
@@ -14,6 +15,8 @@ import logging
 from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass
 from typing import Dict
+
+import qrcode
 
 from flask import Flask, jsonify, render_template, request, session, Blueprint, abort, redirect, url_for, flash, g
 from werkzeug.utils import secure_filename
@@ -5143,6 +5146,20 @@ def _build_qr_payload(client_id: int | None, action: str) -> str:
     return f"{DEMO_QR_PREFIX}|{window_ts}|{nonce}|{action_norm}|{sig}"
 
 
+def _qr_image_base64(payload: str) -> str:
+    qr = qrcode.QRCode(
+        error_correction=qrcode.constants.ERROR_CORRECT_M,
+        box_size=8,
+        border=4,
+    )
+    qr.add_data(payload)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return base64.b64encode(buf.getvalue()).decode("ascii")
+
+
 def _validate_qr_data(
     qr_data: str,
     client_id: int | None = None,
@@ -5248,11 +5265,15 @@ def admin_bp() -> Blueprint:
         now_ts = int(datetime.now(timezone.utc).timestamp())
         window_start = _qr_window_start(now_ts)
         window_end = window_start + QR_WINDOW_SECONDS
+        image_in = _qr_image_base64(payload_in)
+        image_out = _qr_image_base64(payload_out)
         return jsonify(
             ok=True,
             data={
                 "payload_in": payload_in,
                 "payload_out": payload_out,
+                "image_in": image_in,
+                "image_out": image_out,
                 "window_start": window_start,
                 "window_end": window_end,
                 "server_ts": now_ts,
@@ -5422,31 +5443,7 @@ def admin_bp() -> Blueprint:
     @bp.route("/assignments", methods=["GET"])
     def assignments():
         user = _current_user()
-        limit_raw = request.args.get("limit")
-        offset_raw = request.args.get("offset")
-        employee_email = (request.args.get("employee_email") or "").strip()
-        client_raw = (request.args.get("client_id") or "").strip()
-        status = (request.args.get("status") or "").strip().upper()
-        try:
-            limit = int(limit_raw) if limit_raw else None
-        except ValueError:
-            limit = None
-        try:
-            offset = int(offset_raw) if offset_raw else 0
-        except ValueError:
-            offset = 0
-        client_id = int(client_raw) if client_raw.isdigit() else None
-        if status not in {"ACTIVE", "ENDED"}:
-            status = None
-        assignments = _list_assignments(
-            limit=limit,
-            offset=offset,
-            employee_email=employee_email or None,
-            client_id=client_id,
-            status=status,
-        )
-        limit_value = limit or ADMIN_LIST_LIMIT or 0
-        has_next = bool(limit_value) and len(assignments) >= limit_value
+        assignments = _list_assignments()
         return render_template(
             "dashboard/admin_assignments.html",
             user=user,
@@ -5454,14 +5451,6 @@ def admin_bp() -> Blueprint:
             sites=_list_sites(),
             shifts=_list_shifts(),
             assignments=assignments,
-            assignment_filters={
-                "employee_email": employee_email,
-                "client_id": client_id or "",
-                "status": status or "",
-                "limit": limit_value,
-                "offset": offset,
-                "has_next": has_next,
-            },
         )
 
     @bp.route("/policies", methods=["GET"])
@@ -6064,31 +6053,12 @@ def admin_bp() -> Blueprint:
     def employees():
         user = _current_user()
         permissions = _get_role_permissions(user.role)
-        query = (request.args.get("q") or "").strip()
-        limit_raw = request.args.get("limit")
-        offset_raw = request.args.get("offset")
-        try:
-            limit = int(limit_raw) if limit_raw else None
-        except ValueError:
-            limit = None
-        try:
-            offset = int(offset_raw) if offset_raw else 0
-        except ValueError:
-            offset = 0
-        employees = _employees(query=query or None, limit=limit, offset=offset)
-        limit_value = limit or ADMIN_LIST_LIMIT or 0
-        has_next = bool(limit_value) and len(employees) >= limit_value
+        employees = _employees()
         return render_template(
             "dashboard/admin_employees.html",
             user=user,
             employees=employees,
             permissions=permissions,
-            employee_filters={
-                "q": query,
-                "limit": limit_value,
-                "offset": offset,
-                "has_next": has_next,
-            },
         )
 
     @bp.route("/employees/create", methods=["POST"])
@@ -6161,42 +6131,12 @@ def admin_bp() -> Blueprint:
     @bp.route("/attendance", methods=["GET"])
     def attendance():
         user = _current_user()
-        email = (request.args.get("email") or "").strip()
-        date_from = (request.args.get("date_from") or "").strip()
-        date_to = (request.args.get("date_to") or "").strip()
-        limit_raw = request.args.get("limit")
-        offset_raw = request.args.get("offset")
-        try:
-            limit = int(limit_raw) if limit_raw else None
-        except ValueError:
-            limit = None
-        try:
-            offset = int(offset_raw) if offset_raw else 0
-        except ValueError:
-            offset = 0
-        if limit is None:
-            limit = ADMIN_LIST_LIMIT or 200
-        records = _attendance_live(
-            limit=limit,
-            offset=offset,
-            employee_email=email or None,
-            date_from=date_from or None,
-            date_to=date_to or None,
-        )
-        has_next = bool(limit) and len(records) >= limit
-        filters = {
-            "email": email,
-            "date_from": date_from,
-            "date_to": date_to,
-            "limit": limit,
-            "offset": offset,
-            "has_next": has_next,
-        }
+        limit = ADMIN_LIST_LIMIT or 200
+        records = _attendance_live(limit=limit)
         return render_template(
             "dashboard/admin_attendance.html",
             user=user,
             records=records,
-            filters=filters,
         )
 
     @bp.route("/manual_attendance", methods=["GET"])
