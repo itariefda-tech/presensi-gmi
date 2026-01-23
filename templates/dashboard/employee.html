@@ -38,28 +38,8 @@
             </span>
             <span>{{ employee.no_hp if employee and employee.no_hp else "-" }}</span>
           </div>
-          <div class="site-subtitle">
-            {% if active_client and active_site %}
-              <span class="header-meta header-meta--site">
-                <span class="header-meta-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" fill="none">
-                    <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5A2.5 2.5 0 1 1 12 6a2.5 2.5 0 0 1 0 5.5z" fill="currentColor"/>
-                  </svg>
-                </span>
-                <span>{{ active_client.name }} ({{ active_site.name }})</span>
-              </span>
-            {% elif active_site %}
-              <span class="header-meta header-meta--site">
-                <span class="header-meta-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" fill="none">
-                    <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5A2.5 2.5 0 1 1 12 6a2.5 2.5 0 0 1 0 5.5z" fill="currentColor"/>
-                  </svg>
-                </span>
-                <span>{{ active_site.name }}</span>
-              </span>
-            {% else %}
-              Site belum ditetapkan
-            {% endif %}
+          <div class="header-meta header-meta--network">
+            <span class="status-badge online" id="netStatusHeader">Online</span>
           </div>
         </div>
         <div class="header-col header-center">
@@ -80,30 +60,8 @@
                 <span id="clockHH">00</span><span id="clockColon" class="clock-colon">:</span><span id="clockMM">00</span>
               </div>
             </div>
-            <div class="site-subtitle shift-subtitle">
-              {% if active_shift and active_shift.name %}
-                <span class="header-meta header-meta--shift">
-                  <span class="header-meta-icon" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" fill="none">
-                      <path d="M12 4v4l3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                      <circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.5"/>
-                    </svg>
-                  </span>
-                  <span>Shift: {{ active_shift.name }}</span>
-                </span>
-              {% elif active_assignment %}
-                <span class="header-meta header-meta--shift">
-                  <span class="header-meta-icon" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" fill="none">
-                      <path d="M12 4v4l3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                      <circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.5"/>
-                    </svg>
-                  </span>
-                  <span>Shift: Rolling(semuanya)</span>
-                </span>
-              {% else %}
-                Shift belum ditentukan
-              {% endif %}
+            <div class="header-help">
+              <button class="help-btn help-btn-inline" id="btnHelp" type="button">Help ?</button>
             </div>
           </div>
         </div>
@@ -129,60 +87,81 @@
               <span class="circle c1"></span>
             </div>
             <div class="presence-status">
-              <div class="status-main">
-                <div class="status-left">
-                  <span class="status-icon" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" role="img" aria-hidden="true">
-                      <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5A2.5 2.5 0 1 1 12 6a2.5 2.5 0 0 1 0 5.5z"/>
-                    </svg>
-                  </span>
-                  <div class="status-text">
-                    <div class="status-sub status-sub-location">
-                      <span class="status-icon-mini status-icon-warning" id="presenceLocationIcon" aria-hidden="true"></span>
-                      <span id="presenceStatusSub">Lokasi aktif</span>
+              <section class="kpi-grid" aria-label="Ringkasan data dan status">
+                <article class="kpi-card" data-card="site">
+                  <div class="kpi-card__label">Site</div>
+                  <div class="kpi-card__value" id="kpiSiteName">{{ active_site.name if active_site else "Belum ada site" }}</div>
+                  <div class="kpi-card__meta">
+                    {% if active_client and active_client.name %}
+                      {{ active_client.name }}
+                    {% else %}
+                      Client belum ditetapkan
+                    {% endif %}
+                  </div>
+                </article>
+                <article class="kpi-card" data-card="shift">
+                  <div class="kpi-card__label">Shift</div>
+                  <div class="kpi-card__value" id="kpiShiftName">{{ active_shift.name if active_shift and active_shift.name else "belum ditentukan" }}</div>
+                  <div class="kpi-card__meta">
+                    {% if active_shift and active_shift.start_time and active_shift.end_time %}
+                      {{ active_shift.start_time }} &ndash; {{ active_shift.end_time }}
+                    {% else %}
+                      Waktu shift tidak tersedia
+                    {% endif %}
+                  </div>
+                </article>
+                <article class="kpi-card" data-card="masuk">
+                  <div class="kpi-card__label">Masuk</div>
+                  <div class="kpi-card__value" id="kpiMasukValue">--:--</div>
+                  <div class="kpi-card__meta" id="kpiMasukMeta">Status: Belum absen</div>
+                </article>
+                <article class="kpi-card" data-card="absent">
+                  <div class="kpi-card__label">ABSEN</div>
+                  <div class="kpi-card__value" id="kpiAbsentValue">Belum</div>
+                  <div class="kpi-card__meta" id="kpiAbsentMeta">Status: Belum hadir</div>
+                  <div class="kpi-card__meta" id="kpiMethodMeta">Metode: GPS + Selfie</div>
+                </article>
+                <article class="kpi-card" data-card="selfie">
+                  <div class="kpi-card__header">
+                    <div>
+                      <div class="kpi-card__label">Selfie</div>
                     </div>
                   </div>
-                </div>
-                <div class="status-badge online" id="netStatus">
-                  <span class="status-badge-icon" aria-hidden="true">
-                    <svg viewBox="0 0 20 20" fill="none">
-                      <circle cx="10" cy="10" r="6" stroke="currentColor" stroke-width="1.6"/>
-                      <path d="M7 10l2 2 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-                    </svg>
-                  </span>
-                  <span>Online</span>
-                </div>
-              </div>
-            <div class="tool-row tool-row-location">
-                <button class="btn secondary btn-location" id="btnLocation" type="button">
-                  <span class="btn-location-icon" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" fill="none">
-                      <path d="M12 2C8.13 2 5 5.13 5 9c0 4.45 4 10 7 13 3-3 7-8.55 7-13 0-3.87-3.13-7-7-7zm0 18c-1.48-1.79-5-7.25-5-11 0-2.76 2.24-5 5-5s5 2.24 5 5c0 3.75-3.52 9.21-5 11zm0-14a3 3 0 1 0 3 3 3 3 0 0 0-3-3zm0 4a1 1 0 1 1 1-1 1 1 0 0 1-1 1z" fill="currentColor"/>
-                    </svg>
-                  </span>
-                  <span class="btn-location-line">di_Lokasi</span>
-                </button>
-                <div class="muted" id="locStatus">Belum ada lokasi.</div>
-                <button class="help-btn help-btn-inline" id="btnHelp" type="button">Help ?</button>
-                <input type="hidden" id="lat" />
-                <input type="hidden" id="lon" />
-              </div>
-            </div>
-
-            <div class="tool-row tool-selfie">
-              <div class="selfie-box">
-                <label class="label" for="selfieFile">Wajib Selfie</label>
-                <label class="selfie-pick" for="selfieFile" aria-label="Ambil selfie">
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M3 7a2 2 0 0 1 2-2h3l1-2h6l1 2h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Zm9 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z" fill="currentColor" opacity=".85"/>
-                  </svg>
-                </label>
-                <img id="selfiePreview" class="preview selfie-preview" alt="" />
-              </div>
-              <div class="selfie-reset-wrap">
-              <button class="btn secondary selfie-reset is-hidden" id="btnSelfieReset" type="button">Ulangi foto</button>
-              </div>
-              <input type="file" id="selfieFile" class="input is-hidden" accept="image/*" capture="user" />
+                  <div class="selfie-card-body">
+                    <div class="selfie-box">
+                      <label class="label" for="selfieFile">Wajib Selfie</label>
+                      <label class="selfie-pick" for="selfieFile" aria-label="Ambil selfie">
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="M3 7a2 2 0 0 1 2-2h3l1-2h6l1 2h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Zm9 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z" fill="currentColor" opacity=".85"/>
+                        </svg>
+                      </label>
+                      <img id="selfiePreview" class="preview selfie-preview" alt="" />
+                    </div>
+                    <div class="selfie-reset-wrap">
+                      <button class="btn secondary selfie-reset is-hidden" id="btnSelfieReset" type="button">Ulangi foto</button>
+                    </div>
+                    <input type="file" id="selfieFile" class="input is-hidden" accept="image/*" capture="user" />
+                  </div>
+                </article>
+                <article class="kpi-card" data-card="location">
+                  <div class="kpi-card__header">
+                    <div>
+                      <div class="kpi-card__label">Lokasi</div>
+                    </div>
+                    <button class="btn btn-location icon-only" id="btnLocation" type="button" aria-label="Ambil lokasi">
+                      <span class="btn-location-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" fill="none">
+                          <path d="M12 2C8.13 2 5 5.13 5 9c0 4.45 4 10 7 13 3-3 7-8.55 7-13 0-3.87-3.13-7-7-7zm0 18c-1.48-1.79-5-7.25-5-11 0-2.76 2.24-5 5-5s5 2.24 5 5c0 3.75-3.52 9.21-5 11zm0-14a3 3 0 1 0 3 3 3 3 0 0 0-3-3zm0 4a1 1 0 1 1 1-1 1 1 0 0 1-1 1z" fill="currentColor"/>
+                        </svg>
+                      </span>
+                    </button>
+                  </div>
+                  <div class="kpi-card__value" id="kpiLocationStatus">Menunggu lokasi</div>
+                  <div class="kpi-card__meta" id="kpiLocationCoords">Belum ada koordinat.</div>
+                </article>
+              </section>
+              <input type="hidden" id="lat" />
+              <input type="hidden" id="lon" />
             </div>
 
             <div class="presence-ready-card">
@@ -214,14 +193,6 @@
               <button class="chip" type="button" data-mode="gps_selfie" aria-pressed="false">GPS + Selfie</button>
               <button class="chip" type="button" data-mode="gps" aria-pressed="false">GPS</button>
               <button class="chip" type="button" data-mode="qr" aria-pressed="false">QR</button>
-            </div>
-
-            <div class="presence-ready-card presence-last-card">
-              <div class="presence-last">
-                  <span class="last-label">Tercatat</span>
-                <span id="lastActionTime">--:--</span>
-                <span id="lastActionBadge" class="last-badge">-</span>
-              </div>
             </div>
 
             <div class="presence-tools">
