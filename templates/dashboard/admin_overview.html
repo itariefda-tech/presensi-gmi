@@ -4,20 +4,19 @@
 {% set subtitle = "Ringkasan cepat admin" %}
 
 {% block body %}
-<div class="card-grid">
-  <div class="card">
-    <h4>Client aktif</h4>
-    <div class="value">{{ stats.clients }}</div>
+<section class="kpi-section">
+  <div class="kpi-grid">
+    {% for card in kpi_cards %}
+    <article class="kpi-card" data-theme="{{ card.theme }}">
+      <div class="kpi-card__label">{{ card.label }}</div>
+      <div class="kpi-card__value">{{ card.value }}</div>
+      {% if card.meta %}
+      <div class="kpi-card__meta">{{ card.meta }}</div>
+      {% endif %}
+    </article>
+    {% endfor %}
   </div>
-  <div class="card">
-    <h4>Pegawai aktif</h4>
-    <div class="value">{{ stats.employees }}</div>
-  </div>
-  <div class="card">
-    <h4>Hadir hari ini</h4>
-    <div class="value">{{ stats.attendance_today }}</div>
-  </div>
-</div>
+</section>
 
 <div class="card" style="margin-top:16px;">
   <div style="font-weight:700; margin-bottom:8px;">Summary per Client</div>

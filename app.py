@@ -5223,6 +5223,67 @@ def admin_bp() -> Blueprint:
             "employees": len(_employees()),
             "attendance_today": _attendance_today_count(today),
         }
+        sites = _list_sites()
+        primary_site = next((s for s in sites if s.get("is_active")), sites[0] if sites else None)
+        site_name = primary_site["name"] if primary_site else "Belum ada site"
+        site_client = primary_site.get("client_name") if primary_site else None
+        site_meta_label = f"Client: {site_client}" if site_client else "Client: -"
+        coords_value = "-"
+        if primary_site:
+            lat_raw = primary_site.get("latitude")
+            lon_raw = primary_site.get("longitude")
+            try:
+                lat_val = float(lat_raw) if lat_raw is not None else None
+                lon_val = float(lon_raw) if lon_raw is not None else None
+            except (TypeError, ValueError):
+                lat_val = lon_val = None
+            if lat_val is not None and lon_val is not None:
+                coords_value = f"{lat_val:.6f}, {lon_val:.6f}"
+        shifts = _list_shifts()
+        shift_target = next((s for s in shifts if s.get("is_active")), shifts[0] if shifts else None)
+        shift_label = shift_target["name"] if shift_target else "Belum ada shift"
+        shift_meta = f"{len(shifts)} shift terdaftar" if shifts else "Belum ada shift terdaftar"
+        absent_count = stats["employees"] - stats["attendance_today"]
+        if absent_count < 0:
+            absent_count = 0
+        kpi_cards = [
+            {
+                "label": "Client aktif",
+                "value": stats["clients"],
+                "meta": "Klien terdaftar",
+                "theme": "slate",
+            },
+            {
+                "label": "Jumlah Project",
+                "value": len(sites),
+                "meta": "Total site terdaftar",
+                "theme": "amber",
+            },
+            {
+                "label": "Koordinat",
+                "value": coords_value,
+                "meta": "Latitude · Longitude",
+                "theme": "violet",
+            },
+            {
+                "label": "Total Pegawai",
+                "value": stats["employees"],
+                "meta": "Pegawai aktif",
+                "theme": "teal",
+            },
+            {
+                "label": "Pegawai hadir",
+                "value": stats["attendance_today"],
+                "meta": "Check-in hari ini",
+                "theme": "indigo",
+            },
+            {
+                "label": "Pegawai absent",
+                "value": absent_count,
+                "meta": "Belum hadir",
+                "theme": "rose",
+            },
+        ]
         client_summaries = _client_operational_summary(today, user)
         alerts = _build_admin_alerts(today)
         audit_logs = _fetch_audit_logs(5)
@@ -5232,6 +5293,7 @@ def admin_bp() -> Blueprint:
             stats=stats,
             client_summaries=client_summaries,
             alerts=alerts,
+            kpi_cards=kpi_cards,
             audit_logs=audit_logs,
         )
 

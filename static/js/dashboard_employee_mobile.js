@@ -13,12 +13,9 @@ const navHandle = document.getElementById("navHandle");
 const attMethod = document.getElementById("attMethod");
 const modeChips = Array.from(document.querySelectorAll(".chip"));
 const btnLocation = document.getElementById("btnLocation");
-const locStatus = document.getElementById("locStatus");
 const latEl = document.getElementById("lat");
 const lonEl = document.getElementById("lon");
 const presenceStatusTitle = document.getElementById("presenceStatusTitle");
-const presenceStatusSub = document.getElementById("presenceStatusSub");
-const presenceLocationIcon = document.getElementById("presenceLocationIcon");
 const selfieFile = document.getElementById("selfieFile");
 const selfiePreview = document.getElementById("selfiePreview");
 const btnSelfieReset = document.getElementById("btnSelfieReset");
@@ -35,7 +32,6 @@ const checkoutStatus = document.getElementById("checkoutStatus");
 const attToast = document.getElementById("attToast");
 const lastActionTime = document.getElementById("lastActionTime");
 const lastActionBadge = document.getElementById("lastActionBadge");
-const netStatus = document.getElementById("netStatus");
 const helpModal = document.getElementById("helpModal");
 const btnHelp = document.getElementById("btnHelp");
 const btnHelpClose = document.getElementById("btnHelpClose");
@@ -61,6 +57,14 @@ const leaveDetailType = document.getElementById("leaveDetailType");
 const leaveDetailRange = document.getElementById("leaveDetailRange");
 const leaveDetailReason = document.getElementById("leaveDetailReason");
 const leaveDetailNote = document.getElementById("leaveDetailNote");
+const kpiLocationValue = document.getElementById("kpiLocationStatus");
+const kpiLocationCoords = document.getElementById("kpiLocationCoords");
+const kpiMasukValue = document.getElementById("kpiMasukValue");
+const kpiMasukMeta = document.getElementById("kpiMasukMeta");
+const kpiAbsentValue = document.getElementById("kpiAbsentValue");
+const kpiAbsentMeta = document.getElementById("kpiAbsentMeta");
+const kpiMethodMeta = document.getElementById("kpiMethodMeta");
+const netStatusBadge = document.getElementById("netStatusHeader");
 
 let qrStream = null;
 let qrDetector = null;
@@ -79,6 +83,11 @@ const attendanceModeStorage = {
   gps_selfie: "gmi_att_mode_gps_selfie",
   gps: "gmi_att_mode_gps",
   qr: "gmi_att_mode_qr",
+};
+const methodLabelMap = {
+  gps_selfie: "GPS + Selfie",
+  gps: "GPS",
+  qr: "QR / Barcode",
 };
 
 function pad2(n){
@@ -126,22 +135,69 @@ function updatePresenceReadiness(){
   }
 }
 
-function setLocationStatus(active, message){
-  if (!presenceStatusSub) return;
+function setLocationStatus(active){
   locationActive = active;
-  const nextMessage = message || (active
-    ? "Lokasi aktif"
-    : "Lokasi tidak aktif, mohon aktifkan lokasi di pengaturan.");
-  presenceStatusSub.textContent = nextMessage;
-  if (presenceLocationIcon) {
-    presenceLocationIcon.classList.toggle("status-icon-ok", active);
-    presenceLocationIcon.classList.toggle("status-icon-warning", !active);
-  }
   updatePresenceReadiness();
+  refreshLocationKpi();
+}
+
+function getMethodLabel(value){
+  if (!value) {
+    return methodLabelMap.gps_selfie;
+  }
+  return methodLabelMap[value] || value.replace(/_/g, " ").toUpperCase();
+}
+
+function refreshLocationKpi(){
+  if (!kpiLocationValue) return;
+  kpiLocationValue.textContent = locationActive ? "Aktif" : "Tidak aktif";
+}
+
+function refreshLocationCoords(){
+  if (!kpiLocationCoords || !latEl || !lonEl) return;
+  const lat = (latEl.value || "").trim();
+  const lon = (lonEl.value || "").trim();
+  if (lat && lon) {
+    kpiLocationCoords.textContent = `${lat}, ${lon}`;
+  } else {
+    kpiLocationCoords.textContent = "Belum ada koordinat.";
+  }
+}
+
+function refreshNetworkBadge(){
+  if (!netStatusBadge) return;
+  const statusText = isOnline ? "Online" : "Tidak online";
+  netStatusBadge.textContent = statusText;
+  netStatusBadge.classList.toggle("online", isOnline);
+  netStatusBadge.classList.toggle("offline", !isOnline);
+}
+
+function refreshMasukKpi(){
+  if (kpiMasukValue) {
+    const timeText = (lastActionTime?.textContent?.trim() || "--:--");
+    kpiMasukValue.textContent = timeText;
+  }
+  if (kpiMasukMeta) {
+    const badgeText = (lastActionBadge?.textContent?.trim() || "-");
+    const statusText = badgeText === "IN" ? "Masuk tercatat" : badgeText === "OUT" ? "Pulang tercatat" : "Belum absen";
+    kpiMasukMeta.textContent = `Status: ${statusText}`;
+  }
+}
+
+function refreshAbsentKpi(){
+  if (kpiAbsentValue) {
+    kpiAbsentValue.textContent = hasCheckedIn ? "Sudah" : "Belum";
+  }
+  if (kpiAbsentMeta) {
+    const statusText = hasCheckedIn ? "Sudah hadir" : "Belum hadir";
+    kpiAbsentMeta.textContent = `Status: ${statusText}`;
+  }
+  if (kpiMethodMeta) {
+    kpiMethodMeta.textContent = `Metode: ${getMethodLabel(attMethod?.value)}`;
+  }
 }
 
 async function checkLocationStatus(){
-  if (!presenceStatusSub) return;
   if (!navigator.geolocation) {
     setLocationStatus(false);
     return;
@@ -427,20 +483,22 @@ function validateQrPayload(value){
 
 btnLocation?.addEventListener("click", async () => {
   try {
-    locStatus.textContent = "Mengambil lokasi...";
+    if (kpiLocationCoords) {
+      kpiLocationCoords.textContent = "Mengambil lokasi...";
+    }
     const pos = await getLocation();
     latEl.value = pos.coords.latitude.toFixed(6);
     lonEl.value = pos.coords.longitude.toFixed(6);
     lastAccuracy = String(pos.coords.accuracy || "");
     lastDeviceTime = new Date().toISOString();
     hasLocation = true;
-    locStatus.textContent = `${latEl.value}, ${lonEl.value}`;
-    locStatus.classList.add("loc-centered");
+    refreshLocationCoords();
     btnLocation?.classList.add("is-ready");
     updatePresenceReadiness();
   } catch (err) {
-    locStatus.textContent = "Gagal ambil lokasi.";
-    locStatus.classList.remove("loc-centered");
+    if (kpiLocationCoords) {
+      kpiLocationCoords.textContent = "Gagal ambil lokasi.";
+    }
     btnLocation?.classList.remove("is-ready");
     hasLocation = Boolean(latEl?.value && lonEl?.value);
     updatePresenceReadiness();
@@ -585,6 +643,8 @@ function updateLastAction(badgeText){
     lastActionBadge.classList.toggle("in", badgeText === "IN");
     lastActionBadge.classList.toggle("out", badgeText === "OUT");
   }
+  refreshMasukKpi();
+  refreshAbsentKpi();
 }
 
 async function ensureLocation(){
@@ -594,6 +654,7 @@ async function ensureLocation(){
     setLocationStatus(true);
     hasLocation = true;
     btnLocation?.classList.add("is-ready");
+    refreshLocationCoords();
     updatePresenceReadiness();
     return { lat, lon, accuracy: lastAccuracy, deviceTime: lastDeviceTime };
   }
@@ -604,8 +665,7 @@ async function ensureLocation(){
   lonEl.value = nextLon;
   lastAccuracy = String(pos.coords.accuracy || "");
   lastDeviceTime = new Date().toISOString();
-  locStatus.textContent = `${nextLat}, ${nextLon}`;
-  locStatus.classList.add("loc-centered");
+  refreshLocationCoords();
   hasLocation = true;
   setLocationStatus(true);
   btnLocation?.classList.add("is-ready");
@@ -857,6 +917,7 @@ function setMethod(value){
     stopScan();
     if (qrVideo) qrVideo.style.display = "none";
   }
+  refreshAbsentKpi();
 }
 
 function isAttendanceModeEnabled(mode){
@@ -895,11 +956,8 @@ function initMethodChips(){
 }
 
 function updateOnlineStatus(){
-  if (!netStatus) return;
   isOnline = navigator.onLine;
-  netStatus.textContent = isOnline ? "Online" : "Offline";
-  netStatus.classList.toggle("online", isOnline);
-  netStatus.classList.toggle("offline", !isOnline);
+  refreshNetworkBadge();
   updatePresenceReadiness();
 }
 
@@ -1008,6 +1066,10 @@ initLeaveActions();
 initLeaveDetail();
 loadLeaveStory();
 go(0);
+refreshLocationKpi();
+refreshLocationCoords();
+refreshMasukKpi();
+refreshAbsentKpi();
 
 let navResizeTimer = null;
 window.addEventListener("resize", () => {
