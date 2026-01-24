@@ -334,6 +334,33 @@ a:hover{ text-decoration:underline; }
   text-transform:uppercase;
   opacity:.86;
 }
+.kpi-card__header{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+}
+.kpi-card__action{
+  border:1px solid rgba(255,255,255,.35);
+  background:rgba(255,255,255,.16);
+  color:inherit;
+  width:30px;
+  height:30px;
+  border-radius:10px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  cursor:pointer;
+  padding:0;
+}
+.kpi-card__action svg{
+  width:16px;
+  height:16px;
+}
+.kpi-card__action:disabled{
+  opacity:.6;
+  cursor:default;
+}
 .kpi-card__value{
   font-size:28px;
   font-weight:700;

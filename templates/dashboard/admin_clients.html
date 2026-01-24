@@ -168,10 +168,12 @@
           <button class="btn primary btn-fixed-100" type="submit">Simpan</button>
         </div>
       </form>
+      {% if user.role != "client_admin" %}
       <form class="btn-row" method="post" action="{{ url_for('admin.clients_delete', client_id=c.id) }}" onsubmit="return confirm('Hapus client ini?');">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
         <button class="btn secondary" type="submit">Hapus Client</button>
       </form>
+      {% endif %}
       <div class="modal-footer">
         <button class="btn secondary full" type="button" data-modal-close>Tutup</button>
       </div>

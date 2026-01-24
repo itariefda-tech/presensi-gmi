@@ -8,10 +8,28 @@
   <div class="kpi-grid">
     {% for card in kpi_cards %}
     <article class="kpi-card" data-theme="{{ card.theme }}">
+      {% if card.key == "coords" or card.label == "Koordinat" %}
+      <div class="kpi-card__header">
+        <div class="kpi-card__label">{{ card.label }}</div>
+        <button class="kpi-card__action" type="button" id="kpiCoordsRefresh" aria-label="Refresh lokasi" title="Refresh lokasi">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M4 12a8 8 0 0 1 13.3-5.8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+            <path d="M20 6v6h-6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M20 12a8 8 0 0 1-13.3 5.8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+            <path d="M4 18v-6h6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+      </div>
+      <div class="kpi-card__value" id="kpiCoordsValue">{{ card.value }}</div>
+      {% if card.meta %}
+      <div class="kpi-card__meta" id="kpiCoordsMeta">{{ card.meta }}</div>
+      {% endif %}
+      {% else %}
       <div class="kpi-card__label">{{ card.label }}</div>
       <div class="kpi-card__value">{{ card.value }}</div>
       {% if card.meta %}
       <div class="kpi-card__meta">{{ card.meta }}</div>
+      {% endif %}
       {% endif %}
     </article>
     {% endfor %}
@@ -140,4 +158,5 @@
     Attendance, approvals, serta ringkasan client tersedia untuk monitoring harian.
   </p>
 </div>
+<script src="{{ url_for('static', filename='js/admin_overview.js') }}"></script>
 {% endblock %}

@@ -980,9 +980,9 @@ else:
 # =========================
 # Demo data & helpers
 # =========================
-ADMIN_ROLES = {"hr_superadmin", "manager_operational", "supervisor", "admin_asistent"}
+ADMIN_ROLES = {"hr_superadmin", "manager_operational", "supervisor", "admin_asistent", "client_admin"}
 EMPLOYEE_ROLES = {"employee"}
-APPROVER_ROLES = {"hr_superadmin", "manager_operational", "supervisor"}
+APPROVER_ROLES = {"hr_superadmin", "manager_operational", "supervisor", "client_admin"}
 SEED_USERS: list[dict] = []
 SEED_USERS_JSON = (os.environ.get("SEED_USERS_JSON") or "").strip()
 if not SEED_USERS_JSON:
@@ -1001,7 +1001,7 @@ else:
         raise RuntimeError("SEED_USERS_JSON tidak valid.") from exc
 SEED_EMPLOYEES = [
 ]
-ADMIN_ROLE_OPTIONS = ["hr_superadmin", "manager_operational", "supervisor", "admin_asistent"]
+ADMIN_ROLE_OPTIONS = ["hr_superadmin", "manager_operational", "supervisor", "admin_asistent", "client_admin"]
 ROLE_OPTIONS = ADMIN_ROLE_OPTIONS + ["employee"]
 ROLE_PERMISSION_KEYS = [
     "view_overview",
@@ -1062,6 +1062,7 @@ class User:
     theme: str = "dark"
     selfie_path: str | None = None
     must_change_password: int = 0
+    client_id: int | None = None
 
 
 def _persist_user(user: User) -> None:
@@ -1073,6 +1074,7 @@ def _persist_user(user: User) -> None:
         "theme": user.theme,
         "selfie_path": user.selfie_path,
         "must_change_password": user.must_change_password,
+        "client_id": user.client_id,
     }
 
 
@@ -1086,14 +1088,24 @@ def _current_user() -> User | None:
         if not row or int(row["is_active"] or 0) != 1:
             session.pop("user", None)
             return None
+        role = row["role"] if "role" in row.keys() else data.get("role", "employee")
+        email = row["email"] if "email" in row.keys() else data.get("email", "")
+        name = row["name"] if "name" in row.keys() else data.get("name", "")
+        client_id = row["client_id"] if "client_id" in row.keys() else data.get("client_id")
+    else:
+        role = data.get("role", "employee")
+        email = data.get("email", "")
+        name = data.get("name", "")
+        client_id = data.get("client_id")
     return User(
         id=int(data.get("id") or 0),
-        email=data.get("email", ""),
-        role=data.get("role", "employee"),
-        name=data.get("name", ""),
+        email=email,
+        role=role,
+        name=name,
         theme=data.get("theme", "dark"),
         selfie_path=data.get("selfie_path"),
         must_change_password=int(data.get("must_change_password") or 0),
+        client_id=int(client_id) if str(client_id).isdigit() and int(client_id) > 0 else None,
     )
 
 
@@ -1110,6 +1122,35 @@ def _require_api_role(user: User | None, allowed_roles: set[str]):
 
 def _require_admin(user: User | None) -> None:
     _require_role(user, ADMIN_ROLES)
+
+
+def _client_admin_client_id(user: User | None) -> int | None:
+    if not user or user.role != "client_admin":
+        return None
+    if isinstance(user.client_id, int) and user.client_id > 0:
+        return int(user.client_id)
+    return None
+
+
+def _require_client_admin_client(user: User | None, client_id: int | None) -> None:
+    if not user or user.role != "client_admin":
+        return
+    scope_id = _client_admin_client_id(user)
+    if not scope_id or not client_id or int(client_id) != scope_id:
+        abort(403)
+
+
+def _require_client_admin_site(user: User | None, site_id: int | None) -> None:
+    if not user or user.role != "client_admin":
+        return
+    site = _get_site_by_id(site_id) if site_id else None
+    client_id = int(site["client_id"]) if site and site["client_id"] is not None else None
+    _require_client_admin_client(user, client_id)
+
+
+def _require_hr_or_client_admin(user: User | None) -> None:
+    if not user or user.role not in {"hr_superadmin", "client_admin"}:
+        abort(403)
 
 
 def _require_manual_approver(user: User | None) -> None:
@@ -1129,6 +1170,12 @@ def _default_role_permissions(role: str) -> dict[str, bool]:
     defaults = {key: True for key in ROLE_PERMISSION_KEYS}
     if role == "hr_superadmin":
         return defaults
+    if role == "client_admin":
+        defaults["manage_clients_add"] = False
+        defaults["manage_employees_view"] = False
+        defaults["manage_employees_add"] = False
+        defaults["manage_employees_actions"] = False
+        defaults["manage_shifts"] = False
     defaults["manage_settings_codes"] = False
     defaults["manage_settings_password"] = False
     return defaults
@@ -1419,9 +1466,11 @@ def _is_late_checkin(checkin_minutes: int | None, assignment: dict) -> bool:
     return checkin_minutes > allowed_minutes
 
 
-def _client_operational_summary(today: str, user: User | None) -> list[dict]:
+def _client_operational_summary(
+    today: str, user: User | None, clients: list[dict] | None = None
+) -> list[dict]:
     start = time.perf_counter()
-    clients = _clients()
+    clients = clients or _clients()
     if not clients:
         return []
     assignments = _list_active_assignments(today)
@@ -1520,6 +1569,20 @@ def _active_policy_sets(today: str) -> tuple[set[int], set[int]]:
     return site_policy_ids, client_policy_ids
 
 
+def _active_policy_sets_for_client(today: str, client_id: int) -> tuple[set[int], set[int]]:
+    policies = _list_policies_by_client(client_id)
+    site_policy_ids: set[int] = set()
+    client_policy_ids: set[int] = set()
+    for policy in policies:
+        if not _policy_active_for_date(policy, today):
+            continue
+        if policy.get("scope_type") == "SITE" and policy.get("site_id"):
+            site_policy_ids.add(int(policy["site_id"]))
+        if policy.get("scope_type") == "CLIENT" and policy.get("client_id"):
+            client_policy_ids.add(int(policy["client_id"]))
+    return site_policy_ids, client_policy_ids
+
+
 def _get_policy_by_id(policy_id: int) -> dict | None:
     conn = _db_connect()
     try:
@@ -1545,6 +1608,7 @@ def _list_expired_assignments(today: str) -> list[dict]:
                 u.name AS employee_name,
                 u.email AS employee_email,
                 a.site_id,
+                s.client_id,
                 s.name AS site_name,
                 COALESCE(c.name, s.client_name) AS client_name,
                 a.end_date
@@ -1580,37 +1644,44 @@ def _limit_alert_items(items: list[str], max_items: int = 6) -> dict:
     }
 
 
-def _build_admin_alerts(today: str) -> dict:
-    site_policy_ids, client_policy_ids = _active_policy_sets(today)
-    sites = _list_sites()
+def _build_admin_alerts(today: str, client_id: int | None = None) -> dict:
+    if client_id:
+        site_policy_ids, client_policy_ids = _active_policy_sets_for_client(today, client_id)
+        sites = _list_sites_by_client(client_id)
+    else:
+        site_policy_ids, client_policy_ids = _active_policy_sets(today)
+        sites = _list_sites()
     sites_without_policy = []
     for site in sites:
         site_id = int(site.get("id") or 0)
-        client_id = site.get("client_id")
+        site_client_id = site.get("client_id")
         has_policy = False
         if site_id and site_id in site_policy_ids:
             has_policy = True
-        elif client_id and int(client_id) in client_policy_ids:
+        elif site_client_id and int(site_client_id) in client_policy_ids:
             has_policy = True
         if not has_policy:
             client_label = site.get("client_name") or "-"
             sites_without_policy.append(f"{client_label} - {site.get('name') or '-'}")
 
-    employee_users = [
-        e for e in _list_employee_users() if int(e.get("is_active") or 0) == 1
-    ]
-    active_assignments = _list_active_assignments(today)
-    active_user_ids = {int(a.get("employee_user_id") or 0) for a in active_assignments}
     employees_without_assignment = []
-    for employee in employee_users:
-        user_id = int(employee.get("id") or 0)
-        if user_id and user_id not in active_user_ids:
-            label = employee.get("name") or employee.get("email") or "-"
-            employees_without_assignment.append(label)
+    if not client_id:
+        employee_users = [
+            e for e in _list_employee_users() if int(e.get("is_active") or 0) == 1
+        ]
+        active_assignments = _list_active_assignments(today)
+        active_user_ids = {int(a.get("employee_user_id") or 0) for a in active_assignments}
+        for employee in employee_users:
+            user_id = int(employee.get("id") or 0)
+            if user_id and user_id not in active_user_ids:
+                label = employee.get("name") or employee.get("email") or "-"
+                employees_without_assignment.append(label)
 
     expired_assignments = _list_expired_assignments(today)
     expired_labels = []
     for row in expired_assignments:
+        if client_id and int(row.get("client_id") or 0) != client_id:
+            continue
         name = row.get("employee_name") or row.get("employee_email") or "-"
         client = row.get("client_name") or "-"
         site = row.get("site_name") or "-"
@@ -1818,6 +1889,7 @@ def _user_row_to_user(row: sqlite3.Row, theme: str) -> User:
         theme=theme,
         selfie_path=row["selfie_path"] if "selfie_path" in row.keys() else None,
         must_change_password=int(row["must_change_password"] or 0),
+        client_id=int(row["client_id"]) if "client_id" in row.keys() and row["client_id"] is not None else None,
     )
 
 
@@ -2082,6 +2154,7 @@ def _create_user(
     is_active: int = 1,
     must_change_password: int = 0,
     selfie_path: str | None = None,
+    client_id: int | None = None,
 ) -> int:
     conn = _db_connect()
     try:
@@ -2089,8 +2162,8 @@ def _create_user(
             """
             INSERT INTO users (
                 name, email, role, password_hash, is_active,
-                created_at, updated_at, must_change_password, selfie_path
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                created_at, updated_at, must_change_password, selfie_path, client_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 name,
@@ -2102,6 +2175,7 @@ def _create_user(
                 _now_ts(),
                 must_change_password,
                 selfie_path,
+                client_id,
             ),
         )
         return int(cur.lastrowid)
@@ -2119,13 +2193,14 @@ def _create_user_with_conn(
     is_active: int = 1,
     must_change_password: int = 0,
     selfie_path: str | None = None,
+    client_id: int | None = None,
 ) -> int:
     cur = conn.execute(
         """
         INSERT INTO users (
             name, email, role, password_hash, is_active,
-            created_at, updated_at, must_change_password, selfie_path
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            created_at, updated_at, must_change_password, selfie_path, client_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             name,
@@ -2137,34 +2212,40 @@ def _create_user_with_conn(
             _now_ts(),
             must_change_password,
             selfie_path,
+            client_id,
         ),
     )
     return int(cur.lastrowid)
 
 
 def _update_user_basic(
-    user_id: int, name: str, role: str, is_active: int, email: str | None = None
+    user_id: int,
+    name: str,
+    role: str,
+    is_active: int,
+    email: str | None = None,
+    client_id: int | None = None,
+    update_client_id: bool = False,
 ) -> None:
     conn = _db_connect()
     try:
-        if email is None:
-            conn.execute(
-                """
-                UPDATE users
-                SET name = ?, role = ?, is_active = ?, updated_at = ?
-                WHERE id = ?
-                """,
-                (name, role, is_active, _now_ts(), user_id),
-            )
-        else:
-            conn.execute(
-                """
-                UPDATE users
-                SET name = ?, email = ?, role = ?, is_active = ?, updated_at = ?
-                WHERE id = ?
-                """,
-                (name, email.lower(), role, is_active, _now_ts(), user_id),
-            )
+        updates = ["name = ?", "role = ?", "is_active = ?", "updated_at = ?"]
+        params: list = [name, role, is_active, _now_ts()]
+        if email is not None:
+            updates.insert(1, "email = ?")
+            params.insert(1, email.lower())
+        if update_client_id:
+            updates.append("client_id = ?")
+            params.append(client_id)
+        params.append(user_id)
+        conn.execute(
+            f"""
+            UPDATE users
+            SET {", ".join(updates)}
+            WHERE id = ?
+            """,
+            tuple(params),
+        )
     finally:
         conn.commit()
         conn.close()
@@ -2242,9 +2323,19 @@ def _list_users() -> list[dict]:
     try:
         cur = conn.execute(
             """
-            SELECT id, name, email, role, is_active, created_at, must_change_password
-            FROM users
-            ORDER BY created_at DESC
+            SELECT
+                u.id,
+                u.name,
+                u.email,
+                u.role,
+                u.is_active,
+                u.created_at,
+                u.must_change_password,
+                u.client_id,
+                c.name AS client_name
+            FROM users u
+            LEFT JOIN clients c ON c.id = u.client_id
+            ORDER BY u.created_at DESC
             """
         )
         return [dict(row) for row in cur.fetchall()]
@@ -3768,7 +3859,8 @@ def _init_db() -> None:
                 created_at TEXT,
                 updated_at TEXT,
                 must_change_password INTEGER DEFAULT 0,
-                selfie_path TEXT
+                selfie_path TEXT,
+                client_id INTEGER
             )
             """
         )
@@ -4079,6 +4171,7 @@ def _init_db() -> None:
                 """
             )
         else:
+            _ensure_column(conn, "users", "client_id", "client_id INTEGER")
             _ensure_column(conn, "attendance", "source", "source TEXT")
             _ensure_column(conn, "attendance", "manual_request_id", "manual_request_id INTEGER")
             _ensure_column(conn, "attendance", "selfie_path", "selfie_path TEXT")
@@ -4340,8 +4433,8 @@ def _seed_users(conn: sqlite3.Connection) -> None:
             """
             INSERT INTO users (
                 name, email, role, password_hash, is_active,
-                created_at, updated_at, must_change_password
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                created_at, updated_at, must_change_password, client_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 seed.get("name") or "",
@@ -4352,6 +4445,7 @@ def _seed_users(conn: sqlite3.Connection) -> None:
                 _now_ts(),
                 _now_ts(),
                 0,
+                seed.get("client_id"),
             ),
         )
 
@@ -4454,6 +4548,18 @@ def _approver_scope_emails(user: User | None) -> set[str] | None:
         return set()
     if user.role == "hr_superadmin":
         return None
+    if user.role == "client_admin":
+        client_id = _client_admin_client_id(user)
+        if not client_id:
+            return set()
+        today = _today_key()
+        emails: set[str] = set()
+        for row in _list_active_assignments(today):
+            if int(row.get("client_id") or 0) == client_id:
+                email = (row.get("employee_email") or "").strip().lower()
+                if email:
+                    emails.add(email)
+        return emails
     site_ids = _get_supervisor_site_ids(user.id)
     if not site_ids:
         return set()
@@ -5087,6 +5193,28 @@ def _attendance_today_count(today: str) -> int:
         conn.close()
 
 
+def _attendance_today_count_for_emails(today: str, emails: set[str]) -> int:
+    if not emails:
+        return 0
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "attendance"):
+            return 0
+        placeholders = ",".join("?" for _ in emails)
+        params = [today, *sorted({e.lower() for e in emails if e})]
+        query = f"""
+            SELECT COUNT(DISTINCT lower(employee_email)) AS total
+            FROM attendance
+            WHERE date = ? AND action = 'checkin'
+              AND lower(employee_email) IN ({placeholders})
+        """
+        cur = conn.execute(query, params)
+        row = cur.fetchone()
+        return int(row["total"]) if row else 0
+    finally:
+        conn.close()
+
+
 def _within_radius(lat: float, lng: float) -> bool:
     center_lat, center_lng = DEMO_GPS_CENTER
     radius_m = DEMO_GPS_RADIUS_METERS
@@ -5209,6 +5337,8 @@ def admin_bp() -> Blueprint:
             return redirect(url_for("index"))
         if user.role not in ADMIN_ROLES:
             return redirect(url_for("dashboard_employee"))
+        if user.role == "client_admin" and not _client_admin_client_id(user):
+            return abort(403)
         if user.role != "hr_superadmin":
             permission = _permission_for_admin_endpoint(request.endpoint)
             if permission and not _has_role_permission(user.role, permission):
@@ -5218,12 +5348,39 @@ def admin_bp() -> Blueprint:
     def overview():
         user = _current_user()
         today = _today_key()
-        stats = {
-            "clients": len(_clients()),
-            "employees": len(_employees()),
-            "attendance_today": _attendance_today_count(today),
-        }
-        sites = _list_sites()
+        client_scope = _client_admin_client_id(user)
+        if client_scope:
+            client_row = _get_client_by_id(client_scope)
+            clients = [dict(client_row)] if client_row else []
+            sites = _list_sites_by_client(client_scope)
+            assignments = [
+                a
+                for a in _list_active_assignments(today)
+                if int(a.get("client_id") or 0) == client_scope
+            ]
+            employee_ids = {
+                int(a.get("employee_user_id") or 0)
+                for a in assignments
+                if a.get("employee_user_id")
+            }
+            employee_emails = {
+                (a.get("employee_email") or "").lower()
+                for a in assignments
+                if a.get("employee_email")
+            }
+            stats = {
+                "clients": len(clients),
+                "employees": len(employee_ids),
+                "attendance_today": _attendance_today_count_for_emails(today, employee_emails),
+            }
+        else:
+            clients = _clients()
+            stats = {
+                "clients": len(clients),
+                "employees": len(_employees()),
+                "attendance_today": _attendance_today_count(today),
+            }
+            sites = _list_sites()
         primary_site = next((s for s in sites if s.get("is_active")), sites[0] if sites else None)
         site_name = primary_site["name"] if primary_site else "Belum ada site"
         site_client = primary_site.get("client_name") if primary_site else None
@@ -5284,9 +5441,9 @@ def admin_bp() -> Blueprint:
                 "theme": "rose",
             },
         ]
-        client_summaries = _client_operational_summary(today, user)
-        alerts = _build_admin_alerts(today)
-        audit_logs = _fetch_audit_logs(5)
+        client_summaries = _client_operational_summary(today, user, clients=clients)
+        alerts = _build_admin_alerts(today, client_id=client_scope)
+        audit_logs = [] if client_scope else _fetch_audit_logs(5)
         return render_template(
             "dashboard/admin_overview.html",
             user=user,
@@ -5300,7 +5457,12 @@ def admin_bp() -> Blueprint:
     @bp.route("/qr", methods=["GET"])
     def qr_page():
         user = _current_user()
-        clients = _clients()
+        client_scope = _client_admin_client_id(user)
+        if client_scope:
+            client_row = _get_client_by_id(client_scope)
+            clients = [dict(client_row)] if client_row else []
+        else:
+            clients = _clients()
         selected_client_id = request.args.get("client_id")
         return render_template(
             "dashboard/admin_qr.html",
@@ -5315,6 +5477,8 @@ def admin_bp() -> Blueprint:
         if not user:
             return jsonify(ok=False, message="Unauthorized."), 403
         client_id = int(request.args.get("client_id") or 0) or None
+        if user.role == "client_admin":
+            _require_client_admin_client(user, client_id)
         if client_id:
             client = _get_client_by_id(client_id)
             if not client:
@@ -5346,16 +5510,24 @@ def admin_bp() -> Blueprint:
     def clients():
         user = _current_user()
         permissions = _get_role_permissions(user.role)
+        client_scope = _client_admin_client_id(user)
+        if client_scope:
+            client_row = _get_client_by_id(client_scope)
+            client_list = [dict(client_row)] if client_row else []
+        else:
+            client_list = _clients()
         return render_template(
             "dashboard/admin_clients.html",
             user=user,
-            clients=_clients(),
+            clients=client_list,
             permissions=permissions,
         )
 
     @bp.route("/clients/<int:client_id>", methods=["GET"])
     def client_profile(client_id: int):
         user = _current_user()
+        if user and user.role == "client_admin":
+            _require_client_admin_client(user, client_id)
         client = _get_client_by_id(client_id)
         if not client:
             flash("Client tidak ditemukan.")
@@ -5407,7 +5579,10 @@ def admin_bp() -> Blueprint:
     @bp.route("/clients/<int:client_id>/contacts/create", methods=["POST"])
     def client_contacts_create(client_id: int):
         user = _current_user()
-        _require_hr_superadmin(user)
+        if user and user.role == "client_admin":
+            _require_client_admin_client(user, client_id)
+        else:
+            _require_hr_superadmin(user)
         if not _get_client_by_id(client_id):
             flash("Client tidak ditemukan.")
             return redirect(url_for("admin.clients"))
@@ -5442,11 +5617,14 @@ def admin_bp() -> Blueprint:
     @bp.route("/clients/contacts/<int:contact_id>/primary", methods=["POST"])
     def client_contacts_primary(contact_id: int):
         user = _current_user()
-        _require_hr_superadmin(user)
+        if user and user.role != "client_admin":
+            _require_hr_superadmin(user)
         contact = _get_client_contact_by_id(contact_id)
         if not contact:
             flash("Kontak tidak ditemukan.")
             return redirect(url_for("admin.clients"))
+        if user and user.role == "client_admin":
+            _require_client_admin_client(user, contact.get("client_id"))
         _set_primary_client_contact(contact_id)
         flash("Primary PIC diperbarui.")
         return redirect(url_for("admin.client_profile", client_id=contact["client_id"]))
@@ -5454,11 +5632,14 @@ def admin_bp() -> Blueprint:
     @bp.route("/clients/contacts/<int:contact_id>/delete", methods=["POST"])
     def client_contacts_delete(contact_id: int):
         user = _current_user()
-        _require_hr_superadmin(user)
+        if user and user.role != "client_admin":
+            _require_hr_superadmin(user)
         contact = _get_client_contact_by_id(contact_id)
         if not contact:
             flash("Kontak tidak ditemukan.")
             return redirect(url_for("admin.clients"))
+        if user and user.role == "client_admin":
+            _require_client_admin_client(user, contact.get("client_id"))
         _delete_client_contact(contact_id)
         flash("Kontak client dihapus.")
         return redirect(url_for("admin.client_profile", client_id=contact["client_id"]))
@@ -5466,10 +5647,23 @@ def admin_bp() -> Blueprint:
     @bp.route("/sites", methods=["GET"])
     def sites():
         user = _current_user()
-        sites = _list_sites()
-        orphan_sites = [s for s in sites if s.get("is_orphan")]
-        today = _today_key()
-        site_policy_ids, client_policy_ids = _active_policy_sets(today)
+        client_scope = _client_admin_client_id(user)
+        client_row = None
+        if client_scope:
+            client_row = _get_client_by_id(client_scope)
+            sites = _list_sites_by_client(client_scope)
+            orphan_sites = []
+            today = _today_key()
+            site_policy_ids, client_policy_ids = _active_policy_sets_for_client(
+                today, client_scope
+            )
+            for site in sites:
+                site["is_orphan"] = False
+        else:
+            sites = _list_sites()
+            orphan_sites = [s for s in sites if s.get("is_orphan")]
+            today = _today_key()
+            site_policy_ids, client_policy_ids = _active_policy_sets(today)
         assignment_counts = _active_assignment_counts(today)
         for site in sites:
             score = 0
@@ -5497,7 +5691,7 @@ def admin_bp() -> Blueprint:
         return render_template(
             "dashboard/admin_sites.html",
             user=user,
-            clients=_clients(),
+            clients=_clients() if not client_scope else [dict(client_row)] if client_row else [],
             sites=sites,
             orphan_sites=orphan_sites,
         )
@@ -5505,12 +5699,13 @@ def admin_bp() -> Blueprint:
     @bp.route("/assignments", methods=["GET"])
     def assignments():
         user = _current_user()
-        assignments = _list_assignments()
+        client_scope = _client_admin_client_id(user)
+        assignments = _list_assignments(client_id=client_scope) if client_scope else _list_assignments()
         return render_template(
             "dashboard/admin_assignments.html",
             user=user,
             employees=_list_employee_users(),
-            sites=_list_sites(),
+            sites=_list_sites_by_client(client_scope) if client_scope else _list_sites(),
             shifts=_list_shifts(),
             assignments=assignments,
         )
@@ -5518,13 +5713,15 @@ def admin_bp() -> Blueprint:
     @bp.route("/policies", methods=["GET"])
     def policies():
         user = _current_user()
+        client_scope = _client_admin_client_id(user)
+        client_row = _get_client_by_id(client_scope) if client_scope else None
         return render_template(
             "dashboard/admin_policies.html",
             user=user,
-            clients=_clients(),
-            sites=_list_sites(),
+            clients=_clients() if not client_scope else [dict(client_row)] if client_row else [],
+            sites=_list_sites_by_client(client_scope) if client_scope else _list_sites(),
             shifts=_list_shifts(),
-            policies=_list_policies(),
+            policies=_list_policies_by_client(client_scope) if client_scope else _list_policies(),
         )
 
     @bp.route("/shifts", methods=["GET"])
@@ -5540,6 +5737,8 @@ def admin_bp() -> Blueprint:
     def clients_create():
         user = _current_user()
         _require_admin(user)
+        if user and user.role == "client_admin":
+            return abort(403)
         name = (request.form.get("client_name") or "").strip()
         legal_name = (request.form.get("legal_name") or "").strip()
         address = (request.form.get("address") or "").strip()
@@ -5592,6 +5791,8 @@ def admin_bp() -> Blueprint:
     def clients_update(client_id: int):
         user = _current_user()
         _require_admin(user)
+        if user and user.role == "client_admin":
+            _require_client_admin_client(user, client_id)
         client = _get_client_by_id(client_id)
         if not client:
             flash("Client tidak ditemukan.")
@@ -5662,6 +5863,8 @@ def admin_bp() -> Blueprint:
     def clients_delete(client_id: int):
         user = _current_user()
         _require_admin(user)
+        if user and user.role == "client_admin":
+            return abort(403)
         if _client_has_sites(client_id):
             flash("Client masih punya site. Pindahkan atau hapus site terlebih dahulu.")
             return redirect(url_for("admin.clients"))
@@ -5672,7 +5875,7 @@ def admin_bp() -> Blueprint:
     @bp.route("/assignments/create", methods=["POST"])
     def assignments_create():
         user = _current_user()
-        _require_hr_superadmin(user)
+        _require_hr_or_client_admin(user)
         employee_id_raw = (request.form.get("employee_user_id") or "").strip()
         site_id_raw = (request.form.get("site_id") or "").strip()
         shift_id_raw = (request.form.get("shift_id") or "").strip()
@@ -5693,6 +5896,8 @@ def admin_bp() -> Blueprint:
         except ValueError:
             flash("Pegawai atau site tidak valid.")
             return redirect(url_for("admin.assignments", _anchor="add-assignment"))
+        if user and user.role == "client_admin":
+            _require_client_admin_site(user, site_id)
         shift_id = None
         if shift_id_raw:
             if not shift_id_raw.isdigit():
@@ -5746,7 +5951,7 @@ def admin_bp() -> Blueprint:
     @bp.route("/assignments/<int:assignment_id>/update", methods=["POST"])
     def assignments_update(assignment_id: int):
         user = _current_user()
-        _require_hr_superadmin(user)
+        _require_hr_or_client_admin(user)
         employee_id_raw = (request.form.get("employee_user_id") or "").strip()
         site_id_raw = (request.form.get("site_id") or "").strip()
         shift_id_raw = (request.form.get("shift_id") or "").strip()
@@ -5767,6 +5972,8 @@ def admin_bp() -> Blueprint:
         except ValueError:
             flash("Pegawai atau site tidak valid.")
             return redirect(url_for("admin.assignments"))
+        if user and user.role == "client_admin":
+            _require_client_admin_site(user, site_id)
         shift_id = None
         if shift_id_raw:
             if not shift_id_raw.isdigit():
@@ -5793,6 +6000,8 @@ def admin_bp() -> Blueprint:
         if not current:
             flash("Assignment tidak ditemukan.")
             return redirect(url_for("admin.assignments"))
+        if user and user.role == "client_admin":
+            _require_client_admin_site(user, current.get("site_id"))
 
         if status == "ACTIVE":
             current_status = (current.get("status") or "").upper()
@@ -5889,8 +6098,10 @@ def admin_bp() -> Blueprint:
     @bp.route("/assignments/<int:assignment_id>/end", methods=["POST"])
     def assignments_end(assignment_id: int):
         user = _current_user()
-        _require_hr_superadmin(user)
+        _require_hr_or_client_admin(user)
         current = _get_assignment_by_id(assignment_id)
+        if user and user.role == "client_admin":
+            _require_client_admin_site(user, current.get("site_id") if current else None)
         _end_assignment(assignment_id)
         _log_audit_event(
             entity_type="assignment",
@@ -5909,7 +6120,7 @@ def admin_bp() -> Blueprint:
     @bp.route("/policies/create", methods=["POST"])
     def policies_create():
         user = _current_user()
-        _require_hr_superadmin(user)
+        _require_hr_or_client_admin(user)
         scope_type = (request.form.get("scope_type") or "CLIENT").strip().upper()
         client_id_raw = (request.form.get("client_id") or "").strip()
         site_id_raw = (request.form.get("site_id") or "").strip()
@@ -5938,6 +6149,11 @@ def admin_bp() -> Blueprint:
         if scope_type == "SITE" and not site_id:
             flash("Site wajib dipilih untuk scope SITE.")
             return redirect(url_for("admin.policies", _anchor="add-policy"))
+        if user and user.role == "client_admin":
+            if scope_type == "CLIENT":
+                _require_client_admin_client(user, client_id)
+            else:
+                _require_client_admin_site(user, site_id)
 
         shift_id = None
         if shift_id_raw:
@@ -5999,7 +6215,7 @@ def admin_bp() -> Blueprint:
     @bp.route("/policies/<int:policy_id>/update", methods=["POST"])
     def policies_update(policy_id: int):
         user = _current_user()
-        _require_hr_superadmin(user)
+        _require_hr_or_client_admin(user)
         before = _get_policy_by_id(policy_id)
         scope_type = (request.form.get("scope_type") or "CLIENT").strip().upper()
         client_id_raw = (request.form.get("client_id") or "").strip()
@@ -6029,6 +6245,17 @@ def admin_bp() -> Blueprint:
         if scope_type == "SITE" and not site_id:
             flash("Site wajib dipilih untuk scope SITE.")
             return redirect(url_for("admin.policies"))
+        if user and user.role == "client_admin":
+            if before:
+                before_scope = before.get("scope_type")
+                if before_scope == "CLIENT":
+                    _require_client_admin_client(user, before.get("client_id"))
+                elif before_scope == "SITE":
+                    _require_client_admin_site(user, before.get("site_id"))
+            if scope_type == "CLIENT":
+                _require_client_admin_client(user, client_id)
+            else:
+                _require_client_admin_site(user, site_id)
 
         shift_id = None
         if shift_id_raw:
@@ -6094,8 +6321,13 @@ def admin_bp() -> Blueprint:
     @bp.route("/policies/<int:policy_id>/end", methods=["POST"])
     def policies_end(policy_id: int):
         user = _current_user()
-        _require_hr_superadmin(user)
+        _require_hr_or_client_admin(user)
         before = _get_policy_by_id(policy_id)
+        if user and user.role == "client_admin":
+            if before and before.get("scope_type") == "CLIENT":
+                _require_client_admin_client(user, before.get("client_id"))
+            elif before and before.get("scope_type") == "SITE":
+                _require_client_admin_site(user, before.get("site_id"))
         _end_policy(policy_id)
         _log_audit_event(
             entity_type="policy",
@@ -6116,6 +6348,20 @@ def admin_bp() -> Blueprint:
         user = _current_user()
         permissions = _get_role_permissions(user.role)
         employees = _employees()
+        client_scope = _client_admin_client_id(user)
+        if client_scope:
+            today = _today_key()
+            assignments = _list_active_assignments(today)
+            scoped_emails = {
+                (a.get("employee_email") or "").lower()
+                for a in assignments
+                if int(a.get("client_id") or 0) == client_scope
+            }
+            employees = [
+                e
+                for e in employees
+                if (e.get("email") or "").lower() in scoped_emails
+            ]
         return render_template(
             "dashboard/admin_employees.html",
             user=user,
@@ -6194,7 +6440,17 @@ def admin_bp() -> Blueprint:
     def attendance():
         user = _current_user()
         limit = ADMIN_LIST_LIMIT or 200
-        records = _attendance_live(limit=limit)
+        client_scope = _client_admin_client_id(user)
+        if client_scope:
+            today = _today_key()
+            scoped_emails = {
+                (a.get("employee_email") or "").lower()
+                for a in _list_active_assignments(today)
+                if int(a.get("client_id") or 0) == client_scope
+            }
+            records = _attendance_live(limit=limit, allowed_emails=scoped_emails)
+        else:
+            records = _attendance_live(limit=limit)
         return render_template(
             "dashboard/admin_attendance.html",
             user=user,
@@ -6302,6 +6558,7 @@ def admin_bp() -> Blueprint:
                 tab = allowed_tabs[0]
         users = [u for u in _list_users() if u.get("role") != "employee"]
         sites = _list_sites()
+        clients = _clients()
         supervisor_sites = _get_supervisor_sites_map()
         registration_codes = _list_employee_registration_codes()
         role_permissions = {
@@ -6313,6 +6570,7 @@ def admin_bp() -> Blueprint:
             tab=tab,
             users=users,
             sites=sites,
+            clients=clients,
             supervisor_sites=supervisor_sites,
             registration_codes=registration_codes,
             role_options=ADMIN_ROLE_OPTIONS,
@@ -6346,6 +6604,7 @@ def admin_bp() -> Blueprint:
         email = (request.form.get("email") or "").strip().lower()
         role = (request.form.get("role") or "admin_asistent").strip()
         password = (request.form.get("password") or "").strip()
+        client_id_raw = (request.form.get("client_id") or "").strip()
 
         if not _looks_like_email(email):
             flash("Email tidak valid.")
@@ -6362,8 +6621,17 @@ def admin_bp() -> Blueprint:
         if len(password) < 6:
             flash("Password awal minimal 6 karakter.")
             return redirect(url_for("admin.settings", tab="users"))
+        client_id = None
+        if role == "client_admin":
+            if not client_id_raw.isdigit():
+                flash("Client wajib dipilih untuk Client Admin.")
+                return redirect(url_for("admin.settings", tab="users"))
+            client_id = int(client_id_raw)
+            if not _get_client_by_id(client_id):
+                flash("Client tidak ditemukan.")
+                return redirect(url_for("admin.settings", tab="users"))
 
-        _create_user(name=name, email=email, role=role, password=password)
+        _create_user(name=name, email=email, role=role, password=password, client_id=client_id)
         flash("User berhasil ditambahkan.")
         return redirect(url_for("admin.settings", tab="users"))
 
@@ -6379,6 +6647,7 @@ def admin_bp() -> Blueprint:
         email = (request.form.get("email") or "").strip().lower()
         role = (request.form.get("role") or "admin_asistent").strip()
         is_active = 1 if request.form.get("is_active") == "1" else 0
+        client_id_raw = (request.form.get("client_id") or "").strip()
 
         if not _looks_like_email(email):
             flash("Email tidak valid.")
@@ -6399,8 +6668,25 @@ def admin_bp() -> Blueprint:
         if existing and int(existing["id"]) != user_id:
             flash("Email sudah terdaftar.")
             return redirect(url_for("admin.settings", tab="users"))
+        client_id = None
+        if role == "client_admin":
+            if not client_id_raw.isdigit():
+                flash("Client wajib dipilih untuk Client Admin.")
+                return redirect(url_for("admin.settings", tab="users"))
+            client_id = int(client_id_raw)
+            if not _get_client_by_id(client_id):
+                flash("Client tidak ditemukan.")
+                return redirect(url_for("admin.settings", tab="users"))
 
-        _update_user_basic(user_id=user_id, name=name, role=role, is_active=is_active, email=email)
+        _update_user_basic(
+            user_id=user_id,
+            name=name,
+            role=role,
+            is_active=is_active,
+            email=email,
+            client_id=client_id,
+            update_client_id=True,
+        )
         flash("User berhasil diperbarui.")
         return redirect(url_for("admin.settings", tab="users"))
 
@@ -6497,7 +6783,7 @@ def admin_bp() -> Blueprint:
     @bp.route("/settings/sites/create", methods=["POST"])
     def settings_sites_create():
         user = _current_user()
-        _require_hr_superadmin(user)
+        _require_hr_or_client_admin(user)
         client_id_raw = (request.form.get("client_id") or "").strip()
         name = (request.form.get("name") or "").strip()
         timezone = (request.form.get("timezone") or "").strip()
@@ -6514,6 +6800,8 @@ def admin_bp() -> Blueprint:
         except ValueError:
             flash("Client tidak valid.")
             return redirect(url_for("admin.sites"))
+        if user and user.role == "client_admin":
+            _require_client_admin_client(user, client_id)
         if not _get_client_by_id(client_id):
             flash("Client tidak ditemukan.")
             return redirect(url_for("admin.sites"))
@@ -6546,7 +6834,7 @@ def admin_bp() -> Blueprint:
     @bp.route("/settings/sites/<int:site_id>/update", methods=["POST"])
     def settings_sites_update(site_id: int):
         user = _current_user()
-        _require_hr_superadmin(user)
+        _require_hr_or_client_admin(user)
         client_id_raw = (request.form.get("client_id") or "").strip()
         name = (request.form.get("name") or "").strip()
         timezone = (request.form.get("timezone") or "").strip()
@@ -6563,6 +6851,8 @@ def admin_bp() -> Blueprint:
         except ValueError:
             flash("Client tidak valid.")
             return redirect(url_for("admin.sites"))
+        if user and user.role == "client_admin":
+            _require_client_admin_client(user, client_id)
         if not _get_client_by_id(client_id):
             flash("Client tidak ditemukan.")
             return redirect(url_for("admin.sites"))
@@ -6596,11 +6886,13 @@ def admin_bp() -> Blueprint:
     @bp.route("/settings/sites/<int:site_id>/toggle", methods=["POST"])
     def settings_sites_toggle(site_id: int):
         user = _current_user()
-        _require_hr_superadmin(user)
+        _require_hr_or_client_admin(user)
         current = next((s for s in _list_sites() if int(s["id"]) == site_id), None)
         if not current:
             flash("Site tidak ditemukan.")
             return redirect(url_for("admin.sites"))
+        if user and user.role == "client_admin":
+            _require_client_admin_site(user, site_id)
         is_active = 0 if int(current["is_active"] or 0) == 1 else 1
         _toggle_site(site_id, is_active)
         flash("Status site diperbarui.")
@@ -6677,9 +6969,12 @@ def _attendance_live(
     employee_email: str | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
+    allowed_emails: set[str] | None = None,
 ) -> list[dict]:
     start = time.perf_counter()
     records: list[dict] = []
+    if allowed_emails is not None and not allowed_emails:
+        return []
     conn = _db_connect()
     try:
         if _table_exists(conn, "attendance"):
@@ -6692,6 +6987,13 @@ def _attendance_live(
             if employee_email:
                 clauses.append("lower(employee_email) LIKE ?")
                 params.append(f"%{employee_email.strip().lower()}%")
+            if allowed_emails is not None:
+                normalized = {e.lower() for e in allowed_emails if e}
+                if not normalized:
+                    return []
+                placeholders = ",".join("?" for _ in normalized)
+                clauses.append(f"lower(employee_email) IN ({placeholders})")
+                params.extend(sorted(normalized))
             if date_from:
                 clauses.append("COALESCE(date, substr(created_at, 1, 10)) >= ?")
                 params.append(date_from)
