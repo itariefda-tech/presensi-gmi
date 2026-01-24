@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import calendar
 import io
 import json
 import re
@@ -12,7 +13,7 @@ import hashlib
 import hmac
 import time
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, date, timedelta, timezone
 from dataclasses import dataclass
 from typing import Dict
 
@@ -61,7 +62,7 @@ def create_app() -> Flask:
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
         SESSION_COOKIE_SECURE=os.environ.get("SESSION_COOKIE_SECURE", "").lower() in {"1", "true", "yes"},
-        MAX_CONTENT_LENGTH=4 * 1024 * 1024,
+        MAX_CONTENT_LENGTH=12 * 1024 * 1024,
     )
 
     @app.after_request
@@ -260,7 +261,7 @@ def create_app() -> Flask:
             return jsonify(ok=False, message="Email sudah terdaftar."), 400
 
         try:
-            _validate_upload(selfie_file, 2 * 1024 * 1024)
+            _validate_upload(selfie_file, 10 * 1024 * 1024)
         except ValueError as err:
             return jsonify(ok=False, message=str(err)), 400
 
@@ -291,7 +292,7 @@ def create_app() -> Flask:
                 selfie_path=None,
             )
             try:
-                selfie_path = _save_upload(selfie_file, "uploads/selfies", 2 * 1024 * 1024)
+                selfie_path = _save_upload(selfie_file, "uploads/selfies", 10 * 1024 * 1024)
             except ValueError as err:
                 conn.rollback()
                 return jsonify(ok=False, message=str(err)), 400
@@ -414,7 +415,7 @@ def create_app() -> Flask:
         if not avatar_file or not avatar_file.filename:
             return jsonify(ok=False, message="Foto profil wajib diunggah."), 400
         try:
-            selfie_path = _save_upload(avatar_file, "uploads/profiles", 2 * 1024 * 1024)
+            selfie_path = _save_upload(avatar_file, "uploads/profiles", 10 * 1024 * 1024)
         except ValueError as err:
             return jsonify(ok=False, message=str(err)), 400
 
@@ -591,7 +592,7 @@ def create_app() -> Flask:
         selfie_path = None
         if selfie_file and selfie_file.filename:
             try:
-                selfie_path = _save_upload(selfie_file, "uploads/attendance", 2 * 1024 * 1024)
+                selfie_path = _save_upload(selfie_file, "uploads/attendance", 10 * 1024 * 1024)
             except ValueError as err:
                 return jsonify(ok=False, message=str(err)), 400
 
@@ -676,7 +677,7 @@ def create_app() -> Flask:
         selfie_path = None
         if selfie_file and selfie_file.filename:
             try:
-                selfie_path = _save_upload(selfie_file, "uploads/attendance", 2 * 1024 * 1024)
+                selfie_path = _save_upload(selfie_file, "uploads/attendance", 10 * 1024 * 1024)
             except ValueError as err:
                 return jsonify(ok=False, message=str(err)), 400
 
@@ -708,6 +709,16 @@ def create_app() -> Flask:
         today = _today_key()
         records = _list_attendance_today(user.email, today, limit=10)
         return jsonify(ok=True, data=records), 200
+
+    @app.route("/api/attendance/summary", methods=["GET"])
+    def attendance_summary():
+        user = _current_user()
+        if not user:
+            return _json_forbidden()
+        month_param = (request.args.get("month") or "").strip()
+        month_value = month_param if month_param else None
+        data = _attendance_month_summary_for_user(user, month_value)
+        return jsonify(ok=True, data=data), 200
 
     @app.route("/api/attendance/manual", methods=["POST"])
     def attendance_manual():
@@ -1358,6 +1369,46 @@ def _date_in_range(target: str, start: str | None, end: str | None) -> bool:
     return start <= target <= end
 
 
+def _month_bounds(month_str: str | None = None) -> tuple[date, date]:
+    if month_str:
+        parts = month_str.split("-")
+        if len(parts) == 2:
+            try:
+                year = int(parts[0])
+                month = int(parts[1])
+            except ValueError:
+                year = None
+                month = None
+        else:
+            year = None
+            month = None
+    else:
+        year = None
+        month = None
+    now = datetime.now()
+    if year is None or month is None or not (1 <= month <= 12):
+        year, month = now.year, now.month
+    _, last_day = calendar.monthrange(year, month)
+    start_date = date(year, month, 1)
+    end_date = date(year, month, last_day)
+    return start_date, end_date
+
+
+def _count_overlap_days(
+    start: date | None,
+    end: date | None,
+    window_start: date,
+    window_end: date,
+) -> int:
+    if not start or not end:
+        return 0
+    lower = max(start, window_start)
+    upper = min(end, window_end)
+    if lower > upper:
+        return 0
+    return (upper - lower).days + 1
+
+
 def _policy_active_for_date(policy: dict, today: str) -> bool:
     effective_from = (policy.get("effective_from") or "").strip()
     effective_to = (policy.get("effective_to") or "").strip()
@@ -1464,6 +1515,78 @@ def _is_late_checkin(checkin_minutes: int | None, assignment: dict) -> bool:
     late_threshold = int(policy.get("late_threshold_minutes") or 0)
     allowed_minutes = start_minutes + max(grace_minutes, late_threshold)
     return checkin_minutes > allowed_minutes
+
+
+def _attendance_month_summary_for_employee(
+    employee_email: str | None,
+    assignment: dict | None,
+    year_month: str | None = None,
+) -> dict:
+    summary = {"present": 0, "late": 0, "izin": 0, "sakit": 0}
+    if not employee_email:
+        return summary
+    email_key = employee_email.strip().lower()
+    if not email_key:
+        return summary
+    month_start, month_end = _month_bounds(year_month)
+    start_key = month_start.strftime("%Y-%m-%d")
+    end_key = month_end.strftime("%Y-%m-%d")
+    conn = _db_connect()
+    try:
+        cur = conn.execute(
+            """
+            SELECT date, time, created_at
+            FROM attendance
+            WHERE lower(employee_email) = ? AND date BETWEEN ? AND ? AND action = 'checkin'
+            """,
+            (email_key, start_key, end_key),
+        )
+        earliest: dict[str, int] = {}
+        for row in cur.fetchall():
+            date_value = row["date"] or ""
+            minutes = _extract_minutes(row.get("time"), row.get("created_at"))
+            if minutes is None:
+                continue
+            current = earliest.get(date_value)
+            if current is None or minutes < current:
+                earliest[date_value] = minutes
+        summary["present"] = len(earliest)
+        if assignment:
+            late = 0
+            for minutes in earliest.values():
+                if _is_late_checkin(minutes, assignment):
+                    late += 1
+            summary["late"] = late
+        leave_counts = {"izin": 0, "sakit": 0}
+        leave_cur = conn.execute(
+            """
+            SELECT leave_type, date_from, date_to, status
+            FROM leave_requests
+            WHERE lower(employee_email) = ? AND status = 'approved'
+            """,
+            (email_key,),
+        )
+        for row in leave_cur.fetchall():
+            leave_type = (row.get("leave_type") or "").lower()
+            if leave_type not in leave_counts:
+                continue
+            start = _date_from_input(row.get("date_from"))
+            end = _date_from_input(row.get("date_to")) or start
+            counted = _count_overlap_days(start, end, month_start, month_end)
+            if counted:
+                leave_counts[leave_type] += counted
+        summary["izin"] = leave_counts["izin"]
+        summary["sakit"] = leave_counts["sakit"]
+    finally:
+        conn.close()
+    return summary
+
+
+def _attendance_month_summary_for_user(user: User | None, year_month: str | None = None) -> dict:
+    if not user:
+        return {"present": 0, "late": 0, "izin": 0, "sakit": 0}
+    assignment = _get_active_assignment(user.id)
+    return _attendance_month_summary_for_employee(user.email, assignment, year_month)
 
 
 def _client_operational_summary(
@@ -1777,7 +1900,7 @@ def _validate_upload(file_obj, max_size: int) -> None:
     except Exception:
         size = 0
     if size and size > max_size:
-        raise ValueError("Ukuran file maksimal 2MB.")
+        raise ValueError("Ukuran file maksimal 10MB.")
 
 
 def _save_upload(file_obj, subdir: str, max_size: int) -> str:

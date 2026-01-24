@@ -61,10 +61,17 @@ const kpiLocationValue = document.getElementById("kpiLocationStatus");
 const kpiLocationCoords = document.getElementById("kpiLocationCoords");
 const kpiMasukValue = document.getElementById("kpiMasukValue");
 const kpiMasukMeta = document.getElementById("kpiMasukMeta");
-const kpiAbsentValue = document.getElementById("kpiAbsentValue");
-const kpiAbsentMeta = document.getElementById("kpiAbsentMeta");
-const kpiMethodMeta = document.getElementById("kpiMethodMeta");
+const presenceMethodLabel = document.getElementById("presenceMethodLabel");
 const netStatusBadge = document.getElementById("netStatusHeader");
+const netStatusLabel = netStatusBadge?.querySelector(".network-label");
+const netStatusAlert = document.getElementById("netStatusAlert");
+const reportFieldEls = {
+  present: document.querySelector(".report-item[data-field='present'] strong"),
+  late: document.querySelector(".report-item[data-field='late'] strong"),
+  izin: document.querySelector(".report-item[data-field='izin'] strong"),
+  sakit: document.querySelector(".report-item[data-field='sakit'] strong"),
+};
+const dailyReportRows = document.getElementById("dailyReportRows");
 
 let qrStream = null;
 let qrDetector = null;
@@ -85,9 +92,9 @@ const attendanceModeStorage = {
   qr: "gmi_att_mode_qr",
 };
 const methodLabelMap = {
-  gps_selfie: "GPS + Selfie",
+  gps_selfie: "GPS+SELFIE",
   gps: "GPS",
-  qr: "QR / Barcode",
+  qr: "SCAN QR",
 };
 
 function pad2(n){
@@ -121,6 +128,8 @@ function updatePresenceReadiness(){
   if (!presenceStatusTitle) return;
   const ready = isOnline && locationActive && hasLocation;
   presenceStatusTitle.textContent = ready ? "Siap Absen" : "Belum siap Absen";
+  presenceStatusTitle.classList.toggle("is-ready", ready);
+  presenceStatusTitle.setAttribute("aria-label", ready ? "Siap Absen" : "Belum siap Absen");
   if (btnLocation) {
     btnLocation.classList.toggle("is-warning", !hasLocation);
   }
@@ -166,10 +175,23 @@ function refreshLocationCoords(){
 
 function refreshNetworkBadge(){
   if (!netStatusBadge) return;
-  const statusText = isOnline ? "Online" : "Tidak online";
-  netStatusBadge.textContent = statusText;
+  const statusText = isOnline ? "Online" : "Offline";
   netStatusBadge.classList.toggle("online", isOnline);
   netStatusBadge.classList.toggle("offline", !isOnline);
+  netStatusBadge.setAttribute("aria-label", `${statusText} jaringan`);
+  netStatusBadge.dataset.status = statusText.toLowerCase();
+  if (netStatusLabel) {
+    netStatusLabel.textContent = statusText;
+  }
+  if (netStatusAlert) {
+    if (isOnline) {
+      netStatusAlert.textContent = "";
+      netStatusAlert.classList.remove("active");
+    } else {
+      netStatusAlert.textContent = "Segera periksa data/internet (wajib online)";
+      netStatusAlert.classList.add("active");
+    }
+  }
 }
 
 function refreshMasukKpi(){
@@ -185,16 +207,7 @@ function refreshMasukKpi(){
 }
 
 function refreshAbsentKpi(){
-  if (kpiAbsentValue) {
-    kpiAbsentValue.textContent = hasCheckedIn ? "Sudah" : "Belum";
-  }
-  if (kpiAbsentMeta) {
-    const statusText = hasCheckedIn ? "Sudah hadir" : "Belum hadir";
-    kpiAbsentMeta.textContent = `Status: ${statusText}`;
-  }
-  if (kpiMethodMeta) {
-    kpiMethodMeta.textContent = `Metode: ${getMethodLabel(attMethod?.value)}`;
-  }
+  // Kept for legacy hooks; no KPI card to update.
 }
 
 async function checkLocationStatus(){
@@ -325,6 +338,73 @@ async function safeFetch(url, options = {}){
   const ok = res.ok;
   const message = data?.message || (ok ? "Berhasil." : "Permintaan gagal.");
   return { ok, data, message, status: res.status };
+}
+
+function updateReportField(field, value){
+  const el = reportFieldEls[field];
+  if (!el) return;
+  const numeric = Number.isFinite(value) ? value : Number(value);
+  el.textContent = Number.isFinite(numeric) ? String(Math.max(0, numeric)) : "0";
+}
+
+async function loadMonthlySummary(){
+  try {
+    const result = await safeFetch("/api/attendance/summary");
+    if (!result.ok) return;
+    const data = result.data?.data || {};
+    updateReportField("present", data.present ?? 0);
+    updateReportField("late", data.late ?? 0);
+    updateReportField("izin", data.izin ?? 0);
+    updateReportField("sakit", data.sakit ?? 0);
+  } catch (err) {
+    console.error("Failed to load monthly summary", err);
+  }
+}
+
+function formatDateDisplay(value){
+  if (!value) return "-";
+  const parts = value.split("-");
+  if (parts.length !== 3) return value;
+  return `${parts[2]}/${parts[1]}`;
+}
+
+function renderDailyReport(records){
+  if (!dailyReportRows) return;
+  dailyReportRows.innerHTML = "";
+  if (!records.length){
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td colspan="3" class="muted">Belum ada catatan bulanan.</td>`;
+    dailyReportRows.appendChild(tr);
+    return;
+  }
+  records.forEach((row) => {
+    const tr = document.createElement("tr");
+    const statusLabel = row.action === "checkout" ? "Pulang" : "Hadir";
+    const methodLabel = (row.method || "-").toUpperCase();
+    const timeText = row.time ? row.time.slice(0,5) : "-";
+    tr.innerHTML = `
+      <td>${formatDateDisplay(row.date)}<div class="muted">${timeText}</div></td>
+      <td>${statusLabel}</td>
+      <td>${methodLabel}</td>
+    `;
+    dailyReportRows.appendChild(tr);
+  });
+}
+
+async function loadDailyReport(){
+  if (!dailyReportRows) return;
+  try {
+    const today = await safeFetch("/api/attendance/today");
+    if (!today.ok) {
+      dailyReportRows.innerHTML = '<tr><td colspan="3" class="muted">Gagal memuat laporan harian.</td></tr>';
+      return;
+    }
+    const records = today.data?.data || [];
+    renderDailyReport(records);
+  } catch (err) {
+    dailyReportRows.innerHTML = '<tr><td colspan="3" class="muted">Gagal memuat laporan harian.</td></tr>';
+    console.error(err);
+  }
 }
 
 function go(index){
@@ -902,6 +982,7 @@ function initStatusLabels(){
 function setMethod(value){
   if (!attMethod) return;
   attMethod.value = value;
+  const label = getMethodLabel(value);
   modeChips.forEach((chip) => {
     const isActive = chip.dataset.mode === value;
     chip.classList.toggle("active", isActive);
@@ -916,6 +997,9 @@ function setMethod(value){
   if (value !== "qr") {
     stopScan();
     if (qrVideo) qrVideo.style.display = "none";
+  }
+  if (presenceMethodLabel) {
+    presenceMethodLabel.textContent = `Metode ${label}`;
   }
   refreshAbsentKpi();
 }
@@ -1062,10 +1146,12 @@ updateOnlineStatus();
 checkLocationStatus();
 hasLocation = Boolean(latEl?.value && lonEl?.value);
 updatePresenceReadiness();
-initLeaveActions();
-initLeaveDetail();
-loadLeaveStory();
-go(0);
+  initLeaveActions();
+  initLeaveDetail();
+  loadLeaveStory();
+  loadMonthlySummary();
+  loadDailyReport();
+  go(0);
 refreshLocationKpi();
 refreshLocationCoords();
 refreshMasukKpi();

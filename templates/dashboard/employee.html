@@ -38,9 +38,6 @@
             </span>
             <span>{{ employee.no_hp if employee and employee.no_hp else "-" }}</span>
           </div>
-          <div class="header-meta header-meta--network">
-            <span class="status-badge online" id="netStatusHeader">Online</span>
-          </div>
         </div>
         <div class="header-col header-center">
           <div class="clock-circle" aria-hidden="true"></div>
@@ -55,11 +52,6 @@
               <span>Ubah tema</span>
             </button>
           </div>
-            <div class="clock-site-row" aria-label="Jam digital">
-              <div class="clock-row" aria-label="Jam digital">
-                <span id="clockHH">00</span><span id="clockColon" class="clock-colon">:</span><span id="clockMM">00</span>
-              </div>
-            </div>
             <div class="header-help">
               <button class="help-btn help-btn-inline" id="btnHelp" type="button">Help ?</button>
             </div>
@@ -97,16 +89,11 @@
                     {% else %}
                       Client belum ditetapkan
                     {% endif %}
-                  </div>
-                </article>
-                <article class="kpi-card" data-card="shift">
-                  <div class="kpi-card__label">Shift</div>
-                  <div class="kpi-card__value" id="kpiShiftName">{{ active_shift.name if active_shift and active_shift.name else "belum ditentukan" }}</div>
-                  <div class="kpi-card__meta">
-                    {% if active_shift and active_shift.start_time and active_shift.end_time %}
-                      {{ active_shift.start_time }} &ndash; {{ active_shift.end_time }}
-                    {% else %}
-                      Waktu shift tidak tersedia
+                    {% if active_shift and active_shift.name %}
+                      | {{ active_shift.name }}
+                      {% if active_shift.start_time and active_shift.end_time %}
+                        ({{ active_shift.start_time }} &ndash; {{ active_shift.end_time }})
+                      {% endif %}
                     {% endif %}
                   </div>
                 </article>
@@ -114,12 +101,6 @@
                   <div class="kpi-card__label">Masuk</div>
                   <div class="kpi-card__value" id="kpiMasukValue">--:--</div>
                   <div class="kpi-card__meta" id="kpiMasukMeta">Status: Belum absen</div>
-                </article>
-                <article class="kpi-card" data-card="absent">
-                  <div class="kpi-card__label">ABSEN</div>
-                  <div class="kpi-card__value" id="kpiAbsentValue">Belum</div>
-                  <div class="kpi-card__meta" id="kpiAbsentMeta">Status: Belum hadir</div>
-                  <div class="kpi-card__meta" id="kpiMethodMeta">Metode: GPS + Selfie</div>
                 </article>
                 <article class="kpi-card" data-card="selfie">
                   <div class="kpi-card__header">
@@ -164,10 +145,28 @@
               <input type="hidden" id="lon" />
             </div>
 
-            <div class="presence-ready-card">
-              <div class="status-title status-title-ready" id="presenceStatusTitle">Siap Absen</div>
+            <div class="presence-status-panel">
+              <span
+                class="network-indicator online"
+                id="netStatusHeader"
+                role="status"
+                aria-label="Status jaringan"
+                data-status="online"
+              >
+                <span class="network-lamp" aria-hidden="true"></span>
+                <span class="network-label">Online</span>
+              </span>
+              <div class="clock-site-row" aria-label="Jam digital">
+                <div class="clock-row" aria-label="Jam digital">
+                  <span id="clockHH">00</span><span id="clockColon" class="clock-colon">:</span><span id="clockMM">00</span>
+                </div>
+              </div>
+              <span class="presence-method-label" id="presenceMethodLabel">Metode GPS+SELFIE</span>
+              <span class="presence-status-badge is-ready" id="presenceStatusTitle" role="status" aria-live="polite">
+                Siap Absen
+              </span>
+              <span class="network-alert" id="netStatusAlert" aria-live="assertive"></span>
             </div>
-
             <div class="presence-actions">
               <button class="btn-presence btn-checkin" id="btnCheckin" type="button">
                 <span class="btn-icon" aria-hidden="true">
@@ -334,18 +333,18 @@
         </section>
 
         <section class="swipe-pane" data-pane="2" aria-label="Laporan">
-          <div class="card mobile-card">
-            <h4>Ringkasan Bulan Ini</h4>
-            <div class="report-grid">
-              <div class="report-item"><span>Hadir</span><strong>18</strong></div>
-              <div class="report-item"><span>Telat</span><strong>2</strong></div>
-              <div class="report-item"><span>Izin</span><strong>1</strong></div>
-              <div class="report-item"><span>Sakit</span><strong>0</strong></div>
-            </div>
-          </div>
+           <div class="card mobile-card">
+             <h4>Ringkasan Bulan Ini</h4>
+             <div class="report-grid">
+               <div class="report-item" data-field="present"><span>Hadir</span><strong>0</strong></div>
+               <div class="report-item" data-field="late"><span>Telat</span><strong>0</strong></div>
+               <div class="report-item" data-field="izin"><span>Izin</span><strong>0</strong></div>
+               <div class="report-item" data-field="sakit"><span>Sakit</span><strong>0</strong></div>
+             </div>
+           </div>
           <div class="card mobile-card card-collapsible is-collapsed" id="daily-report-card" data-collapsible>
             <div class="card-header-collapsible">
-              <h4 style="margin:0;">Laporan Harian (Mock)</h4>
+              <h4 style="margin:0;">Laporan Harian</h4>
               <button class="collapse-toggle" type="button" data-collapse-toggle aria-expanded="false" aria-controls="daily-report-body">
                 <span class="icon-burger" aria-hidden="true"><span></span><span></span><span></span></span>
                 <span class="icon-minus" aria-hidden="true"></span>
@@ -360,10 +359,10 @@
                     <th>Metode</th>
                   </tr>
                 </thead>
-                <tbody>
-                  <tr><td>20/12</td><td>Hadir</td><td>GPS</td></tr>
-                  <tr><td>19/12</td><td>Hadir</td><td>QR</td></tr>
-                  <tr><td>18/12</td><td>Telat</td><td>GPS</td></tr>
+                <tbody id="dailyReportRows">
+                  <tr>
+                    <td colspan="3" class="muted">Memuat data...</td>
+                  </tr>
                 </tbody>
               </table>
             </div>
