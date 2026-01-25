@@ -18,7 +18,7 @@ const lonEl = document.getElementById("lon");
 const presenceStatusTitle = document.getElementById("presenceStatusTitle");
 const selfieFile = document.getElementById("selfieFile");
 const selfiePreview = document.getElementById("selfiePreview");
-const btnSelfieReset = document.getElementById("btnSelfieReset");
+const selfiePick = document.querySelector(".selfie-pick");
 const selfieBlock = document.querySelector(".tool-selfie");
 const btnScan = document.getElementById("btnScan");
 const qrStatus = document.getElementById("qrStatus");
@@ -192,6 +192,25 @@ function refreshNetworkBadge(){
       netStatusAlert.classList.add("active");
     }
   }
+}
+
+function hideSelfiePreview(){
+  if (!selfiePreview) return;
+  selfiePreview.src = "";
+  selfiePreview.style.display = "none";
+}
+
+function updateSelfiePickState(ready){
+  if (!selfiePick) return;
+  selfiePick.classList.toggle("is-ready", ready);
+}
+
+function resetSelfieSelection(){
+  if (selfieFile) {
+    selfieFile.value = "";
+  }
+  updateSelfiePickState(false);
+  hideSelfiePreview();
 }
 
 function refreshMasukKpi(){
@@ -373,7 +392,7 @@ function renderDailyReport(records){
   dailyReportRows.innerHTML = "";
   if (!records.length){
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td colspan="3" class="muted">Belum ada catatan bulanan.</td>`;
+    tr.innerHTML = `<td colspan="3" class="muted">Belum ada</td>`;
     dailyReportRows.appendChild(tr);
     return;
   }
@@ -408,7 +427,7 @@ async function loadDailyReport(){
 }
 
 function go(index){
-  const max = 2;
+  const max = 3;
   swipeIndex = Math.max(0, Math.min(max, index));
   const offset = swipeIndex * 100;
   swipeTrack.style.transform = `translateX(-${offset}%)`;
@@ -594,32 +613,22 @@ if (btnLocation) {
 selfieFile?.addEventListener("change", (e) => {
   const file = e.target.files?.[0];
   if (!file) {
-    const selfiePick = document.querySelector(".selfie-pick");
-    selfiePick?.classList.remove("is-ready");
-    selfiePreview.style.display = "none";
-    btnSelfieReset?.classList.add("is-hidden");
+    resetSelfieSelection();
     return;
   }
-  const selfiePick = document.querySelector(".selfie-pick");
-  selfiePick?.classList.add("is-ready");
+  updateSelfiePickState(true);
   const reader = new FileReader();
   reader.onload = () => {
     selfiePreview.src = reader.result || "";
     selfiePreview.style.display = "block";
-    btnSelfieReset?.classList.remove("is-hidden");
   };
   reader.readAsDataURL(file);
 });
 
-btnSelfieReset?.addEventListener("click", () => {
-  if (selfieFile) selfieFile.value = "";
-  if (selfiePreview) {
-    selfiePreview.src = "";
-    selfiePreview.style.display = "none";
-  }
-  const selfiePick = document.querySelector(".selfie-pick");
-  selfiePick?.classList.remove("is-ready");
-  btnSelfieReset?.classList.add("is-hidden");
+selfiePreview?.addEventListener("click", () => {
+  if (!selfieFile || selfiePreview.style.display === "none") return;
+  resetSelfieSelection();
+  selfieFile.click();
 });
 
 async function startScan(){

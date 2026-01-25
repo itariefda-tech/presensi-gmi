@@ -242,6 +242,57 @@
   </script>
   <script>
     (function(){
+      const resetButtons = document.querySelectorAll("[data-collapse-reset]");
+      if (!resetButtons.length) return;
+      const clearFields = (container) => {
+        container.querySelectorAll("input, textarea, select").forEach((field) => {
+          if (field instanceof HTMLInputElement) {
+            if (field.type === "checkbox" || field.type === "radio") {
+              field.checked = field.defaultChecked;
+              return;
+            }
+            if (field.type === "file") {
+              field.value = "";
+              return;
+            }
+            field.value = field.defaultValue || "";
+            return;
+          }
+          if (field instanceof HTMLSelectElement) {
+            field.selectedIndex = 0;
+            return;
+          }
+          field.value = field.defaultValue || "";
+        });
+      };
+      const collapseCard = (card) => {
+        if (!card) return;
+        card.classList.add("is-collapsed");
+        const toggle = card.querySelector("[data-collapse-toggle]");
+        if (toggle) {
+          toggle.setAttribute("aria-expanded", "false");
+        }
+      };
+      resetButtons.forEach((button) => {
+        button.addEventListener("click", () => {
+          const card = button.closest("[data-collapsible]");
+          if (!card) return;
+          const form = card.querySelector("form");
+          if (form) {
+            form.reset();
+            form.querySelectorAll("input[type='file']").forEach((fileInput) => {
+              fileInput.value = "";
+            });
+          } else {
+            clearFields(card);
+          }
+          collapseCard(card);
+        });
+      });
+    })();
+  </script>
+  <script>
+    (function(){
       const notifyBtn = document.querySelector(".notify-btn");
       const notifyModal = document.getElementById("notifyModal");
       const notifyBody = document.getElementById("notifyBody");

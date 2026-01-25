@@ -80,22 +80,21 @@
             </div>
             <div class="presence-status">
               <section class="kpi-grid" aria-label="Ringkasan data dan status">
-                <article class="kpi-card" data-card="site">
-                  <div class="kpi-card__label">Site</div>
-                  <div class="kpi-card__value" id="kpiSiteName">{{ active_site.name if active_site else "Belum ada site" }}</div>
-                  <div class="kpi-card__meta">
-                    {% if active_client and active_client.name %}
-                      {{ active_client.name }}
-                    {% else %}
-                      Client belum ditetapkan
-                    {% endif %}
-                    {% if active_shift and active_shift.name %}
-                      | {{ active_shift.name }}
-                      {% if active_shift.start_time and active_shift.end_time %}
-                        ({{ active_shift.start_time }} &ndash; {{ active_shift.end_time }})
-                      {% endif %}
-                    {% endif %}
+                <article class="kpi-card" data-card="location">
+                  <div class="kpi-card__header">
+                    <div>
+                      <div class="kpi-card__label">Lokasi</div>
+                    </div>
+                    <button class="btn btn-location icon-only" id="btnLocation" type="button" aria-label="Ambil lokasi">
+                      <span class="btn-location-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" fill="none">
+                          <path d="M12 2C8.13 2 5 5.13 5 9c0 4.45 4 10 7 13 3-3 7-8.55 7-13 0-3.87-3.13-7-7-7zm0 18c-1.48-1.79-5-7.25-5-11 0-2.76 2.24-5 5-5s5 2.24 5 5c0 3.75-3.52 9.21-5 11zm0-14a3 3 0 1 0 3 3 3 3 0 0 0-3-3zm0 4a1 1 0 1 1 1-1 1 1 0 0 1-1 1z" fill="currentColor"/>
+                        </svg>
+                      </span>
+                    </button>
                   </div>
+                  <div class="kpi-card__value" id="kpiLocationStatus">Menunggu lokasi</div>
+                  <div class="kpi-card__meta" id="kpiLocationCoords">Belum ada koordinat.</div>
                 </article>
                 <article class="kpi-card" data-card="masuk">
                   <div class="kpi-card__label">Masuk</div>
@@ -118,27 +117,26 @@
                       </label>
                       <img id="selfiePreview" class="preview selfie-preview" alt="" />
                     </div>
-                    <div class="selfie-reset-wrap">
-                      <button class="btn secondary selfie-reset is-hidden" id="btnSelfieReset" type="button">Ulangi foto</button>
-                    </div>
                     <input type="file" id="selfieFile" class="input is-hidden" accept="image/*" capture="user" />
                   </div>
                 </article>
-                <article class="kpi-card" data-card="location">
-                  <div class="kpi-card__header">
-                    <div>
-                      <div class="kpi-card__label">Lokasi</div>
-                    </div>
-                    <button class="btn btn-location icon-only" id="btnLocation" type="button" aria-label="Ambil lokasi">
-                      <span class="btn-location-icon" aria-hidden="true">
-                        <svg viewBox="0 0 24 24" fill="none">
-                          <path d="M12 2C8.13 2 5 5.13 5 9c0 4.45 4 10 7 13 3-3 7-8.55 7-13 0-3.87-3.13-7-7-7zm0 18c-1.48-1.79-5-7.25-5-11 0-2.76 2.24-5 5-5s5 2.24 5 5c0 3.75-3.52 9.21-5 11zm0-14a3 3 0 1 0 3 3 3 3 0 0 0-3-3zm0 4a1 1 0 1 1 1-1 1 1 0 0 1-1 1z" fill="currentColor"/>
-                        </svg>
-                      </span>
-                    </button>
+                <article class="kpi-card" data-card="site">
+                  <div class="kpi-card__label">SITE &amp; SHIFT</div>
+                  <div class="kpi-card__value" id="kpiSiteName">{{ active_site.name if active_site else "Belum ada site" }}</div>
+                  <div class="kpi-card__meta">
+                    {% if active_client and active_client.name %}
+                      {{ active_client.name }}
+                    {% else %}
+                      Client belum ditetapkan
+                    {% endif %}
+                    {% if active_shift and active_shift.name %}
+                      <br />
+                      {{ active_shift.name }}
+                      {% if active_shift.start_time and active_shift.end_time %}
+                        ({{ active_shift.start_time }} &ndash; {{ active_shift.end_time }})
+                      {% endif %}
+                    {% endif %}
                   </div>
-                  <div class="kpi-card__value" id="kpiLocationStatus">Menunggu lokasi</div>
-                  <div class="kpi-card__meta" id="kpiLocationCoords">Belum ada koordinat.</div>
                 </article>
               </section>
               <input type="hidden" id="lat" />
@@ -294,7 +292,7 @@
             </div>
           </div>
 
-          <div class="card mobile-card card-collapsible is-collapsed" id="leave-story-card" data-collapsible>
+      <div class="card mobile-card card-collapsible is-collapsed" id="leave-story-card" data-collapsible>
             <div class="card-header-collapsible">
               <div class="leave-story-header" style="margin:0;">
                 <h4 style="margin:0;">Story</h4>
@@ -373,6 +371,105 @@
             <button class="btn primary full" id="btnOpenChangePassword" type="button">Ganti Password</button>
           </div>
         </section>
+
+        <section class="swipe-pane" data-pane="3" aria-label="Patroli">
+          <div class="card mobile-card">
+            <h4>Patroli Harian</h4>
+            <div class="report-grid">
+              <div class="report-item" data-field="planned">
+                <span>Rute Terjadwal</span>
+                <strong>3</strong>
+              </div>
+              <div class="report-item" data-field="completed">
+                <span>Tuntas</span>
+                <strong>1</strong>
+              </div>
+              <div class="report-item" data-field="pending">
+                <span>Pending</span>
+                <strong>2</strong>
+              </div>
+              <div class="report-item" data-field="alerts">
+                <span>Alert</span>
+                <strong>0</strong>
+              </div>
+            </div>
+          </div>
+          <div class="card mobile-card">
+            <div class="card-header">
+              <div>
+                <h4>Rute Aktif</h4>
+                <div class="muted">Jalur patroli berikutnya</div>
+              </div>
+              <button class="btn secondary" type="button">Mulai</button>
+            </div>
+            <div class="stack">
+              <article class="history-item">
+                <div class="history-row">
+                  <strong>Site Utama</strong>
+                  <span class="muted">08:00 - 09:00</span>
+                </div>
+                <div class="muted">Gerbang Utama → Lobby → R. Server</div>
+              </article>
+              <article class="history-item">
+                <div class="history-row">
+                  <strong>Warehouse 2</strong>
+                  <span class="muted">09:30 - 10:15</span>
+                </div>
+                <div class="muted">Gudang → Parkir → Loading Dock</div>
+              </article>
+              <article class="history-item">
+                <div class="history-row">
+                  <strong>Satelit C</strong>
+                  <span class="muted">18:00 - 19:00</span>
+                </div>
+                <div class="muted">Pos 1 → Pos 2 → Gate Selatan</div>
+              </article>
+            </div>
+          </div>
+          <div class="card mobile-card card-collapsible is-collapsed" data-collapsible>
+            <div class="card-header-collapsible">
+              <div>Riwayat Patroli Terakhir</div>
+              <button class="collapse-toggle" type="button" data-collapse-toggle aria-expanded="false" aria-controls="patrol-history-body">
+                <span class="icon-burger" aria-hidden="true"><span></span><span></span><span></span></span>
+                <span class="icon-minus" aria-hidden="true"></span>
+              </button>
+            </div>
+            <div class="card-body-collapsible" id="patrol-history-body">
+              <div class="story-list">
+                <div class="story-item">
+                  <div class="story-row">
+                    <span>Patroli Area A</span>
+                    <span class="muted">Selesai • 05 menit lalu</span>
+                  </div>
+                  <div class="muted">Semua titik diverifikasi. Tidak ada temuan.</div>
+                </div>
+                <div class="story-item">
+                  <div class="story-row">
+                    <span>Patroli Area B</span>
+                    <span class="muted">Pending • 12 menit lagi</span>
+                  </div>
+                  <div class="muted">Menunggu petugas tambahan untuk shift malam.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="card mobile-card card-collapsible" data-collapsible>
+            <div class="card-header-collapsible">
+              <div>Catatan Pengawas</div>
+              <button class="collapse-toggle" type="button" data-collapse-toggle aria-expanded="true" aria-controls="patrol-notes-body">
+                <span class="icon-burger" aria-hidden="true"><span></span><span></span><span></span></span>
+                <span class="icon-minus" aria-hidden="true"></span>
+              </button>
+            </div>
+            <div class="card-body-collapsible" id="patrol-notes-body">
+              <div class="form-row single" style="grid-column: 1 / -1;">
+                <div class="form-inline">
+                  <textarea class="input" rows="3" placeholder="Pantau zona/area barat; beberapa kendaraan aman. Laporkan segera jika ada pelanggaran." style="width:100%;" disabled></textarea>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
       </div>
     </div>
 
@@ -395,16 +492,25 @@
         </span>
         <span class="nav-label">Izin</span>
       </button>
-      <button class="nav-btn" data-tab="2" type="button">
-        <span class="nav-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none">
-            <path d="M6 14h4v6H6zM10 10h4v10h-4zM14 6h4v14h-4z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-        </span>
-        <span class="nav-label">Laporan</span>
-      </button>
-      <form method="post" action="{{ url_for('logout') }}">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <button class="nav-btn" data-tab="2" type="button">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none">
+              <path d="M6 14h4v6H6zM10 10h4v10h-4zM14 6h4v14h-4z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </span>
+          <span class="nav-label">Laporan</span>
+        </button>
+        <button class="nav-btn" data-tab="3" type="button">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none">
+              <path d="M12 2a1 1 0 0 1 1 1v3h3a1 1 0 0 1 0 2h-3v3a1 1 0 0 1-2 0V8H8a1 1 0 0 1 0-2h3V3a1 1 0 0 1 1-1Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M6 12h12v9H6z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </span>
+          <span class="nav-label">Patroli</span>
+        </button>
+        <form method="post" action="{{ url_for('logout') }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
         <button class="nav-btn nav-logout" type="submit">
           <span class="nav-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none">

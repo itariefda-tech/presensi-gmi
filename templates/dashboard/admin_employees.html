@@ -10,10 +10,15 @@
 <div class="card card-collapsible is-collapsed" id="add-employee" data-collapsible>
   <div class="card-header-collapsible">
     <div>Tambah Pegawai</div>
-    <button class="collapse-toggle" type="button" data-collapse-toggle aria-expanded="false" aria-controls="add-employee-body">
-      <span class="icon-burger" aria-hidden="true"><span></span><span></span><span></span></span>
-      <span class="icon-minus" aria-hidden="true"></span>
-    </button>
+    <div class="card-header-actions">
+      <button class="btn secondary collapse-reset" type="button" data-collapse-reset aria-label="Batal input">
+        <span aria-hidden="true">×</span>
+      </button>
+      <button class="collapse-toggle" type="button" data-collapse-toggle aria-expanded="false" aria-controls="add-employee-body">
+        <span class="icon-burger" aria-hidden="true"><span></span><span></span><span></span></span>
+        <span class="icon-minus" aria-hidden="true"></span>
+      </button>
+    </div>
   </div>
   <div class="card-body-collapsible" id="add-employee-body">
     <form class="form-grid" style="grid-template-columns: repeat(2, minmax(260px, 1fr));" method="post" action="{{ url_for('admin.employees_create') }}">
@@ -93,23 +98,27 @@
         <td>{{ e.gender or "-" }}</td>
         <td>{{ e.email or "-" }}</td>
         <td>{% if e.is_active %}Active{% else %}Disabled{% endif %}</td>
-        <td>
-          {% if can_actions %}
-          <details class="dropdown">
-            <summary class="btn secondary icon-btn" aria-label="Aksi">
-              <span></span>
-              <span></span>
-              <span></span>
-            </summary>
-            <div class="dropdown-menu">
-              <button class="btn secondary" type="button" data-modal-open="employee-profile-{{ e.id }}">Profile</button>
-              <button class="btn secondary" type="button" data-modal-open="employee-edit-{{ e.id }}">Edit</button>
-            </div>
-          </details>
-          {% else %}
-          <span class="muted">-</span>
-          {% endif %}
-        </td>
+          <td>
+            {% if can_actions %}
+            <details class="dropdown">
+              <summary class="btn secondary icon-btn" aria-label="Aksi">
+                <span></span>
+                <span></span>
+                <span></span>
+              </summary>
+              <div class="dropdown-menu">
+                <button class="btn secondary" type="button" data-modal-open="employee-profile-{{ e.id }}">Profile</button>
+                <button class="btn secondary" type="button" data-modal-open="employee-edit-{{ e.id }}">Edit</button>
+                <form class="btn-row" method="post" action="{{ url_for('admin.employees_delete', employee_id=e.id) }}" onsubmit="return confirm('Hapus pegawai ini?');">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                  <button class="btn secondary" type="submit">Delete</button>
+                </form>
+              </div>
+            </details>
+            {% else %}
+            <span class="muted">-</span>
+            {% endif %}
+          </td>
       </tr>
       {% endfor %}
     </tbody>
@@ -221,10 +230,6 @@
         <div class="btn-row">
           <button class="btn primary btn-fixed-100" type="submit">Simpan</button>
         </div>
-      </form>
-      <form class="btn-row" method="post" action="{{ url_for('admin.employees_delete', employee_id=e.id) }}" onsubmit="return confirm('Hapus pegawai ini?');">
-  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-        <button class="btn secondary" type="submit">Hapus Pegawai</button>
       </form>
       <div class="modal-footer">
         <button class="btn secondary full" type="button" data-modal-close>Tutup</button>

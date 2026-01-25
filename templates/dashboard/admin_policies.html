@@ -7,13 +7,18 @@
 <div class="card card-collapsible is-collapsed" id="add-policy" data-collapsible>
   <div class="card-header-collapsible">
     <div>Tambah Policy</div>
-    <button class="collapse-toggle" type="button" data-collapse-toggle aria-expanded="false" aria-controls="add-policy-body">
-      <span class="icon-burger" aria-hidden="true"><span></span><span></span><span></span></span>
-      <span class="icon-minus" aria-hidden="true"></span>
-    </button>
+    <div class="card-header-actions">
+      <button class="btn secondary collapse-reset" type="button" data-collapse-reset aria-label="Batal input">
+        <span aria-hidden="true">×</span>
+      </button>
+      <button class="collapse-toggle" type="button" data-collapse-toggle aria-expanded="false" aria-controls="add-policy-body">
+        <span class="icon-burger" aria-hidden="true"><span></span><span></span><span></span></span>
+        <span class="icon-minus" aria-hidden="true"></span>
+      </button>
+    </div>
   </div>
   <div class="card-body-collapsible" id="add-policy-body">
-    <form class="form-grid" style="grid-template-columns: repeat(2, minmax(260px, 1fr));" method="post" action="{{ url_for('admin.policies_create') }}">
+    <form class="form-grid" style="grid-template-columns: repeat(2, minmax(260px, 1fr));" method="post" action="{{ url_for('admin.policies_create') }}" data-policy-form>
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
     <div class="form-row">
       <label class="label" for="policy-scope">Scope :</label>
@@ -51,11 +56,11 @@
     </div>
     <div class="form-row">
       <label class="label" for="policy-from">Berlaku Mulai :</label>
-      <input class="input" id="policy-from" type="date" name="effective_from" required />
+      <input class="input" id="policy-from" type="text" name="effective_from" placeholder="dd/mm/yyyy" required data-policy-date />
     </div>
     <div class="form-row">
       <label class="label" for="policy-to">Berlaku Sampai :</label>
-      <input class="input" id="policy-to" type="date" name="effective_to" />
+      <input class="input" id="policy-to" type="text" name="effective_to" placeholder="dd/mm/yyyy" data-policy-date />
     </div>
     <div class="form-row">
       <label class="label" for="policy-work">Durasi Kerja (menit) :</label>
@@ -135,7 +140,7 @@
           QR: {{ 'Ya' if p.allow_qr else 'Tidak' }},
           Selfie: {{ 'Ya' if p.require_selfie else 'Tidak' }}
         </td>
-        <td>
+          <td>
           <details class="dropdown">
             <summary class="btn secondary icon-btn" aria-label="Aksi">
               <span></span>
@@ -147,6 +152,10 @@
               <form method="post" action="{{ url_for('admin.policies_end', policy_id=p.id) }}" onsubmit="return confirm('Tutup policy ini?');">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                 <button class="btn secondary" type="submit">End</button>
+              </form>
+              <form method="post" action="{{ url_for('admin.policies_delete', policy_id=p.id) }}" onsubmit="return confirm('Hapus policy ini?');">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                <button class="btn secondary" type="submit">Delete</button>
               </form>
             </div>
           </details>
@@ -162,7 +171,7 @@
   <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="policy-edit-title-{{ p.id }}">
     <div class="modal-title" id="policy-edit-title-{{ p.id }}">Edit Policy</div>
     <div class="stack">
-      <form method="post" action="{{ url_for('admin.policies_update', policy_id=p.id) }}">
+      <form method="post" action="{{ url_for('admin.policies_update', policy_id=p.id) }}" data-policy-form>
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
         <div class="form-row">
           <label class="label" for="policy-scope-{{ p.id }}">Scope</label>
@@ -200,11 +209,11 @@
         </div>
         <div class="form-row">
           <label class="label" for="policy-from-{{ p.id }}">Berlaku Mulai</label>
-          <input class="input" id="policy-from-{{ p.id }}" type="date" name="effective_from" value="{{ p.effective_from }}" required />
+          <input class="input" id="policy-from-{{ p.id }}" type="text" name="effective_from" value="{{ p.effective_from|ddmmyyyy }}" placeholder="dd/mm/yyyy" required data-policy-date />
         </div>
         <div class="form-row">
           <label class="label" for="policy-to-{{ p.id }}">Berlaku Sampai</label>
-          <input class="input" id="policy-to-{{ p.id }}" type="date" name="effective_to" value="{{ p.effective_to or '' }}" />
+          <input class="input" id="policy-to-{{ p.id }}" type="text" name="effective_to" value="{{ p.effective_to|ddmmyyyy or '' }}" placeholder="dd/mm/yyyy" data-policy-date />
         </div>
         <div class="form-row">
           <label class="label" for="policy-work-{{ p.id }}">Durasi Kerja (menit)</label>
@@ -286,8 +295,8 @@
   })();
 </script>
 
-<script>
-  (function(){
+  <script>
+    (function(){
     const openButtons = document.querySelectorAll("[data-modal-open]");
     const closeButtons = document.querySelectorAll("[data-modal-close]");
     openButtons.forEach((btn) => {
@@ -335,6 +344,27 @@
       const menu = drop.querySelector(".dropdown-menu");
       menu?.addEventListener("mouseleave", () => {
         drop.removeAttribute("open");
+      });
+    });
+  })();
+</script>
+<script>
+  (function(){
+    function toIsoDate(value){
+      if (!value) return "";
+      const match = value.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+      if (!match) return value;
+      return `${match[3]}-${match[2]}-${match[1]}`;
+    }
+    document.querySelectorAll("[data-policy-form]").forEach((form) => {
+      form.addEventListener("submit", () => {
+        const names = ["effective_from", "effective_to"];
+        names.forEach((name) => {
+          const input = form.querySelector(`input[name="${name}"]`);
+          if (input) {
+            input.value = toIsoDate(input.value);
+          }
+        });
       });
     });
   })();

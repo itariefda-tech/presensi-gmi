@@ -7,10 +7,15 @@
 <div class="card card-collapsible is-collapsed" id="add-shift" data-collapsible>
   <div class="card-header-collapsible">
     <div>Tambah Shift</div>
-    <button class="collapse-toggle" type="button" data-collapse-toggle aria-expanded="false" aria-controls="add-shift-body">
-      <span class="icon-burger" aria-hidden="true"><span></span><span></span><span></span></span>
-      <span class="icon-minus" aria-hidden="true"></span>
-    </button>
+    <div class="card-header-actions">
+      <button class="btn secondary collapse-reset" type="button" data-collapse-reset aria-label="Batal input">
+        <span aria-hidden="true">×</span>
+      </button>
+      <button class="collapse-toggle" type="button" data-collapse-toggle aria-expanded="false" aria-controls="add-shift-body">
+        <span class="icon-burger" aria-hidden="true"><span></span><span></span><span></span></span>
+        <span class="icon-minus" aria-hidden="true"></span>
+      </button>
+    </div>
   </div>
   <div class="card-body-collapsible" id="add-shift-body">
     <div class="muted" style="margin-bottom:10px;">Atur jadwal kerja dan toleransi keterlambatan.</div>
@@ -51,16 +56,27 @@
           <td><input class="input shift-grace-input" type="number" name="grace_minutes" value="{{ s.grace_minutes or 0 }}" min="0" form="shift-form-{{ s.id }}" /></td>
           <td class="shift-col-status">{% if s.is_active %}Active{% else %}Disabled{% endif %}</td>
           <td class="shift-col-actions">
-            <div class="stack shift-actions">
-              <form id="shift-form-{{ s.id }}" method="post" action="{{ url_for('admin.settings_shifts_update', shift_id=s.id) }}">
+            <details class="dropdown">
+              <summary class="btn secondary icon-btn" aria-label="Aksi">
+                <span></span>
+                <span></span>
+                <span></span>
+              </summary>
+              <div class="dropdown-menu">
+                <form id="shift-form-{{ s.id }}" method="post" action="{{ url_for('admin.settings_shifts_update', shift_id=s.id) }}">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-                <button class="btn primary" type="submit">Save</button>
-              </form>
-              <form method="post" action="{{ url_for('admin.settings_shifts_toggle', shift_id=s.id) }}">
+                  <button class="btn secondary" type="submit">Edit</button>
+                </form>
+                <form method="post" action="{{ url_for('admin.settings_shifts_toggle', shift_id=s.id) }}">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-                <button class="btn secondary" type="submit">{% if s.is_active %}Disable{% else %}Enable{% endif %}</button>
-              </form>
-            </div>
+                  <button class="btn secondary" type="submit">{% if s.is_active %}Disable{% else %}Enable{% endif %}</button>
+                </form>
+                <form method="post" action="{{ url_for('admin.settings_shifts_delete', shift_id=s.id) }}" onsubmit="return confirm('Hapus shift ini?');">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                  <button class="btn secondary" type="submit">Delete</button>
+                </form>
+              </div>
+            </details>
           </td>
         </tr>
         {% endfor %}

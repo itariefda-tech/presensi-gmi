@@ -2997,6 +2997,15 @@ def _delete_client(client_id: int) -> None:
         conn.close()
 
 
+def _delete_site(site_id: int) -> None:
+    conn = _db_connect()
+    try:
+        conn.execute("DELETE FROM sites WHERE id = ?", (site_id,))
+    finally:
+        conn.commit()
+        conn.close()
+
+
 def _list_sites() -> list[dict]:
     conn = _db_connect()
     try:
@@ -3611,6 +3620,15 @@ def _end_assignment_with_date(assignment_id: int, end_date: str) -> None:
         conn.close()
 
 
+def _delete_assignment(assignment_id: int) -> None:
+    conn = _db_connect()
+    try:
+        conn.execute("DELETE FROM assignments WHERE id = ?", (assignment_id,))
+    finally:
+        conn.commit()
+        conn.close()
+
+
 def _create_site(
     client_id: int,
     name: str,
@@ -3703,6 +3721,15 @@ def _toggle_site(site_id: int, is_active: int) -> None:
         conn.close()
 
 
+def _delete_policy(policy_id: int) -> None:
+    conn = _db_connect()
+    try:
+        conn.execute("DELETE FROM attendance_policies WHERE id = ?", (policy_id,))
+    finally:
+        conn.commit()
+        conn.close()
+
+
 def _list_shifts() -> list[dict]:
     conn = _db_connect()
     try:
@@ -3756,6 +3783,15 @@ def _toggle_shift(shift_id: int, is_active: int) -> None:
             "UPDATE shifts SET is_active = ? WHERE id = ?",
             (is_active, shift_id),
         )
+    finally:
+        conn.commit()
+        conn.close()
+
+
+def _delete_shift(shift_id: int) -> None:
+    conn = _db_connect()
+    try:
+        conn.execute("DELETE FROM shifts WHERE id = ?", (shift_id,))
     finally:
         conn.commit()
         conn.close()
@@ -6240,6 +6276,28 @@ def admin_bp() -> Blueprint:
         flash("Assignment ditutup.")
         return redirect(url_for("admin.assignments"))
 
+    @bp.route("/assignments/<int:assignment_id>/delete", methods=["POST"])
+    def assignments_delete(assignment_id: int):
+        user = _current_user()
+        _require_hr_or_client_admin(user)
+        current = _get_assignment_by_id(assignment_id)
+        if not current:
+            flash("Assignment tidak ditemukan.")
+            return redirect(url_for("admin.assignments"))
+        if user and user.role == "client_admin":
+            _require_client_admin_site(user, current.get("site_id"))
+        _delete_assignment(assignment_id)
+        _log_audit_event(
+            entity_type="assignment",
+            entity_id=assignment_id,
+            action="DELETE",
+            actor=user,
+            summary=f"Assignment dihapus untuk id {assignment_id}.",
+            details={"before": current},
+        )
+        flash("Assignment dihapus.")
+        return redirect(url_for("admin.assignments"))
+
     @bp.route("/policies/create", methods=["POST"])
     def policies_create():
         user = _current_user()
@@ -6464,6 +6522,32 @@ def admin_bp() -> Blueprint:
             },
         )
         flash("Policy ditutup.")
+        return redirect(url_for("admin.policies"))
+
+    @bp.route("/policies/<int:policy_id>/delete", methods=["POST"])
+    def policies_delete(policy_id: int):
+        user = _current_user()
+        _require_hr_or_client_admin(user)
+        before = _get_policy_by_id(policy_id)
+        if not before:
+            flash("Policy tidak ditemukan.")
+            return redirect(url_for("admin.policies"))
+        if user and user.role == "client_admin":
+            scope = before.get("scope_type")
+            if scope == "CLIENT":
+                _require_client_admin_client(user, before.get("client_id"))
+            elif scope == "SITE":
+                _require_client_admin_site(user, before.get("site_id"))
+        _delete_policy(policy_id)
+        _log_audit_event(
+            entity_type="policy",
+            entity_id=policy_id,
+            action="DELETE",
+            actor=user,
+            summary=f"Policy dihapus untuk id {policy_id}.",
+            details={"before": before},
+        )
+        flash("Policy berhasil dihapus.")
         return redirect(url_for("admin.policies"))
 
     @bp.route("/employees", methods=["GET"])
@@ -7021,6 +7105,23 @@ def admin_bp() -> Blueprint:
         flash("Status site diperbarui.")
         return redirect(url_for("admin.sites"))
 
+    @bp.route("/settings/sites/<int:site_id>/delete", methods=["POST"])
+    def settings_sites_delete(site_id: int):
+        user = _current_user()
+        _require_hr_or_client_admin(user)
+        current = next((s for s in _list_sites() if int(s["id"]) == site_id), None)
+        if not current:
+            flash("Site tidak ditemukan.")
+            return redirect(url_for("admin.sites"))
+        if user and user.role == "client_admin":
+            _require_client_admin_site(user, site_id)
+        try:
+            _delete_site(site_id)
+            flash("Site berhasil dihapus.")
+        except sqlite3.IntegrityError:
+            flash("Site tidak dapat dihapus karena masih memiliki data terkait.")
+        return redirect(url_for("admin.sites"))
+
     @bp.route("/settings/shifts/create", methods=["POST"])
     def settings_shifts_create():
         user = _current_user()
@@ -7062,6 +7163,21 @@ def admin_bp() -> Blueprint:
         is_active = 0 if int(current["is_active"] or 0) == 1 else 1
         _toggle_shift(shift_id, is_active)
         flash("Status shift diperbarui.")
+        return redirect(url_for("admin.shifts"))
+
+    @bp.route("/settings/shifts/<int:shift_id>/delete", methods=["POST"])
+    def settings_shifts_delete(shift_id: int):
+        user = _current_user()
+        _require_hr_superadmin(user)
+        current = next((s for s in _list_shifts() if int(s["id"]) == shift_id), None)
+        if not current:
+            flash("Shift tidak ditemukan.")
+            return redirect(url_for("admin.shifts"))
+        try:
+            _delete_shift(shift_id)
+            flash("Shift berhasil dihapus.")
+        except sqlite3.IntegrityError:
+            flash("Shift tidak dapat dihapus karena masih digunakan oleh data lain.")
         return redirect(url_for("admin.shifts"))
 
     return bp

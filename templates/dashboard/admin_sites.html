@@ -5,12 +5,17 @@
 
 {% block body %}
 <div class="card card-collapsible is-collapsed" id="add-site" data-collapsible>
-  <div class="card-header-collapsible">
+    <div class="card-header-collapsible">
     <div>Tambah Site</div>
-    <button class="collapse-toggle" type="button" data-collapse-toggle aria-expanded="false" aria-controls="add-site-body">
-      <span class="icon-burger" aria-hidden="true"><span></span><span></span><span></span></span>
-      <span class="icon-minus" aria-hidden="true"></span>
-    </button>
+    <div class="card-header-actions">
+      <button class="btn secondary collapse-reset" type="button" data-collapse-reset aria-label="Batal input">
+        <span aria-hidden="true">×</span>
+      </button>
+      <button class="collapse-toggle" type="button" data-collapse-toggle aria-expanded="false" aria-controls="add-site-body">
+        <span class="icon-burger" aria-hidden="true"><span></span><span></span><span></span></span>
+        <span class="icon-minus" aria-hidden="true"></span>
+      </button>
+    </div>
   </div>
   <div class="card-body-collapsible" id="add-site-body">
     <form class="form-grid" style="grid-template-columns: repeat(2, minmax(260px, 1fr));" method="post" action="{{ url_for('admin.settings_sites_create') }}">
@@ -47,7 +52,10 @@
     </div>
     <div class="form-row">
       <label class="label" for="site-lon">Longitude :</label>
-      <input class="input" id="site-lon" type="number" name="longitude" placeholder="Longitude" step="0.000001" required />
+      <div class="form-inline">
+        <input class="input" id="site-lon" type="number" name="longitude" placeholder="Longitude" step="0.000001" required />
+        <button class="btn secondary" type="button" data-get-site-location data-target-lat="site-lat" data-target-lon="site-lon">Ambil lokasi sini</button>
+      </div>
     </div>
     <div class="form-row">
       <label class="label" for="site-radius">Radius (meter) :</label>
@@ -131,9 +139,13 @@
               </summary>
               <div class="dropdown-menu">
                 <button class="btn secondary" type="button" data-modal-open="site-edit-{{ s.id }}">Edit</button>
-                <form method="post" action="{{ url_for('admin.settings_sites_toggle', site_id=s.id) }}">
+                <form method="post" action="{{ url_for('admin.settings_sites_toggle', site_id=s.id) }}" onsubmit="return confirm('Toggle status site ini?');">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                   <button class="btn secondary" type="submit">{% if s.is_active %}Disable{% else %}Enable{% endif %}</button>
+                </form>
+                <form method="post" action="{{ url_for('admin.settings_sites_delete', site_id=s.id) }}" onsubmit="return confirm('Hapus site ini?');">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                  <button class="btn secondary" type="submit">Delete</button>
                 </form>
               </div>
             </details>
@@ -183,7 +195,10 @@
         </div>
         <div class="form-row">
           <label class="label" for="site-lon-{{ s.id }}">Longitude</label>
-          <input class="input" id="site-lon-{{ s.id }}" type="number" name="longitude" value="{{ s.longitude or '' }}" step="0.000001" required />
+          <div class="form-inline">
+            <input class="input" id="site-lon-{{ s.id }}" type="number" name="longitude" value="{{ s.longitude or '' }}" step="0.000001" required />
+            <button class="btn secondary" type="button" data-get-site-location data-target-lat="site-lat-{{ s.id }}" data-target-lon="site-lon-{{ s.id }}">Ambil lokasi sini</button>
+          </div>
         </div>
         <div class="form-row">
           <label class="label" for="site-radius-{{ s.id }}">Radius (meter)</label>
@@ -255,6 +270,58 @@
         drop.removeAttribute("open");
       });
     });
+    const locationButtons = document.querySelectorAll("[data-get-site-location]");
+    if (locationButtons.length) {
+      const requestCoordinates = () => new Promise((resolve, reject) => {
+        if (!navigator.geolocation) {
+          reject(new Error("Browser tidak mendukung GPS."));
+          return;
+        }
+        navigator.geolocation.getCurrentPosition(
+          resolve,
+          reject,
+          { enableHighAccuracy: true, timeout: 15000 }
+        );
+      });
+      const restoreButtonLabel = (button) => {
+        if (!button) return;
+        button.textContent = button.dataset.defaultLabel || button.textContent;
+      };
+      const showTemporaryLabel = (button, message) => {
+        if (!button) return;
+        if (button._locationLabelTimer) {
+          window.clearTimeout(button._locationLabelTimer);
+          button._locationLabelTimer = null;
+        }
+        button.textContent = message;
+        button._locationLabelTimer = window.setTimeout(() => {
+          restoreButtonLabel(button);
+          button._locationLabelTimer = null;
+        }, 1500);
+      };
+      locationButtons.forEach((button) => {
+        button.dataset.defaultLabel = button.dataset.defaultLabel || button.textContent;
+        button.addEventListener("click", async () => {
+          const latId = button.dataset.targetLat;
+          const lonId = button.dataset.targetLon;
+          const latInput = document.getElementById(latId);
+          const lonInput = document.getElementById(lonId);
+          if (!latInput || !lonInput) return;
+          button.disabled = true;
+          button.textContent = "Mengambil lokasi...";
+          try {
+            const pos = await requestCoordinates();
+            latInput.value = pos.coords.latitude.toFixed(6);
+            lonInput.value = pos.coords.longitude.toFixed(6);
+            showTemporaryLabel(button, "Lokasi terisi");
+          } catch (err) {
+            showTemporaryLabel(button, "Gagal ambil lokasi");
+          } finally {
+            button.disabled = false;
+          }
+        });
+      });
+    }
   })();
 </script>
 {% endblock %}

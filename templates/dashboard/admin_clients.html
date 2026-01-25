@@ -10,10 +10,15 @@
 <div class="card card-collapsible is-collapsed" id="add-client" data-collapsible>
   <div class="card-header-collapsible">
     <div>Tambah Client</div>
-    <button class="collapse-toggle" type="button" data-collapse-toggle aria-expanded="false" aria-controls="add-client-body">
-      <span class="icon-burger" aria-hidden="true"><span></span><span></span><span></span></span>
-      <span class="icon-minus" aria-hidden="true"></span>
-    </button>
+    <div class="card-header-actions">
+      <button class="btn secondary collapse-reset" type="button" data-collapse-reset aria-label="Batal input">
+        <span aria-hidden="true">×</span>
+      </button>
+      <button class="collapse-toggle" type="button" data-collapse-toggle aria-expanded="false" aria-controls="add-client-body">
+        <span class="icon-burger" aria-hidden="true"><span></span><span></span><span></span></span>
+        <span class="icon-minus" aria-hidden="true"></span>
+      </button>
+    </div>
   </div>
   <div class="card-body-collapsible" id="add-client-body">
     <form class="form-grid" style="grid-template-columns: repeat(2, minmax(260px, 1fr));" method="post" action="{{ url_for('admin.clients_create') }}">
@@ -99,11 +104,15 @@
               <div class="dropdown-menu">
                 <a class="btn secondary dropdown-center" href="{{ url_for('admin.client_profile', client_id=c.id) }}">Profile</a>
                 <button class="btn secondary" type="button" data-modal-open="client-edit-{{ c.id }}">Edit</button>
+                <form method="post" action="{{ url_for('admin.clients_delete', client_id=c.id) }}" onsubmit="return confirm('Hapus client ini?');">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                  <button class="btn secondary" type="submit">Delete</button>
+                </form>
               </div>
-          </details>
-          {% elif can_view %}
-            <a class="btn secondary dropdown-center" href="{{ url_for('admin.client_profile', client_id=c.id) }}">Profile</a>
-          {% else %}
+            </details>
+            {% elif can_view %}
+              <a class="btn secondary dropdown-center" href="{{ url_for('admin.client_profile', client_id=c.id) }}">Profile</a>
+            {% else %}
           <span class="muted">-</span>
           {% endif %}
         </td>
@@ -168,12 +177,6 @@
           <button class="btn primary btn-fixed-100" type="submit">Simpan</button>
         </div>
       </form>
-      {% if user.role != "client_admin" %}
-      <form class="btn-row" method="post" action="{{ url_for('admin.clients_delete', client_id=c.id) }}" onsubmit="return confirm('Hapus client ini?');">
-  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-        <button class="btn secondary" type="submit">Hapus Client</button>
-      </form>
-      {% endif %}
       <div class="modal-footer">
         <button class="btn secondary full" type="button" data-modal-close>Tutup</button>
       </div>
