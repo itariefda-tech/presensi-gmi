@@ -35,7 +35,54 @@ html[data-theme="light"] .story-item{
   border-color: rgba(15,23,42,.18);
 }
 html[data-theme="light"] .report-item{
-  background: #e2e8f0;
+  background: rgba(0, 61, 122, 0.40);
+  border: 1px solid rgba(0, 61, 122, 0.50);
+  color: #0f172a;
+}
+html[data-theme="light"] .report-item:hover{
+  background: rgba(0, 61, 122, 0.20);
+  border-color: rgba(0, 61, 122, 0.30);
+}
+html[data-theme="light"] .report-item strong{
+  color: #0f172a;
+}
+html[data-theme="light"] .kpi-card{
+  background: rgba(0, 61, 122, 0.40);
+  border: 1px solid rgba(0, 61, 122, 0.50);
+  color: #0f172a;
+}
+html[data-theme="light"] .kpi-card:hover{
+  background: rgba(0, 61, 122, 0.20);
+  border-color: rgba(0, 61, 122, 0.30);
+}
+html[data-theme="light"] .kpi-card__label{
+  opacity: 0.8;
+  color: #0f172a;
+}
+html[data-theme="light"] .kpi-card__value{
+  color: #0f172a;
+}
+html[data-theme="light"] .kpi-card__meta{
+  color: #52607a;
+}
+html[data-theme="light"] .kpi-card__action{
+  background: rgba(0, 61, 122, 0.35);
+  border-color: rgba(0, 61, 122, 0.45);
+  color: #0f172a;
+}
+html[data-theme="light"] .kpi-card[data-card="masuk"]{
+  background: linear-gradient(135deg, #0ea5e9, #22c55e);
+  color: #fff;
+}
+html[data-theme="light"] .kpi-card[data-card="masuk"] .kpi-card__label,
+html[data-theme="light"] .kpi-card[data-card="masuk"] .kpi-card__value,
+html[data-theme="light"] .kpi-card[data-card="masuk"] .kpi-card__meta{
+  color: #fff;
+}
+html[data-theme="light"] .kpi-card[data-card="masuk"] .kpi-card__action{
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.35);
+  color: #fff;
 }
 *, *::before, *::after{
   box-sizing: inherit;
@@ -668,6 +715,32 @@ html[data-theme="light"] .presence-card .decor-circles .circle{
   font-size: 12px;
   opacity: .9;
 }
+/* KPI Card Masuk - Success State */
+.kpi-card[data-card="masuk"].is-success{
+  background: linear-gradient(135deg, #10b981, #059669);
+  box-shadow: 0 0 20px rgba(16, 185, 129, 0.3);
+}
+.kpi-card[data-card="masuk"].is-success .kpi-card__value{
+  font-size: 28px;
+  animation: pulse-kpi 0.6s ease-out;
+}
+.kpi-card[data-card="masuk"].is-success .kpi-card__meta{
+  font-weight: 600;
+  opacity: 1;
+}
+@keyframes pulse-kpi{
+  0%{
+    transform: scale(0.95);
+    opacity: 0;
+  }
+  50%{
+    transform: scale(1.05);
+  }
+  100%{
+    transform: scale(1);
+    opacity: 1;
+  }
+}
 .kpi-card[data-card="masuk"]{
   background: linear-gradient(135deg, #0ea5e9, #22c55e);
 }
@@ -955,6 +1028,36 @@ html:not([data-theme="light"]) .presence-last-card{
 .btn-presence.is-loading{
   filter: saturate(.8);
 }
+/* Status success untuk button checkin */
+.btn-presence.is-success{
+  background: linear-gradient(135deg, #10b981, #059669);
+  box-shadow: 0 0 20px rgba(16, 185, 129, 0.4);
+  animation: pulse-success 0.6s ease-out;
+}
+.btn-presence.is-success .btn-label{
+  font-weight: 900;
+  letter-spacing: 0.5px;
+}
+@keyframes pulse-success{
+  0%{
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7),
+                0 10px 24px rgba(15,23,42,.25);
+  }
+  50%{
+    box-shadow: 0 0 15px 8px rgba(16, 185, 129, 0.3),
+                0 10px 24px rgba(15,23,42,.25);
+  }
+  100%{
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0),
+                0 10px 24px rgba(15,23,42,.25);
+  }
+}
+/* Status badge success */
+.presence-status-badge.is-done{
+  color: #10b981;
+  background-color: rgba(16, 185, 129, 0.1);
+  border-color: #10b981;
+}
 .presence-last{
   display: flex;
   align-items: center;
@@ -1009,6 +1112,12 @@ html:not([data-theme="light"]) .presence-last-card{
   justify-content: center;
   box-shadow: 0 5px 18px rgba(15,23,42,.15);
   transition: transform .2s ease, box-shadow .2s ease;
+}
+.chip[disabled],
+.chip[aria-disabled="true"]{
+  cursor: not-allowed;
+  opacity: 0.6;
+  pointer-events: none;
 }
 .chip[data-mode="gps_selfie"]{
   background: linear-gradient(135deg, #deb566, #a65d1e);

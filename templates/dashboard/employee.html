@@ -12,7 +12,7 @@
       } catch (e) {}
     })();
   </script>
-  <title>Pegawai GMI</title>
+  <title>{{ (active_client.name.split(',')[0] if active_client and active_client.name else "Pegawai") }}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/employee_mobile.css') }}" />
 </head>
@@ -21,7 +21,7 @@
     <header class="employee-header">
       <div class="header-top">
         <div class="header-col header-left">
-          <div class="profile-name">  Pegawai GMI</div>
+          <div class="profile-name">{{ (active_client.name.split(',')[0] if active_client and active_client.name else "Pegawai GMI") }}</div>
           <div class="profile-email header-meta">
             <span class="header-meta-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none">
@@ -653,6 +653,45 @@
           toggle.setAttribute("aria-expanded", String(!isCollapsed));
         });
       });
+
+      // Handle Patroli page visibility
+      (function(){
+        const patroli_key = "gmi_page_patroli_enabled";
+        const patroli_pane = document.querySelector('[data-pane="3"]');
+        const patroli_nav_btn = document.querySelector('[data-tab="3"]');
+        const swipeTrack = document.getElementById("swipeTrack");
+        
+        function updatePatroliVisibility(enabled) {
+          if (!patroli_pane || !patroli_nav_btn) return;
+          
+          if (!enabled) {
+            // Hide patroli pane
+            patroli_pane.style.display = "none";
+            patroli_nav_btn.style.display = "none";
+          } else {
+            // Show patroli pane
+            patroli_pane.style.display = "";
+            patroli_nav_btn.style.display = "";
+          }
+        }
+        
+        // Check on load
+        const stored = localStorage.getItem(patroli_key);
+        const isEnabled = stored === null ? true : stored === "1";
+        updatePatroliVisibility(isEnabled);
+        
+        // Listen for toggle changes from main page
+        window.addEventListener("gmi_patroli_toggle_changed", (e) => {
+          updatePatroliVisibility(e.detail.enabled);
+        });
+        
+        // Also check periodically (in case changed in another tab)
+        setInterval(() => {
+          const current = localStorage.getItem(patroli_key);
+          const enabled = current === null ? true : current === "1";
+          updatePatroliVisibility(enabled);
+        }, 1000);
+      })();
     })();
   </script>
 </body>

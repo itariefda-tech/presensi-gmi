@@ -125,8 +125,39 @@ function appendCsrf(formData){
 }
 
 function updatePresenceReadiness(){
-  if (!presenceStatusTitle) return;
-  const ready = isOnline && locationActive && hasLocation;
+  if (!presenceStatusTitle) {
+    console.log("[READINESS] presenceStatusTitle not found");
+    return;
+  }
+  
+  // If already checked in successfully, don't update the status
+  if (presenceStatusTitle.classList.contains("is-done")) {
+    console.log("[READINESS] Skipped: Status already is-done");
+    return;
+  }
+  
+  // Get current selected method
+  const currentMethod = attMethod?.value || "gps_selfie";
+  console.log("[READINESS] Current method:", currentMethod);
+  
+  // Determine readiness based on selected method
+  let ready = false;
+  
+  if (currentMethod === "gps") {
+    // GPS only: needs location only, selfie NOT required
+    ready = isOnline && locationActive && hasLocation;
+  } else if (currentMethod === "gps_selfie") {
+    // GPS + Selfie: needs location AND selfie
+    const hasSelfie = selfieFile?.files?.length > 0 && selfiePreview?.style?.display !== "none";
+    ready = isOnline && locationActive && hasLocation && hasSelfie;
+    console.log("[READINESS] GPS+Selfie check:", {isOnline, locationActive, hasLocation, hasSelfie, ready});
+  } else if (currentMethod === "qr") {
+    // QR mode: needs QR data, location not required
+    const hasQr = qrData?.value && qrData.value.trim() !== "";
+    ready = isOnline && hasQr;
+  }
+  
+  console.log("[READINESS] Setting status to:", ready ? "Siap Absen" : "Belum siap Absen");
   presenceStatusTitle.textContent = ready ? "Siap Absen" : "Belum siap Absen";
   presenceStatusTitle.classList.toggle("is-ready", ready);
   presenceStatusTitle.setAttribute("aria-label", ready ? "Siap Absen" : "Belum siap Absen");
@@ -211,6 +242,8 @@ function resetSelfieSelection(){
   }
   updateSelfiePickState(false);
   hideSelfiePreview();
+  // Update presence readiness when selfie is reset
+  updatePresenceReadiness();
 }
 
 function refreshMasukKpi(){
@@ -621,6 +654,8 @@ selfieFile?.addEventListener("change", (e) => {
   reader.onload = () => {
     selfiePreview.src = reader.result || "";
     selfiePreview.style.display = "block";
+    // Update presence readiness when selfie is selected
+    updatePresenceReadiness();
   };
   reader.readAsDataURL(file);
 });
@@ -763,14 +798,6 @@ async function ensureLocation(){
 }
 
 async function submitAttendance(url, labelEl){
-  let locationData = null;
-  try {
-    locationData = await ensureLocation();
-  } catch (err) {
-    showToast("error", "Lokasi GPS wajib diisi.", { target: attToast });
-    return { ok: false };
-  }
-
   applyAttendanceModes();
   const enabledModes = getEnabledAttendanceModes();
   let method = attMethod?.value || "gps_selfie";
@@ -778,33 +805,59 @@ async function submitAttendance(url, labelEl){
     method = enabledModes[0];
     if (attMethod) attMethod.value = method;
   }
-  const file = selfieFile?.files?.[0];
-  if (method === "gps_selfie" && !file) {
-    showToast("error", "Selfie wajib untuk presensi.", { target: attToast });
-    return { ok: false };
-  }
-  if (method === "qr" && !qrData?.value?.trim()) {
-    showToast("error", "QR code wajib di-scan.", { target: attToast });
-    return { ok: false };
-  }
+
+  // Validate method-specific requirements
+  let locationData = null;
+  
   if (method === "qr") {
+    // QR mode: validate QR data
+    if (!qrData?.value?.trim()) {
+      showToast("error", "QR code wajib di-scan.", { target: attToast });
+      return { ok: false };
+    }
     const validation = validateQrPayload(qrData?.value || "");
     if (!validation.ok) {
       showToast("error", validation.message, { target: attToast });
       return { ok: false };
     }
+  } else {
+    // GPS and GPS+Selfie modes: require location
+    try {
+      locationData = await ensureLocation();
+    } catch (err) {
+      showToast("error", "Lokasi GPS wajib diisi.", { target: attToast });
+      return { ok: false };
+    }
+
+    // GPS+Selfie specific: validate selfie
+    if (method === "gps_selfie") {
+      const file = selfieFile?.files?.[0];
+      if (!file) {
+        showToast("error", "Selfie wajib untuk presensi.", { target: attToast });
+        return { ok: false };
+      }
+    }
   }
 
+  const file = selfieFile?.files?.[0];
   const formData = new FormData();
   appendCsrf(formData);
   formData.append("method", method);
-  formData.append("lat", locationData.lat);
-  formData.append("lng", locationData.lon);
-  formData.append("accuracy", locationData.accuracy || "");
-  formData.append("device_time", locationData.deviceTime || new Date().toISOString());
+  
+  // Only append location data for GPS-based methods
+  if (method !== "qr" && locationData) {
+    formData.append("lat", locationData.lat);
+    formData.append("lng", locationData.lon);
+    formData.append("accuracy", locationData.accuracy || "");
+    formData.append("device_time", locationData.deviceTime || new Date().toISOString());
+  }
+  
+  // Append selfie if present
   if (file) {
     formData.append("selfie", file);
   }
+  
+  // Append QR data if present
   if (qrData?.value?.trim()) {
     formData.append("qr_data", qrData.value.trim());
   }
@@ -825,6 +878,7 @@ async function handleAttendance(action){
   const activeBtn = isCheckin ? btnCheckin : btnCheckout;
   const badgeText = isCheckin ? "IN" : "OUT";
   if (!activeBtn) return;
+  
   if (isCheckin && presenceStatusTitle?.textContent === "Belum siap Absen") {
     showToast("error", "Belum siap absen. Pastikan lokasi aktif dan internet tersambung.", { target: attToast });
     return;
@@ -852,11 +906,191 @@ async function handleAttendance(action){
     hasCheckedIn = isCheckin;
     updateLastAction(badgeText);
     updatePresenceReadiness();
+    
+    // UBAH BUTTON STATE KE SUCCESS
+    activeBtn.classList.add("is-success");
+    activeBtn.disabled = true;
+    
+    // Ubah text button
+    const btnLabel = activeBtn.querySelector(".btn-label");
+    if (btnLabel) {
+      btnLabel.textContent = isCheckin ? "✓ Sudah Masuk" : "✓ Sudah Pulang";
+    }
+    
+    // Update status badge
+    if (presenceStatusTitle) {
+      presenceStatusTitle.textContent = isCheckin ? "Siap Absen Pulang" : "✓ Sudah Pulang";
+      presenceStatusTitle.classList.remove("is-ready");
+      presenceStatusTitle.classList.add("is-done");
+    }
+    
+    // Update KPI Card dengan jam checkin/checkout
+    if (isCheckin && (kpiMasukValue || kpiMasukMeta)) {
+      const now = new Date();
+      const hours = String(now.getHours()).padStart(2, "0");
+      const minutes = String(now.getMinutes()).padStart(2, "0");
+      const waktuCheckin = `${hours}:${minutes}`;
+      
+      if (kpiMasukValue) {
+        kpiMasukValue.textContent = waktuCheckin;
+      }
+      if (kpiMasukMeta) {
+        kpiMasukMeta.textContent = `Status: ✓ Sudah Checkin (${waktuCheckin})`;
+      }
+      
+      // Add success class ke KPI card
+      const kpiCard = document.querySelector('[data-card="masuk"]');
+      if (kpiCard) {
+        kpiCard.classList.add("is-success");
+      }
+    }
   }
 }
 
 btnCheckin?.addEventListener("click", () => handleAttendance("checkin"));
 btnCheckout?.addEventListener("click", () => handleAttendance("checkout"));
+
+/**
+ * Restore attendance state dari server setelah login
+ * Fitur: Jika user sudah checkin, state tetap persisted meskipun logout
+ */
+async function restoreAttendanceState(){
+  try {
+    const result = await safeFetch("/api/attendance/today");
+    console.log("[RESTORE] API response:", result);
+    if (!result.ok || !result.data) {
+      console.log("[RESTORE] Skipped: API not ok or no data");
+      return;
+    }
+    const records = result.data.data || [];
+    console.log("[RESTORE] Records from API:", records, "Count:", records.length);
+    if (records.length === 0) {
+      console.log("[RESTORE] No records found");
+      return;
+    }
+    if (records.length > 0) {
+      console.log("[RESTORE] First record structure:", Object.keys(records[0]));
+      console.log("[RESTORE] First record sample:", records[0]);
+    }
+    // Sort by created_at ascending untuk proper sequence check
+    try {
+      records.sort((a, b) => {
+        const aDate = a.created_at ? new Date(a.created_at) : new Date(0);
+        const bDate = b.created_at ? new Date(b.created_at) : new Date(0);
+        if (isNaN(aDate.getTime())) {
+          console.warn("[RESTORE] Invalid date for A:", a);
+        }
+        if (isNaN(bDate.getTime())) {
+          console.warn("[RESTORE] Invalid date for B:", b);
+        }
+        return aDate - bDate;
+      });
+      console.log("[RESTORE] Sort successful");
+    } catch (sortErr) {
+      console.error("[RESTORE] Sort error, using original order:", sortErr);
+    }
+    console.log("[RESTORE] Sorted records:", records);
+    // Cek sequence: checkin diikuti checkout atau belum
+    let hasCheckinToday = false;
+    let hasCheckoutToday = false;
+    let lastCheckinTime = null;
+    let checkinFound = false;
+    for (const record of records) {
+      console.log("[RESTORE] Processing record:", record);
+      if (record.action === "checkin") {
+        hasCheckinToday = true;
+        checkinFound = true;
+        lastCheckinTime = record.time;
+        hasCheckoutToday = false; // Reset checkout flag untuk checkin baru
+        console.log("[RESTORE] Found checkin:", record);
+      }
+      if (record.action === "checkout" && checkinFound) {
+        hasCheckoutToday = true;
+        console.log("[RESTORE] Found checkout:", record);
+      }
+    }
+    console.log("[RESTORE] Final state:", {hasCheckinToday, hasCheckoutToday, lastCheckinTime});
+    // Log DOM elements
+    console.log("[RESTORE] DOM kpiMasukValue:", kpiMasukValue);
+    console.log("[RESTORE] DOM kpiMasukMeta:", kpiMasukMeta);
+    console.log("[RESTORE] DOM btnCheckin:", btnCheckin);
+    console.log("[RESTORE] DOM presenceStatusTitle:", presenceStatusTitle);
+    // Update state variable
+    hasCheckedIn = hasCheckinToday && !hasCheckoutToday;
+    console.log("[RESTORE] hasCheckedIn global:", hasCheckedIn);
+    // Restore button state jika sudah checkin
+    if (hasCheckinToday && !hasCheckoutToday) {
+      console.log("[RESTORE] Restoring checkin state...");
+      if (btnCheckin) {
+        console.log("[RESTORE] btnCheckin found, adding is-success class");
+        btnCheckin.classList.add("is-success");
+        btnCheckin.disabled = true;
+        const btnLabel = btnCheckin.querySelector(".btn-label");
+        if (btnLabel) {
+          btnLabel.textContent = "✓ Sudah Masuk";
+        } else {
+          console.log("[RESTORE] btnLabel not found inside btnCheckin");
+        }
+      } else {
+        console.log("[RESTORE] WARNING: btnCheckin is null/undefined");
+      }
+      if (presenceStatusTitle) {
+        console.log("[RESTORE] Updating presenceStatusTitle");
+        presenceStatusTitle.textContent = "Siap Absen Pulang";
+        presenceStatusTitle.classList.remove("is-ready");
+        presenceStatusTitle.classList.add("is-done");
+      } else {
+        console.log("[RESTORE] WARNING: presenceStatusTitle is null/undefined");
+      }
+      if (lastCheckinTime && (kpiMasukValue || kpiMasukMeta)) {
+        console.log("[RESTORE] Updating KPI card with time:", lastCheckinTime);
+        if (kpiMasukValue) {
+          kpiMasukValue.textContent = lastCheckinTime;
+        } else {
+          console.log("[RESTORE] kpiMasukValue is null/undefined");
+        }
+        if (kpiMasukMeta) {
+          kpiMasukMeta.textContent = `Status: ✓ Sudah Checkin (${lastCheckinTime})`;
+        } else {
+          console.log("[RESTORE] kpiMasukMeta is null/undefined");
+        }
+        const kpiCard = document.querySelector('[data-card="masuk"]');
+        if (kpiCard) {
+          kpiCard.classList.add("is-success");
+        } else {
+          console.log("[RESTORE] kpiCard [data-card=masuk] not found");
+        }
+      } else {
+        console.log("[RESTORE] WARNING: KPI elements missing or no checkinTime", {lastCheckinTime, kpiMasukValue: !!kpiMasukValue, kpiMasukMeta: !!kpiMasukMeta});
+      }
+      if (checkinStatus) {
+        checkinStatus.textContent = `Check-in: ${lastCheckinTime}`;
+      } else {
+        console.log("[RESTORE] checkinStatus is null/undefined");
+      }
+    }
+    if (hasCheckoutToday) {
+      console.log("[RESTORE] Restoring checkout state...");
+      if (btnCheckout) {
+        btnCheckout.classList.add("is-success");
+        btnCheckout.disabled = true;
+        const btnLabel = btnCheckout.querySelector(".btn-label");
+        if (btnLabel) {
+          btnLabel.textContent = "✓ Sudah Pulang";
+        } else {
+          console.log("[RESTORE] btnLabel not found inside btnCheckout");
+        }
+      }
+      if (presenceStatusTitle) {
+        presenceStatusTitle.textContent = "✓ Sudah Pulang";
+        presenceStatusTitle.classList.remove("is-ready");
+        presenceStatusTitle.classList.add("is-done");
+      }
+    }
+  } catch (err) {
+    console.error("[RESTORE] ERROR:", err);
+  }
+}
 
 async function loadLeaveStory(){
   if (!leaveStory) return;
@@ -1011,6 +1245,8 @@ function setMethod(value){
     presenceMethodLabel.textContent = `Metode ${label}`;
   }
   refreshAbsentKpi();
+  // Update presence readiness status when method changes
+  updatePresenceReadiness();
 }
 
 function isAttendanceModeEnabled(mode){
@@ -1042,10 +1278,21 @@ function applyAttendanceModes(){
 function initMethodChips(){
   if (!attMethod || !modeChips.length) return;
   setMethod(attMethod.value || "gps_selfie");
+  
+  // Disable method toggle - chips are for display only now
   modeChips.forEach((chip) => {
-    chip.addEventListener("click", () => setMethod(chip.dataset.mode));
+    chip.style.pointerEvents = "none";
+    chip.style.opacity = "0.6";
+    chip.removeEventListener("click", null); // Remove any previous click handlers
+    chip.setAttribute("disabled", "true");
+    chip.setAttribute("aria-disabled", "true");
   });
-  attMethod.addEventListener("change", () => setMethod(attMethod.value));
+  
+  // Also disable attMethod input
+  if (attMethod) {
+    attMethod.disabled = true;
+    attMethod.style.opacity = "0.6";
+  }
 }
 
 function updateOnlineStatus(){
@@ -1141,30 +1388,38 @@ function startClock(){
   clockTimer = window.setInterval(tickClock, 1000);
 }
 
-initTheme();
-initProfile();
-startClock();
-initSwipe();
-initNavPosition();
-initNavDrag();
-initStatusLabels();
-initMethodChips();
-applyAttendanceModes();
-initHelpModal();
-updateOnlineStatus();
-checkLocationStatus();
-hasLocation = Boolean(latEl?.value && lonEl?.value);
-updatePresenceReadiness();
+document.addEventListener("DOMContentLoaded", () => {
+  initTheme();
+  initProfile();
+  startClock();
+  initSwipe();
+  initNavPosition();
+  initNavDrag();
+  initStatusLabels();
+  initMethodChips();
+  applyAttendanceModes();
+  initHelpModal();
+  updateOnlineStatus();
+  checkLocationStatus();
+  hasLocation = Boolean(latEl?.value && lonEl?.value);
+
+  // Load persistent checkin state dari server SEBELUM update readiness
+  restoreAttendanceState();
+
+  // SETELAH restore state, baru update readiness
+  updatePresenceReadiness();
   initLeaveActions();
   initLeaveDetail();
   loadLeaveStory();
   loadMonthlySummary();
   loadDailyReport();
+
   go(0);
-refreshLocationKpi();
-refreshLocationCoords();
-refreshMasukKpi();
-refreshAbsentKpi();
+  refreshLocationKpi();
+  refreshLocationCoords();
+  refreshMasukKpi();
+  refreshAbsentKpi();
+});
 
 let navResizeTimer = null;
 window.addEventListener("resize", () => {

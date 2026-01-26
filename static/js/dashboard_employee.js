@@ -12,6 +12,8 @@ const qrData = document.getElementById("qrData");
 const btnCheckin = document.getElementById("btnCheckin");
 const attToast = document.getElementById("attToast");
 const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || "";
+const kpiMasukValue = document.getElementById("kpiMasukValue");
+const kpiMasukMeta = document.getElementById("kpiMasukMeta");
 
 const leaveType = document.getElementById("leaveType");
 const leaveFrom = document.getElementById("leaveFrom");
@@ -192,11 +194,63 @@ btnCheckin?.addEventListener("click", async () => {
   if (method === "qr") {
     formData.append("qr_data", qrData.value.trim());
   }
+  // Tambah class loading sebelum submit
+  btnCheckin.classList.add("is-loading");
+  
   const result = await safeFetch("/api/attendance/checkin", {
     method: "POST",
     body: formData,
   });
+  
   setToast(attToast, result.message || "Selesai.", result.ok);
+  
+  // Jika checkin berhasil
+  if (result.ok) {
+    // Ubah warna button ke success state
+    btnCheckin.classList.add("is-success");
+    btnCheckin.classList.remove("is-loading");
+    
+    // Ubah text button
+    const btnLabel = btnCheckin.querySelector(".btn-label");
+    if (btnLabel) {
+      btnLabel.textContent = "✓ Sudah Masuk";
+    }
+    
+    // Disable button checkin
+    btnCheckin.disabled = true;
+    
+    // Update status badge
+    const presenceStatus = document.getElementById("presenceStatusTitle");
+    if (presenceStatus) {
+      presenceStatus.textContent = "✓ Checkin Berhasil";
+      presenceStatus.classList.remove("is-ready");
+      presenceStatus.classList.add("is-done");
+    }
+    
+    // Update KPI Card dengan jam checkin
+    if (kpiMasukValue || kpiMasukMeta) {
+      const now = new Date();
+      const hours = String(now.getHours()).padStart(2, "0");
+      const minutes = String(now.getMinutes()).padStart(2, "0");
+      const waktuCheckin = `${hours}:${minutes}`;
+      
+      if (kpiMasukValue) {
+        kpiMasukValue.textContent = waktuCheckin;
+      }
+      if (kpiMasukMeta) {
+        kpiMasukMeta.textContent = `Status: ✓ Sudah Checkin (${waktuCheckin})`;
+      }
+      
+      // Add success class ke KPI card
+      const kpiCard = document.querySelector('[data-card="masuk"]');
+      if (kpiCard) {
+        kpiCard.classList.add("is-success");
+      }
+    }
+  } else {
+    // Jika gagal, hilangkan loading state
+    btnCheckin.classList.remove("is-loading");
+  }
 });
 
 btnLeave?.addEventListener("click", async () => {
@@ -258,3 +312,81 @@ async function loadLeaveHistory(){
 }
 
 loadLeaveHistory();
+
+/**
+ * Restore attendance state dari server setelah login
+ * Fitur: Jika user sudah checkin, state tetap persisted meskipun logout
+ */
+async function restoreAttendanceState(){
+  try {
+    const response = await fetch("/api/attendance/today");
+    if (!response.ok) return;
+    
+    const data = await response.json();
+    const records = (data && data.data) || [];
+    if (records.length === 0) return;
+    
+    // Sort by created_at ascending untuk proper sequence check
+    records.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+    
+    // Cek sequence: checkin diikuti checkout atau belum
+    let hasCheckinToday = false;
+    let lastCheckinTime = null;
+    let hasCheckoutToday = false;
+    let checkinFound = false;
+    
+    for (const record of records) {
+      if (record.action === "checkin") {
+        hasCheckinToday = true;
+        checkinFound = true;
+        lastCheckinTime = record.time;
+        hasCheckoutToday = false; // Reset checkout flag untuk checkin baru
+      }
+      if (record.action === "checkout" && checkinFound) {
+        // Checkout hanya valid jika sebelumnya ada checkin
+        hasCheckoutToday = true;
+      }
+    }
+    
+    // Restore button state jika sudah checkin
+    if (hasCheckinToday && !hasCheckoutToday) {
+      // User sudah checkin, button masuk harus disabled + success state
+      if (btnCheckin) {
+        btnCheckin.classList.add("is-success");
+        btnCheckin.disabled = true;
+        const btnLabel = btnCheckin.querySelector(".btn-label");
+        if (btnLabel) {
+          btnLabel.textContent = "✓ Sudah Masuk";
+        }
+      }
+      
+      // Update status badge
+      const presenceStatus = document.getElementById("presenceStatusTitle");
+      if (presenceStatus) {
+        presenceStatus.textContent = "Siap Absen Pulang";
+        presenceStatus.classList.remove("is-ready");
+        presenceStatus.classList.add("is-done");
+      }
+      
+      // Update KPI card dengan waktu checkin
+      if (lastCheckinTime && (kpiMasukValue || kpiMasukMeta)) {
+        if (kpiMasukValue) {
+          kpiMasukValue.textContent = lastCheckinTime;
+        }
+        if (kpiMasukMeta) {
+          kpiMasukMeta.textContent = `Status: ✓ Sudah Checkin (${lastCheckinTime})`;
+        }
+        
+        const kpiCard = document.querySelector('[data-card="masuk"]');
+        if (kpiCard) {
+          kpiCard.classList.add("is-success");
+        }
+      }
+    }
+  } catch (err) {
+    console.warn("[RESTORE STATE] Error loading attendance:", err);
+  }
+}
+
+// Load persistent state saat page load
+restoreAttendanceState();

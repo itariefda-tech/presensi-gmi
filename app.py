@@ -136,7 +136,10 @@ def create_app() -> Flask:
             req_token = header_token or body_token
         else:
             req_token = (request.form.get("csrf_token") or "").strip()
+        
         if not token or req_token != token:
+            if request.path == "/api/attendance/checkin":
+                print(f"[CSRF_ERROR] Token mismatch - aborting 403")
             return abort(403)
         return None
 
@@ -337,7 +340,7 @@ def create_app() -> Flask:
                 return jsonify(ok=False, message="Email wajib diisi."), 400
         token = None
         row = _get_user_by_email(email)
-        if row and int(row.get("is_active") or 0) == 1:
+        if row and int(_row_get(row, "is_active") or 0) == 1:
             if method == "whatsapp_otp":
                 token = _create_password_reset_token(int(row["id"]), _generate_otp_token(), ttl_minutes=10)
             else:
@@ -532,31 +535,82 @@ def create_app() -> Flask:
 
     @app.route("/api/attendance/checkin", methods=["POST"])
     def attendance_checkin():
-        user = _current_user()
+        """
+        FLOW LOGIC KONSISTENSI (4 LAYER):
+        
+        Layer 1 (Policies): Resolved dari site/client/shift -> define allow_gps, allow_qr, require_selfie
+        Layer 2 (Assignment): User harus punya active assignment (site + shift)
+        Layer 3 (Dashboard Method Selection): User pilih method: gps, gps_selfie, atau qr
+        Layer 4 (Validation Rules):
+          - GPS mode: require location (lat, lng), selfie TIDAK required
+          - GPS+Selfie mode: require location + selfie
+          - QR mode: require QR code, location TIDAK required
+          - Policy require_selfie: HANYA apply untuk gps_selfie method
+        
+        Konsistensi Logic:
+        ✓ Frontend updatePresenceReadiness() harus match backend validation
+        ✓ Policy allow_gps/allow_qr harus restrict method selection
+        ✓ Method-specific requirements harus consistent
+        ✓ Selfie requirement ONLY untuk gps_selfie, bukan untuk GPS mode
+        """
+        try:
+            user = _current_user()
+        except Exception as e:
+            return jsonify(ok=False, message="Error mendapatkan user."), 400
+            
         forbidden = _require_api_role(user, EMPLOYEE_ROLES)
         if forbidden:
             return forbidden
-        employee = _employee_by_email(user.email, only_active=False)
+            
+        try:
+            employee = _employee_by_email(user.email, only_active=False)
+        except Exception as e:
+            return jsonify(ok=False, message=f"Error cari employee: {str(e)}"), 400
+            
         if not employee:
             return jsonify(ok=False, message="Lengkapi data master pegawai terlebih dahulu."), 400
-        assignment = _get_active_assignment(user.id)
+            
+        try:
+            assignment = _get_active_assignment(user.id)
+        except Exception as e:
+            return jsonify(ok=False, message=f"Error cari assignment: {str(e)}"), 400
+            
         if not assignment:
             return jsonify(ok=False, message="Belum ada penempatan aktif. Hubungi admin."), 400
+        
         site = _get_site_by_id(assignment.get("site_id"))
+        
         if not site:
             return jsonify(ok=False, message="Site penempatan tidak ditemukan. Hubungi admin."), 400
-        if int(site["is_active"] or 0) != 1:
+        
+        # Convert sqlite3.Row to dict for easier access
+        site = dict(site) if hasattr(site, 'keys') else site
+        
+        if int(site.get("is_active") or 0) != 1:
             return jsonify(ok=False, message="Site penempatan sedang nonaktif."), 400
+        
         policy = _resolve_attendance_policy(
-            site["id"] if site else None,
-            site["client_id"] if site else None,
+            site.get("id"),
+            site.get("client_id"),
             assignment.get("shift_id") if assignment else None,
         )
+        
         today = _today_key()
-        if _attendance_action_exists(user.email, today, "checkin"):
-            return jsonify(ok=False, message="Sudah check-in hari ini."), 400
-        if _attendance_action_exists(user.email, today, "checkout"):
-            return jsonify(ok=False, message="Check-out sudah tercatat hari ini."), 400
+        
+        try:
+            checkin_exists = _attendance_action_exists(user.email, today, "checkin")
+            if checkin_exists:
+                return jsonify(ok=False, message="Sudah check-in hari ini."), 400
+        except Exception as e:
+            return jsonify(ok=False, message=f"Error cek absen: {str(e)}"), 400
+        
+        try:
+            checkout_exists = _attendance_action_exists(user.email, today, "checkout")
+            if checkout_exists:
+                return jsonify(ok=False, message="Check-out sudah tercatat hari ini."), 400
+        except Exception as e:
+            return jsonify(ok=False, message=f"Error cek checkout: {str(e)}"), 400
+        
         data = request.form or {}
         method = (data.get("method") or "gps_selfie").strip()
         lat = (data.get("lat") or "").strip()
@@ -564,6 +618,7 @@ def create_app() -> Flask:
         accuracy = (data.get("accuracy") or "").strip()
         device_time = (data.get("device_time") or "").strip()
         qr_data = (data.get("qr_data") or "").strip()
+        
         selfie_file = request.files.get("selfie")
 
         if method not in {"gps_selfie", "gps", "qr"}:
@@ -572,20 +627,44 @@ def create_app() -> Flask:
             return jsonify(ok=False, message="Metode GPS tidak diizinkan."), 400
         if not policy.get("allow_qr", 1) and method == "qr":
             return jsonify(ok=False, message="Metode QR tidak diizinkan."), 400
-        if policy.get("require_selfie") and method != "gps_selfie":
-            return jsonify(ok=False, message="Selfie wajib sesuai kebijakan."), 400
-        if not lat or not lng:
-            return jsonify(ok=False, message="Lokasi GPS wajib diisi."), 400
-        try:
-            lat_f = float(lat)
-            lng_f = float(lng)
-        except ValueError:
-            return jsonify(ok=False, message="Lokasi GPS tidak valid."), 400
-        if not _within_site_radius(lat_f, lng_f, site):
-            return jsonify(ok=False, message="Lokasi di luar radius site."), 400
-        if method == "gps_selfie" and (not selfie_file or not selfie_file.filename):
-            return jsonify(ok=False, message="Selfie wajib untuk presensi."), 400
+        
+        # Validate location for GPS-based methods only
+        if method in {"gps", "gps_selfie"}:
+            if not lat or not lng:
+                return jsonify(ok=False, message="Lokasi GPS wajib diisi."), 400
+            try:
+                lat_f = float(lat)
+                lng_f = float(lng)
+            except ValueError:
+                return jsonify(ok=False, message="Lokasi GPS tidak valid."), 400
+            if not _within_site_radius(lat_f, lng_f, site):
+                return jsonify(ok=False, message="Lokasi di luar radius site."), 400
+        
+        # Validate selfie for GPS+Selfie method
+        if method == "gps_selfie":
+            # If require_selfie policy is set, enforce selfie for gps_selfie method
+            if not selfie_file or not selfie_file.filename:
+                print(f"[CHECKIN] Missing selfie for gps_selfie")
+                return jsonify(ok=False, message="Selfie wajib untuk presensi."), 400
+            print(f"[CHECKIN] Selfie validation passed")
+        
+        # Validate QR data for QR method only
         if method == "qr":
+            if not qr_data:
+                print(f"[CHECKIN] Missing QR data")
+                return jsonify(ok=False, message="QR code wajib di-scan."), 400
+            ok, msg = _validate_qr_data(qr_data, site["client_id"], "IN")
+            if not ok:
+                print(f"[CHECKIN] Invalid QR: {msg}")
+                return jsonify(ok=False, message=msg), 400
+            print(f"[CHECKIN] QR validation passed")
+
+
+        
+        # Validate QR data for QR method only
+        if method == "qr":
+            if not qr_data:
+                return jsonify(ok=False, message="QR code wajib di-scan."), 400
             ok, msg = _validate_qr_data(qr_data, site["client_id"], "IN")
             if not ok:
                 return jsonify(ok=False, message=msg), 400
@@ -596,15 +675,24 @@ def create_app() -> Flask:
             except ValueError as err:
                 return jsonify(ok=False, message=str(err)), 400
 
-        record = _create_attendance_record(
-            employee=employee,
-            employee_email=user.email,
-            action="checkin",
-            method="gps+selfie" if method == "gps_selfie" else method,
-            device_time=device_time,
-            source="app",
-            selfie_path=selfie_path,
-        )
+        try:
+            record = _create_attendance_record(
+                employee=employee,
+                employee_email=user.email,
+                action="checkin",
+                method="gps+selfie" if method == "gps_selfie" else method,
+                device_time=device_time,
+                source="app",
+                selfie_path=selfie_path,
+            )
+        except sqlite3.IntegrityError as e:
+            # Handle UNIQUE constraint violation (sudah checkin hari ini)
+            if "UNIQUE constraint failed" in str(e):
+                return jsonify(ok=False, message="Sudah check-in hari ini."), 400
+            return jsonify(ok=False, message=f"Error mencatat presensi: {str(e)}"), 400
+        except Exception as e:
+            return jsonify(ok=False, message=f"Error mencatat presensi: {str(e)}"), 500
+        
         _log_audit_event(
             entity_type="attendance",
             entity_id=record.get("id"),
@@ -657,20 +745,29 @@ def create_app() -> Flask:
             return jsonify(ok=False, message="Metode GPS tidak diizinkan."), 400
         if not policy.get("allow_qr", 1) and method == "qr":
             return jsonify(ok=False, message="Metode QR tidak diizinkan."), 400
-        if policy.get("require_selfie") and method != "gps_selfie":
-            return jsonify(ok=False, message="Selfie wajib sesuai kebijakan."), 400
-        if not lat or not lng:
-            return jsonify(ok=False, message="Lokasi GPS wajib diisi."), 400
-        try:
-            lat_f = float(lat)
-            lng_f = float(lng)
-        except ValueError:
-            return jsonify(ok=False, message="Lokasi GPS tidak valid."), 400
-        if not _within_site_radius(lat_f, lng_f, site):
-            return jsonify(ok=False, message="Lokasi di luar radius site."), 400
-        if method == "gps_selfie" and (not selfie_file or not selfie_file.filename):
-            return jsonify(ok=False, message="Selfie wajib untuk presensi."), 400
+        
+        # Validate location for GPS-based methods only
+        if method in {"gps", "gps_selfie"}:
+            if not lat or not lng:
+                return jsonify(ok=False, message="Lokasi GPS wajib diisi."), 400
+            try:
+                lat_f = float(lat)
+                lng_f = float(lng)
+            except ValueError:
+                return jsonify(ok=False, message="Lokasi GPS tidak valid."), 400
+            if not _within_site_radius(lat_f, lng_f, site):
+                return jsonify(ok=False, message="Lokasi di luar radius site."), 400
+        
+        # Validate selfie for GPS+Selfie method
+        if method == "gps_selfie":
+            # If require_selfie policy is set, enforce selfie for gps_selfie method
+            if not selfie_file or not selfie_file.filename:
+                return jsonify(ok=False, message="Selfie wajib untuk presensi."), 400
+        
+        # Validate QR data for QR method only
         if method == "qr":
+            if not qr_data:
+                return jsonify(ok=False, message="QR code wajib di-scan."), 400
             ok, msg = _validate_qr_data(qr_data, site["client_id"], "OUT")
             if not ok:
                 return jsonify(ok=False, message=msg), 400
@@ -703,11 +800,15 @@ def create_app() -> Flask:
     @app.route("/api/attendance/today", methods=["GET"])
     def attendance_today():
         user = _current_user()
+        print("[API] /api/attendance/today user:", user.email if user else None)
         forbidden = _require_api_role(user, EMPLOYEE_ROLES)
         if forbidden:
+            print("[API] Forbidden for user", user.email if user else None)
             return forbidden
         today = _today_key()
+        print("[API] Today key:", today)
         records = _list_attendance_today(user.email, today, limit=10)
+        print(f"[API] Attendance records for {user.email} on {today}: {records}")
         return jsonify(ok=True, data=records), 200
 
     @app.route("/api/attendance/summary", methods=["GET"])
@@ -785,9 +886,9 @@ def create_app() -> Flask:
         request_row = _manual_request_by_id(request_id)
         if not request_row:
             return jsonify(ok=False, message="Data attendance tidak ditemukan."), 404
-        if request_row.get("status") != "PENDING":
+        if _row_get(request_row, "status") != "PENDING":
             return jsonify(ok=False, message="Attendance sudah diproses."), 400
-        if not _approver_can_handle(user, request_row.get("employee_email") or ""):
+        if not _approver_can_handle(user, _row_get(request_row, "employee_email") or ""):
             return _json_forbidden()
         ok, message = _approve_manual_request_atomic(request_id, user, note or None)
         if not ok:
@@ -1544,7 +1645,7 @@ def _attendance_month_summary_for_employee(
         earliest: dict[str, int] = {}
         for row in cur.fetchall():
             date_value = row["date"] or ""
-            minutes = _extract_minutes(row.get("time"), row.get("created_at"))
+            minutes = _extract_minutes(row["time"], row["created_at"])
             if minutes is None:
                 continue
             current = earliest.get(date_value)
@@ -1567,11 +1668,11 @@ def _attendance_month_summary_for_employee(
             (email_key,),
         )
         for row in leave_cur.fetchall():
-            leave_type = (row.get("leave_type") or "").lower()
+            leave_type = (row["leave_type"] or "").lower()
             if leave_type not in leave_counts:
                 continue
-            start = _date_from_input(row.get("date_from"))
-            end = _date_from_input(row.get("date_to")) or start
+            start = _date_from_input(row["date_from"])
+            end = _date_from_input(row["date_to"]) or start
             counted = _count_overlap_days(start, end, month_start, month_end)
             if counted:
                 leave_counts[leave_type] += counted
@@ -1603,10 +1704,10 @@ def _client_operational_summary(
     for row in assignments:
         user_id = int(row["employee_user_id"])
         assignment_by_employee.setdefault(user_id, row)
-        email = (row.get("employee_email") or "").lower()
+        email = (_row_get(row, "employee_email") or "").lower()
         if email:
             email_to_user_id[email] = user_id
-        client_id = row.get("client_id")
+        client_id = _row_get(row, "client_id")
         if client_id is None:
             continue
         client_employees.setdefault(int(client_id), set()).add(user_id)
@@ -1803,12 +1904,12 @@ def _build_admin_alerts(today: str, client_id: int | None = None) -> dict:
     expired_assignments = _list_expired_assignments(today)
     expired_labels = []
     for row in expired_assignments:
-        if client_id and int(row.get("client_id") or 0) != client_id:
+        if client_id and int(_row_get(row, "client_id") or 0) != client_id:
             continue
-        name = row.get("employee_name") or row.get("employee_email") or "-"
-        client = row.get("client_name") or "-"
-        site = row.get("site_name") or "-"
-        end_date = row.get("end_date") or "-"
+        name = _row_get(row, "employee_name") or _row_get(row, "employee_email") or "-"
+        client = _row_get(row, "client_name") or "-"
+        site = _row_get(row, "site_name") or "-"
+        end_date = _row_get(row, "end_date") or "-"
         expired_labels.append(f"{name} - {client}/{site} (end: {end_date})")
 
     alerts = {
@@ -1996,6 +2097,19 @@ def _save_base64_attachment(data: str, subdir: str, max_size: int) -> str:
     return f"{subdir}/{filename}"
 
 
+def _row_get(row: sqlite3.Row | dict | None, key: str, default: any = None) -> any:
+    """
+    Safely get value from sqlite3.Row or dict without using .get() method.
+    sqlite3.Row doesn't have .get() method, only bracket notation [].
+    """
+    if row is None:
+        return default
+    try:
+        return row[key]
+    except (KeyError, IndexError, TypeError):
+        return default
+
+
 def _db_connect() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -2140,13 +2254,13 @@ def _get_active_assignment(user_id: int) -> dict | None:
             return None
         today = datetime.fromisoformat(_today_key()).date()
         for row in rows:
-            start_dt = _date_from_input(row.get("start_date"))
+            start_dt = _date_from_input(_row_get(row, "start_date"))
             if not start_dt:
                 continue
-            end_dt = _date_from_input(row.get("end_date")) if row.get("end_date") else None
+            end_dt = _date_from_input(_row_get(row, "end_date")) if _row_get(row, "end_date") else None
             if start_dt <= today and (not end_dt or end_dt >= today):
                 return row
-        return rows[0]
+            return rows[0]
     finally:
         conn.close()
 
@@ -4714,8 +4828,8 @@ def _approver_scope_emails(user: User | None) -> set[str] | None:
         today = _today_key()
         emails: set[str] = set()
         for row in _list_active_assignments(today):
-            if int(row.get("client_id") or 0) == client_id:
-                email = (row.get("employee_email") or "").strip().lower()
+            if int(_row_get(row, "client_id") or 0) == client_id:
+                email = (_row_get(row, "employee_email") or "").strip().lower()
                 if email:
                     emails.add(email)
         return emails
@@ -4725,8 +4839,8 @@ def _approver_scope_emails(user: User | None) -> set[str] | None:
     today = _today_key()
     emails: set[str] = set()
     for row in _list_active_assignments(today):
-        if int(row.get("site_id") or 0) in site_ids:
-            email = (row.get("employee_email") or "").strip().lower()
+        if int(_row_get(row, "site_id") or 0) in site_ids:
+            email = (_row_get(row, "employee_email") or "").strip().lower()
             if email:
                 emails.add(email)
     return emails
@@ -5244,10 +5358,13 @@ def _create_attendance_record(
     source: str,
     selfie_path: str | None = None,
 ) -> dict:
-    date_value, time_value = _device_time_parts(device_time)
+    # Gunakan tanggal hari ini untuk field 'date', time dari device_time jika ada
+    _, time_value = _device_time_parts(device_time)
+    date_value = _today_key()
     employee_id = employee.get("id") if employee else None
     employee_name = employee.get("name") if employee else None
     created_at = _now_ts()
+    print(f"[API] INSERT attendance: email={employee_email}, date={date_value}, time={time_value}, action={action}, method={method}, device_time={device_time}, source={source}, selfie_path={selfie_path}, created_at={created_at}")
     conn = _db_connect()
     try:
         cur = conn.execute(
@@ -5289,7 +5406,9 @@ def _list_attendance_today(employee_email: str, today: str, limit: int = 10) -> 
     conn = _db_connect()
     try:
         if not _table_exists(conn, "attendance"):
+            print(f"[API] Table 'attendance' does not exist!")
             return []
+        print(f"[API] Querying attendance for email={employee_email}, date={today}, limit={limit}")
         cur = conn.execute(
             """
             SELECT id, employee_email, date, time, action, method, created_at
@@ -5300,7 +5419,9 @@ def _list_attendance_today(employee_email: str, today: str, limit: int = 10) -> 
             """,
             (employee_email, today, limit),
         )
-        return [dict(row) for row in cur.fetchall()]
+        rows = cur.fetchall()
+        print(f"[API] Query result rows: {rows}")
+        return [dict(row) for row in rows]
     finally:
         conn.close()
 

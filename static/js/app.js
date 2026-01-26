@@ -103,6 +103,7 @@ const primaryKeySelect = document.getElementById("primaryKeySelect");
 const toggleModeGpsSelfie = document.getElementById("toggleModeGpsSelfie");
 const toggleModeGps = document.getElementById("toggleModeGps");
 const toggleModeQr = document.getElementById("toggleModeQr");
+const togglePagePatroli = document.getElementById("togglePagePatroli");
 
 const heroLogo = document.getElementById("heroLogo");
 const heroLabel = document.getElementById("heroLabel");
@@ -230,6 +231,21 @@ function handleAttendanceModeChange(source){
 });
 
 syncAttendanceModeToggles();
+
+// Handle togglePagePatroli
+if (togglePagePatroli) {
+  const patroli_key = "gmi_page_patroli_enabled";
+  const stored = localStorage.getItem(patroli_key);
+  const isEnabled = stored === null ? true : stored === "1";
+  togglePagePatroli.checked = isEnabled;
+  
+  togglePagePatroli.addEventListener("change", () => {
+    const enabled = togglePagePatroli.checked;
+    localStorage.setItem(patroli_key, enabled ? "1" : "0");
+    // Broadcast change ke halaman employee jika terbuka
+    window.dispatchEvent(new CustomEvent("gmi_patroli_toggle_changed", { detail: { enabled } }));
+  });
+}
 
 if(labelInput && heroLabel){
   labelInput.addEventListener("input", () => {
@@ -569,6 +585,10 @@ function bindSignupMultipart(){
       toast(toastEl, data.message || (ok ? "Berhasil." : "Gagal."), ok ? "ok" : "err");
       if (ok) {
         form.reset();
+        // Otomatis kembali ke halaman login setelah 2 detik
+        setTimeout(() => {
+          go(0); // Kembali ke form login (index 0)
+        }, 2000);
       }
     }catch(err){
       toast(toastEl, "Terjadi masalah jaringan.", "err");

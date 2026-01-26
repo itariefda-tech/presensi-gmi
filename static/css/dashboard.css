@@ -94,6 +94,40 @@ html[data-theme="light"] .dropdown-menu .btn:focus-visible{
   border-color: rgba(100,116,139,.5);
   box-shadow: 0 8px 18px rgba(15,23,42,.12);
 }
+html[data-theme="light"] .kpi-card{
+  background: rgba(0, 61, 122, 0.40);
+  border: 1px solid rgba(0, 61, 122, 0.50);
+  color: var(--ink);
+}
+html[data-theme="light"] .kpi-card:hover{
+  background: rgba(0, 61, 122, 0.20);
+  border-color: rgba(0, 61, 122, 0.30);
+}
+html[data-theme="light"] .kpi-card__label{
+  opacity: 0.8;
+}
+html[data-theme="light"] .kpi-card__meta{
+  color: var(--muted);
+}
+html[data-theme="light"] .kpi-card__action{
+  background: rgba(0, 61, 122, 0.35);
+  border-color: rgba(0, 61, 122, 0.45);
+  color: var(--ink);
+}
+html[data-theme="light"] .kpi-card[data-card="masuk"]{
+  background: linear-gradient(135deg, #0ea5e9, #22c55e);
+  color: #fff;
+}
+html[data-theme="light"] .kpi-card[data-card="masuk"] .kpi-card__label,
+html[data-theme="light"] .kpi-card[data-card="masuk"] .kpi-card__value,
+html[data-theme="light"] .kpi-card[data-card="masuk"] .kpi-card__meta{
+  color: #fff;
+}
+html[data-theme="light"] .kpi-card[data-card="masuk"] .kpi-card__action{
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.35);
+  color: #fff;
+}
 
 *{ box-sizing:border-box; }
 html, body{ overflow-x:hidden; }
