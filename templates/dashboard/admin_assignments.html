@@ -41,7 +41,6 @@
     <div class="form-row">
       <label class="label" for="assignment-shift">Shift :</label>
       <select class="input" id="assignment-shift" name="shift_id">
-        <option value="" selected>Rolling(semuanya)</option>
         {% for sh in shifts %}
         <option value="{{ sh.id }}">{{ sh.name }}</option>
         {% endfor %}
@@ -152,7 +151,6 @@
         <div class="form-row">
           <label class="label" for="assignment-shift-{{ a.id }}">Shift</label>
           <select class="input" id="assignment-shift-{{ a.id }}" name="shift_id">
-            <option value="" {% if not a.shift_id %}selected{% endif %}>Rolling(semuanya)</option>
             {% for sh in shifts %}
             <option value="{{ sh.id }}" {% if a.shift_id == sh.id %}selected{% endif %}>{{ sh.name }}</option>
             {% endfor %}

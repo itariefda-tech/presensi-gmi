@@ -46,15 +46,6 @@
       </select>
     </div>
     <div class="form-row">
-      <label class="label" for="policy-shift">Shift :</label>
-      <select class="input" id="policy-shift" name="shift_id">
-        <option value="" selected>Rolling(semuanya)</option>
-        {% for sh in shifts %}
-        <option value="{{ sh.id }}">{{ sh.name }}</option>
-        {% endfor %}
-      </select>
-    </div>
-    <div class="form-row">
       <label class="label" for="policy-from">Berlaku Mulai :</label>
       <input class="input" id="policy-from" type="text" name="effective_from" placeholder="dd/mm/yyyy" required data-policy-date />
     </div>
@@ -195,15 +186,6 @@
             <option value="" {% if not p.site_id %}selected{% endif %}>Pilih site</option>
             {% for s in sites %}
             <option value="{{ s.id }}" {% if p.site_id == s.id %}selected{% endif %}>{{ s.client_name or '-' }} - {{ s.name }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div class="form-row">
-          <label class="label" for="policy-shift-{{ p.id }}">Shift</label>
-          <select class="input" id="policy-shift-{{ p.id }}" name="shift_id">
-            <option value="" {% if not p.shift_id %}selected{% endif %}>Rolling(semuanya)</option>
-            {% for sh in shifts %}
-            <option value="{{ sh.id }}" {% if p.shift_id == sh.id %}selected{% endif %}>{{ sh.name }}</option>
             {% endfor %}
           </select>
         </div>

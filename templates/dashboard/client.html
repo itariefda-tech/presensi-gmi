@@ -1,0 +1,756 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="csrf-token" content="{{ csrf_token }}" />
+  <script>
+    (function(){
+      try {
+        var saved = localStorage.getItem("gmi_theme") || "dark";
+        document.documentElement.setAttribute("data-theme", saved);
+      } catch (e) {}
+    })();
+  </script>
+  <title>{{ client.name if client else "Client" }} | Dashboard Client</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/client_dashboard.css') }}" />
+</head>
+<body>
+  <header class="client-top">
+    <div class="brand">
+      <div class="brand-pill">{{ client.name if client else "Client" }}</div>
+      <div class="brand-title">{{ site.name or "Site" }}</div>
+      <div class="brand-meta">Ringkasan hari ini • {{ today|ddmmyyyy }}</div>
+    </div>
+    <div class="top-actions">
+      <div class="themePick" aria-label="Pemilih tema">
+        <button type="button" class="themeToggle toggle" aria-label="Ubah tema" data-theme-toggle>
+          <div class="handle"></div>
+        </button>
+      </div>
+      {% set avatar_src = user.selfie_path and url_for('static', filename=user.selfie_path) or url_for('static', filename='img/gmi_logo.gif') %}
+      <label class="avatar-upload" for="avatarInput" title="Upload foto profil">
+        <div class="user-avatar" id="userAvatar" style="background-image:url('{{ avatar_src }}');" aria-hidden="true"></div>
+      </label>
+      <input class="avatar-input" type="file" id="avatarInput" accept="image/*" />
+    </div>
+  </header>
+
+  <main class="client-main">
+    <div class="swipe-viewport">
+      <div class="swipe-track" id="swipeTrack">
+        <section class="swipe-pane" data-pane="0" aria-label="Halaman Utama">
+          <section class="kpi-section">
+              <div class="section-head">
+                <h2>Operasional Hari Ini</h2>
+                <span class="section-sub"></span>
+              </div>
+            <div class="kpi-grid">
+              <article class="kpi-card kpi-primary">
+                <div class="kpi-label">Total Pegawai</div>
+                <div class="kpi-value">{{ total_employees }}</div>
+                <div class="kpi-meta">Pegawai terdaftar</div>
+              </article>
+              <article class="kpi-card kpi-success">
+                <div class="kpi-label">Hadir Hari Ini</div>
+                <div class="kpi-value">{{ present_today }}</div>
+                <div class="kpi-meta">Sudah check-in</div>
+              </article>
+              <article class="kpi-card kpi-warning">
+                <div class="kpi-label">Terlambat</div>
+                <div class="kpi-value">{{ late_today }}</div>
+                <div class="kpi-meta">Melewati batas</div>
+              </article>
+              <article class="kpi-card kpi-danger">
+                <div class="kpi-label">Belum Hadir</div>
+                <div class="kpi-value">{{ absent_today }}</div>
+                <div class="kpi-meta">Tanpa izin</div>
+              </article>
+              <article class="kpi-card kpi-location">
+                <div class="kpi-label">Koordinat Site</div>
+                <div class="coord-value">
+                  {% if site.latitude is not none and site.longitude is not none %}
+                  <span>{{ "%.6f"|format(site.latitude) }}</span>
+                  <span>{{ "%.6f"|format(site.longitude) }}</span>
+                  {% else %}
+                  <span>-</span>
+                  {% endif %}
+                </div>
+                <div class="kpi-meta">Latitude dan Logitude</div>
+              </article>
+              <article class="kpi-card kpi-location kpi-device">
+                <div class="kpi-label">Lokasi Device</div>
+                <div class="coord-value is-device" id="deviceCoords">-</div>
+                <div class="kpi-meta" id="deviceMeta">Belum diambil</div>
+                <button class="mini-btn kpi-action" type="button" id="refreshGps" aria-label="Refresh lokasi">
+                  <span aria-hidden="true">⟳</span>
+                </button>
+              </article>
+            </div>
+          </section>
+
+          <article class="panel site-panel" id="site">
+            <div class="panel-head">
+              <div>
+                <h3>{{ site.name or "-" }}</h3>
+                <div class="panel-sub">Ringkasan site aktif client.</div>
+              </div>
+              <span class="panel-badge">Client: {{ client.name if client else "-" }}</span>
+            </div>
+            <div class="site-meta">
+              <div>
+                <div class="meta-label">Timezone</div>
+                <div class="meta-value">{{ site.timezone or "Asia/Jakarta" }}</div>
+              </div>
+              <div>
+                <div class="meta-label">Work Mode</div>
+                <div class="meta-value">{{ site.work_mode or "-" }}</div>
+              </div>
+              <div>
+                <div class="meta-label">Radius</div>
+                <div class="meta-value">{{ site.radius_meters or "-" }} m</div>
+              </div>
+              <div>
+                <div class="meta-label">Catatan</div>
+                <div class="meta-value">{{ site.notes or "-" }}</div>
+              </div>
+            </div>
+            {% if can_manage_site %}
+            <div class="form-actions">
+              <button class="btn ghost" type="button" data-modal-open="siteModal">Edit Site</button>
+            </div>
+            {% else %}
+            <div class="panel-sub">Hanya Client Admin yang dapat mengubah data site.</div>
+            {% endif %}
+          </article>
+        </section>
+
+        <section class="swipe-pane" data-pane="1" aria-label="Perizinan">
+          <article class="panel" id="leave">
+            <div class="panel-head">
+              <div>
+                <h3>Perizinan Tidak Masuk</h3>
+                <div class="panel-sub">Sakit & izin yang aktif hari ini.</div>
+              </div>
+              <span class="panel-badge">Live</span>
+            </div>
+            <div class="leave-grid">
+              <div class="leave-card">
+                <div class="leave-label">Sakit</div>
+                <div class="leave-value">{{ leave_sakit }}</div>
+                <div class="leave-meta">Karyawan sakit hari ini</div>
+              </div>
+              <div class="leave-card">
+                <div class="leave-label">Izin</div>
+                <div class="leave-value">{{ leave_izin }}</div>
+                <div class="leave-meta">Karyawan izin hari ini</div>
+              </div>
+              <div class="leave-card is-pending">
+                <div class="leave-label">Pending</div>
+                <div class="leave-value">{{ leave_pending }}</div>
+                <div class="leave-meta">Menunggu persetujuan</div>
+              </div>
+            </div>
+          </article>
+        </section>
+
+        <section class="swipe-pane" data-pane="2" aria-label="Pegawai">
+          <article class="panel" id="employees">
+            <div class="panel-head">
+              <div>
+                <h3>Pegawai Site</h3>
+                <div class="panel-sub">Berdasarkan assignment aktif di site ini.</div>
+              </div>
+              <span class="panel-badge">Total: {{ total_employees }}</span>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Nama</th>
+                    <th>Email</th>
+                    <th>No HP</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% if employees %}
+                  {% for e in employees %}
+                  <tr>
+                    <td>{{ e.name }}</td>
+                    <td>{{ e.email }}</td>
+                    <td>{{ e.no_hp }}</td>
+                    <td>{{ "Aktif" if e.is_active else "Nonaktif" }}</td>
+                  </tr>
+                  {% endfor %}
+                  {% else %}
+                  <tr>
+                    <td colspan="4" class="empty-row">Belum ada pegawai.</td>
+                  </tr>
+                  {% endif %}
+                </tbody>
+              </table>
+            </div>
+          </article>
+
+          <article class="panel" id="employee-add">
+            {% if can_manage_employees %}
+            <div class="panel-head">
+              <div>
+                <h3>Tambah Pegawai</h3>
+                <div class="panel-sub">2 langkah: simpan data pegawai, lalu lanjutkan assignment untuk site ini lewat admin.</div>
+              </div>
+              <span class="panel-badge">2 Langkah</span>
+            </div>
+            <div class="employee-add-grid">
+              <form class="site-form employee-form" method="post" action="{{ url_for('client_employees_create') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                <div class="form-grid">
+                  <div class="form-row">
+                    <label class="label" for="employee-nik">NIK</label>
+                    <input class="input" id="employee-nik" name="nik" type="text" required />
+                  </div>
+                  <div class="form-row">
+                    <label class="label" for="employee-name">Nama</label>
+                    <input class="input" id="employee-name" name="name" type="text" required />
+                  </div>
+                  <div class="form-row">
+                    <label class="label" for="employee-email">Email</label>
+                    <input class="input" id="employee-email" name="email" type="email" required />
+                  </div>
+                  <div class="form-row">
+                    <label class="label" for="employee-phone">No HP</label>
+                    <input class="input" id="employee-phone" name="no_hp" type="text" required />
+                  </div>
+                  <div class="form-row full">
+                    <label class="label" for="employee-address">Alamat</label>
+                    <input class="input" id="employee-address" name="address" type="text" required />
+                  </div>
+                  <div class="form-row">
+                    <label class="label" for="employee-gender">Jenis Kelamin</label>
+                    <select class="input" id="employee-gender" name="gender" required>
+                      <option value="" selected>Pilih</option>
+                      <option value="Laki-laki">Laki-laki</option>
+                      <option value="Perempuan">Perempuan</option>
+                    </select>
+                  </div>
+                  <div class="form-row">
+                    <label class="label" for="employee-marital">Status Nikah</label>
+                    <select class="input" id="employee-marital" name="status_nikah" required>
+                      <option value="" selected>Pilih</option>
+                      <option value="Belum menikah">Belum menikah</option>
+                      <option value="Menikah">Menikah</option>
+                      <option value="Cerai">Cerai</option>
+                    </select>
+                  </div>
+                  <div class="form-row full">
+                    <label class="label" for="employee-notes">Catatan</label>
+                    <textarea class="input" id="employee-notes" name="notes" rows="2"></textarea>
+                  </div>
+                </div>
+                <div class="form-actions">
+                  <button class="btn primary" type="submit">Tambah Pegawai</button>
+                </div>
+              </form>
+              <aside class="assignment-guide">
+                <div class="guide-header">
+                  <div>
+                    <h4>Assignment Lanjutan</h4>
+                    <p>Setelah data tersimpan, lanjutkan assignment pegawai di dashboard admin.</p>
+                  </div>
+                  <span class="guide-pill">Site Ini</span>
+                </div>
+                <ol class="guide-steps">
+                  <li>Simpan data pegawai di form kiri.</li>
+                  <li>Buka menu Assignments untuk menautkan pegawai ke site ini.</li>
+                  <li>Gunakan status ACTIVE agar langsung masuk operasional.</li>
+                </ol>
+                <div class="guide-meta">
+                  <div>
+                    <span class="meta-label">Target Site</span>
+                    <span class="meta-value">{{ site.name or "-" }}</span>
+                  </div>
+                  <div>
+                    <span class="meta-label">Client</span>
+                    <span class="meta-value">{{ client.name if client else "-" }}</span>
+                  </div>
+                </div>
+                <a class="btn ghost" href="{{ url_for('admin.assignments', _anchor='add-assignment') }}">Buka Assignments Admin</a>
+                <div class="guide-note">Assignment hanya bisa dikelola lewat dashboard admin untuk menjaga sinkronisasi antar site.</div>
+              </aside>
+            </div>
+            {% else %}
+            <div class="panel-sub">Tambah pegawai hanya untuk Client Admin.</div>
+            {% endif %}
+          </article>
+        </section>
+
+        <section class="swipe-pane" data-pane="3" aria-label="Policies">
+          <article class="panel" id="policies">
+            <div class="panel-head">
+              <div>
+                <h3>Attendance Policy</h3>
+                <div class="panel-sub">Scope site (1 site = 1 policy).</div>
+              </div>
+              <span class="panel-badge muted">{{ policies|length }} policy</span>
+            </div>
+            <div class="policy-grid">
+              {% if policies %}
+              {% for p in policies %}
+              <div class="policy-card">
+                <div class="policy-head">
+                  <div>
+                    <div class="policy-title">{{ p.scope_type }} • {{ p.effective_from }}</div>
+                    <div class="policy-meta">Sampai {{ p.effective_to or "-" }}</div>
+                  </div>
+                  <span class="policy-pill {% if p.effective_to and p.effective_to < today %}muted{% else %}ok{% endif %}">
+                    {% if p.effective_to and p.effective_to < today %}Expired{% else %}Aktif{% endif %}
+                  </span>
+                </div>
+                <div class="policy-tags">
+                  <span>GPS {{ "On" if p.allow_gps else "Off" }}</span>
+                  <span>QR {{ "On" if p.allow_qr else "Off" }}</span>
+                  <span>Selfie {{ "On" if p.require_selfie else "Off" }}</span>
+                </div>
+                {% if can_manage_policies %}
+                <details class="policy-edit">
+                  <summary>Edit policy</summary>
+                  <form method="post" action="{{ url_for('client_policies_update', policy_id=p.id) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                    <div class="form-grid">
+                      <div class="form-row">
+                        <label class="label">Mulai</label>
+                        <input class="input" name="effective_from" type="text" value="{{ p.effective_from }}" required />
+                      </div>
+                      <div class="form-row">
+                        <label class="label">Selesai</label>
+                        <input class="input" name="effective_to" type="text" value="{{ p.effective_to or '' }}" />
+                      </div>
+                      <div class="form-row">
+                        <label class="label">Work duration</label>
+                        <input class="input" name="work_duration_minutes" type="number" value="{{ p.work_duration_minutes or '' }}" />
+                      </div>
+                      <div class="form-row">
+                        <label class="label">Grace (menit)</label>
+                        <input class="input" name="grace_minutes" type="number" value="{{ p.grace_minutes or '' }}" />
+                      </div>
+                      <div class="form-row">
+                        <label class="label">Late threshold</label>
+                        <input class="input" name="late_threshold_minutes" type="number" value="{{ p.late_threshold_minutes or '' }}" />
+                      </div>
+                      <div class="form-row">
+                        <label class="label">Cutoff time</label>
+                        <input class="input" name="cutoff_time" type="text" value="{{ p.cutoff_time or '' }}" />
+                      </div>
+                      <div class="form-row">
+                        <label class="toggle-line">
+                          <input type="checkbox" name="allow_gps" value="1" {% if p.allow_gps %}checked{% endif %} />
+                          Allow GPS
+                        </label>
+                      </div>
+                      <div class="form-row">
+                        <label class="toggle-line">
+                          <input type="checkbox" name="allow_qr" value="1" {% if p.allow_qr %}checked{% endif %} />
+                          Allow QR
+                        </label>
+                      </div>
+                      <div class="form-row">
+                        <label class="toggle-line">
+                          <input type="checkbox" name="require_selfie" value="1" {% if p.require_selfie %}checked{% endif %} />
+                          Require Selfie
+                        </label>
+                      </div>
+                      <div class="form-row">
+                        <label class="toggle-line">
+                          <input type="checkbox" name="auto_checkout" value="1" {% if p.auto_checkout %}checked{% endif %} />
+                          Auto Checkout
+                        </label>
+                      </div>
+                    </div>
+                    <div class="form-actions">
+                      <button class="btn ghost" type="submit">Update</button>
+                    </div>
+                  </form>
+                  <form method="post" action="{{ url_for('client_policies_end', policy_id=p.id) }}" class="inline-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                    <button class="btn danger" type="submit">End Policy</button>
+                  </form>
+                </details>
+                {% endif %}
+              </div>
+              {% endfor %}
+              {% else %}
+              <div class="empty-state">Belum ada policy untuk site ini.</div>
+              {% endif %}
+            </div>
+            {% if can_manage_policies %}
+            <form class="site-form" method="post" action="{{ url_for('client_policies_create') }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+              <div class="form-grid">
+                <div class="form-row">
+                  <label class="label" for="policy-start">Mulai</label>
+                  <input class="input" id="policy-start" name="effective_from" type="text" placeholder="dd/mm/yyyy" required />
+                </div>
+                <div class="form-row">
+                  <label class="label" for="policy-end">Selesai</label>
+                  <input class="input" id="policy-end" name="effective_to" type="text" placeholder="dd/mm/yyyy" />
+                </div>
+                <div class="form-row">
+                  <label class="label" for="policy-work">Work duration</label>
+                  <input class="input" id="policy-work" name="work_duration_minutes" type="number" />
+                </div>
+                <div class="form-row">
+                  <label class="label" for="policy-grace">Grace (menit)</label>
+                  <input class="input" id="policy-grace" name="grace_minutes" type="number" />
+                </div>
+                <div class="form-row">
+                  <label class="label" for="policy-late">Late threshold</label>
+                  <input class="input" id="policy-late" name="late_threshold_minutes" type="number" />
+                </div>
+                <div class="form-row">
+                  <label class="label" for="policy-cutoff">Cutoff time</label>
+                  <input class="input" id="policy-cutoff" name="cutoff_time" type="text" placeholder="HH:MM" />
+                </div>
+                <div class="form-row">
+                  <label class="toggle-line">
+                    <input type="checkbox" name="allow_gps" value="1" checked />
+                    Allow GPS
+                  </label>
+                </div>
+                <div class="form-row">
+                  <label class="toggle-line">
+                    <input type="checkbox" name="allow_qr" value="1" checked />
+                    Allow QR
+                  </label>
+                </div>
+                <div class="form-row">
+                  <label class="toggle-line">
+                    <input type="checkbox" name="require_selfie" value="1" />
+                    Require Selfie
+                  </label>
+                </div>
+                <div class="form-row">
+                  <label class="toggle-line">
+                    <input type="checkbox" name="auto_checkout" value="1" />
+                    Auto Checkout
+                  </label>
+                </div>
+              </div>
+              <div class="form-actions">
+                <button class="btn primary" type="submit">Tambah Policy</button>
+              </div>
+            </form>
+            {% else %}
+            <div class="panel-sub">Pengaturan policy hanya untuk Client Admin.</div>
+            {% endif %}
+          </article>
+        </section>
+
+        <section class="swipe-pane" data-pane="4" aria-label="Attendance & Patroli">
+          <article class="panel" id="attendance">
+            <div class="panel-head">
+              <div>
+                <h3>Attendance Terbaru</h3>
+                <div class="panel-sub">Rekap check-in/out site ini.</div>
+              </div>
+              <span class="panel-badge muted">Live</span>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Pegawai</th>
+                    <th>Tanggal</th>
+                    <th>Waktu</th>
+                    <th>Aksi</th>
+                    <th>Metode</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% if attendance_records %}
+                  {% for row in attendance_records %}
+                  <tr>
+                    <td>{{ row.employee }}</td>
+                    <td>{{ row.date }}</td>
+                    <td>{{ row.time }}</td>
+                    <td>{{ row.action|upper }}</td>
+                    <td>{{ row.method }}</td>
+                  </tr>
+                  {% endfor %}
+                  {% else %}
+                  <tr>
+                    <td colspan="5" class="empty-row">Belum ada data attendance.</td>
+                  </tr>
+                  {% endif %}
+                </tbody>
+              </table>
+            </div>
+          </article>
+
+          <article class="panel" id="patrol">
+            <div class="panel-head">
+              <div>
+                <h3>Report Patroli</h3>
+                <div class="panel-sub">Mock data sementara.</div>
+              </div>
+              <span class="panel-badge muted">Mock</span>
+            </div>
+            <div class="patrol-list">
+              <div class="patrol-item">
+                <div class="patrol-title">Patroli Pagi - {{ site.name or "Site" }}</div>
+                <div class="patrol-meta">08:10 • 12 titik</div>
+                <span class="patrol-status ok">Selesai</span>
+              </div>
+              <div class="patrol-item">
+                <div class="patrol-title">Patroli Siang - {{ site.name or "Site" }}</div>
+                <div class="patrol-meta">13:00 • 9 titik</div>
+                <span class="patrol-status progress">Berjalan</span>
+              </div>
+              <div class="patrol-item">
+                <div class="patrol-title">Patroli Malam - {{ site.name or "Site" }}</div>
+                <div class="patrol-meta">19:30 • 10 titik</div>
+                <span class="patrol-status hold">Terjadwal</span>
+              </div>
+            </div>
+          </article>
+        </section>
+
+        <section class="swipe-pane" data-pane="5" aria-label="Settings">
+          <article class="panel" id="settings">
+            <div class="panel-head">
+              <div>
+                <h3>Settings Client</h3>
+                <div class="panel-sub">Role khusus client (maks. 4 role).</div>
+              </div>
+              <span class="panel-badge">Roles</span>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Nama</th>
+                    <th>Email</th>
+                    <th>Role</th>
+                    <th>Status</th>
+                    {% if can_manage_users %}<th>Aksi</th>{% endif %}
+                  </tr>
+                </thead>
+                <tbody>
+                  {% if client_users %}
+                  {% for cu in client_users %}
+                  <tr>
+                    <td>{{ cu.name or "-" }}</td>
+                    <td>{{ cu.email }}</td>
+                    <td>{{ cu.role|replace('_',' ')|title }}</td>
+                    <td>{{ "Aktif" if cu.is_active else "Nonaktif" }}</td>
+                    {% if can_manage_users %}
+                    <td>
+                      {% if cu.id != user.id %}
+                      <form method="post" action="{{ url_for('client_users_toggle', user_id=cu.id) }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                        <button class="btn ghost" type="submit">Toggle</button>
+                      </form>
+                      {% else %}
+                      <span class="note">Anda</span>
+                      {% endif %}
+                    </td>
+                    {% endif %}
+                  </tr>
+                  {% endfor %}
+                  {% else %}
+                  <tr>
+                    <td colspan="{% if can_manage_users %}5{% else %}4{% endif %}" class="empty-row">Belum ada user client.</td>
+                  </tr>
+                  {% endif %}
+                </tbody>
+              </table>
+            </div>
+            {% if can_manage_users %}
+            <form class="site-form" method="post" action="{{ url_for('client_users_create') }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+              <div class="form-grid">
+                <div class="form-row">
+                  <label class="label" for="client-user-name">Nama</label>
+                  <input class="input" id="client-user-name" name="name" type="text" required />
+                </div>
+                <div class="form-row">
+                  <label class="label" for="client-user-email">Email</label>
+                  <input class="input" id="client-user-email" name="email" type="email" required />
+                </div>
+                <div class="form-row">
+                  <label class="label" for="client-user-role">Role</label>
+                  <select class="input" id="client-user-role" name="role" required>
+                    <option value="client_assistant">Client Assistant Admin</option>
+                    <option value="client_supervisor">Client Supervisor</option>
+                    <option value="client_operational">Client Operational</option>
+                  </select>
+                </div>
+                <div class="form-row">
+                  <label class="label" for="client-user-pass">Password</label>
+                  <input class="input" id="client-user-pass" name="password" type="password" required />
+                </div>
+              </div>
+              <div class="form-actions">
+                <button class="btn primary" type="submit">Tambah User Client</button>
+              </div>
+            </form>
+            {% endif %}
+
+            {% if can_change_password %}
+            <div class="password-box">
+              <h4>Ganti Password (Client Admin)</h4>
+              <form id="changePasswordForm">
+                <div class="form-grid">
+                  <div class="form-row">
+                    <label class="label" for="currentPassword">Password Saat Ini</label>
+                    <input class="input" id="currentPassword" name="current_password" type="password" required />
+                  </div>
+                  <div class="form-row">
+                    <label class="label" for="newPassword">Password Baru</label>
+                    <input class="input" id="newPassword" name="new_password" type="password" required />
+                  </div>
+                  <div class="form-row">
+                    <label class="label" for="newPassword2">Ulangi Password</label>
+                    <input class="input" id="newPassword2" name="new_password2" type="password" required />
+                  </div>
+                </div>
+                <div class="form-actions">
+                  <button class="btn primary" type="submit">Perbarui Password</button>
+                </div>
+                <div class="form-message" id="changePasswordMessage"></div>
+              </form>
+            </div>
+            {% endif %}
+          </article>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <div class="floating-nav bottom-nav-floating" id="floatingNav">
+    <div class="drag-handle" id="navHandle" aria-hidden="true"></div>
+    <button class="nav-btn active" data-tab="0" type="button" aria-label="Utama">
+      <span class="nav-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none">
+          <path d="M4 12 12 5l8 7v7a2 2 0 0 1-2 2h-3v-5H9v5H6a2 2 0 0 1-2-2v-7Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+        </svg>
+      </span>
+    </button>
+    <button class="nav-btn" data-tab="1" type="button" aria-label="Perizinan">
+      <span class="nav-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none">
+          <path d="M5 7h14M5 12h10M5 17h7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+          <circle cx="18" cy="12" r="3" stroke="currentColor" stroke-width="1.4"/>
+        </svg>
+      </span>
+    </button>
+    <button class="nav-btn" data-tab="2" type="button" aria-label="Pegawai">
+      <span class="nav-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none">
+          <path d="M12 12a3 3 0 1 0-3-3 3 3 0 0 0 3 3Z" stroke="currentColor" stroke-width="1.6"/>
+          <path d="M5 19c1.5-3 5-4 7-4s5.5 1 7 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+        </svg>
+      </span>
+    </button>
+    <button class="nav-btn" data-tab="3" type="button" aria-label="Policies">
+      <span class="nav-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none">
+          <path d="M7 4h7l4 4v12a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+          <path d="M9 13h6M9 9h3M9 17h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+      </span>
+    </button>
+    <button class="nav-btn" data-tab="4" type="button" aria-label="Attendance">
+      <span class="nav-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none">
+          <rect x="4" y="6" width="16" height="14" rx="2.5" stroke="currentColor" stroke-width="1.5"/>
+          <path d="M8 4v4M16 4v4M8 12h4m-4 4h7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+      </span>
+    </button>
+    <button class="nav-btn" data-tab="5" type="button" aria-label="Settings">
+      <span class="nav-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none">
+          <path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z" stroke="currentColor" stroke-width="1.5"/>
+          <path d="M19.4 15a7.9 7.9 0 0 0 .1-2l2-1.5-2-3.5-2.3.8a7.6 7.6 0 0 0-1.7-1l-.4-2.4h-4l-.4 2.4a7.6 7.6 0 0 0-1.7 1l-2.3-.8-2 3.5 2 1.5a7.9 7.9 0 0 0 .1 2l-2 1.5 2 3.5 2.3-.8a7.6 7.6 0 0 0 1.7 1l.4 2.4h4l.4-2.4a7.6 7.6 0 0 0 1.7-1l2.3.8 2-3.5-2-1.5Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
+        </svg>
+      </span>
+    </button>
+    <form method="post" action="{{ url_for('logout') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <button class="nav-btn nav-logout" type="submit" aria-label="Logout">
+        <span class="nav-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M15 7.5V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h7a2 2 0 0 0 2-2v-1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            <path d="M10 12h9m0 0-3-3m3 3-3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </span>
+      </button>
+    </form>
+  </div>
+
+  <div class="modal" id="siteModal" aria-hidden="true">
+    <div class="modal-backdrop" data-modal-close="siteModal"></div>
+    <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="siteModalTitle">
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <h3 id="siteModalTitle">Edit Site</h3>
+            <div class="panel-sub">Perubahan hanya berlaku untuk site aktif.</div>
+          </div>
+          <button class="mini-btn" type="button" data-modal-close="siteModal" aria-label="Tutup">✕</button>
+        </div>
+        <form class="site-form" method="post" action="{{ url_for('client_site_update') }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <div class="form-grid">
+            <div class="form-row">
+              <label class="label" for="site-name">Nama Site</label>
+              <input class="input" id="site-name" name="name" type="text" value="{{ site.name or '' }}" required />
+            </div>
+            <div class="form-row">
+              <label class="label" for="site-timezone">Timezone</label>
+              <input class="input" id="site-timezone" name="timezone" type="text" value="{{ site.timezone or '' }}" />
+            </div>
+            <div class="form-row">
+              <label class="label" for="site-workmode">Work Mode</label>
+              <select class="input" id="site-workmode" name="work_mode">
+                <option value="" {% if not site.work_mode %}selected{% endif %}>Pilih mode</option>
+                <option value="ONSITE" {% if site.work_mode == "ONSITE" %}selected{% endif %}>ONSITE</option>
+                <option value="HYBRID" {% if site.work_mode == "HYBRID" %}selected{% endif %}>HYBRID</option>
+                <option value="REMOTE" {% if site.work_mode == "REMOTE" %}selected{% endif %}>REMOTE</option>
+              </select>
+            </div>
+            <div class="form-row">
+              <label class="label" for="site-latitude">Latitude</label>
+              <input class="input" id="site-latitude" name="latitude" type="text" value="{{ site.latitude or '' }}" required />
+            </div>
+            <div class="form-row">
+              <label class="label" for="site-longitude">Longitude</label>
+              <input class="input" id="site-longitude" name="longitude" type="text" value="{{ site.longitude or '' }}" required />
+            </div>
+            <div class="form-row full">
+              <button class="btn ghost" type="button" id="sitePickLocation">Ambil lokasi sini</button>
+            </div>
+            <div class="form-row">
+              <label class="label" for="site-radius">Radius (meter)</label>
+              <input class="input" id="site-radius" name="radius_meters" type="number" min="1" value="{{ site.radius_meters or '' }}" required />
+            </div>
+            <div class="form-row full">
+              <label class="label" for="site-notes">Catatan</label>
+              <textarea class="input" id="site-notes" name="notes" rows="2">{{ site.notes or '' }}</textarea>
+            </div>
+          </div>
+          <div class="form-actions">
+            <button class="btn ghost" type="button" data-modal-close="siteModal">Batal</button>
+            <button class="btn primary" type="submit">Simpan Perubahan</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <script src="{{ url_for('static', filename='js/dashboard_theme.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/profile_photo.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/client_dashboard.js') }}"></script>
+</body>
+</html>
