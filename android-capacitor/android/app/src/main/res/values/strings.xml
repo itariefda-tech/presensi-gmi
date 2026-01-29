@@ -1,7 +1,0 @@
-<?xml version='1.0' encoding='utf-8'?>
-<resources>
-    <string name="app_name">Presensi GMI</string>
-    <string name="title_activity_main">Presensi GMI</string>
-    <string name="package_name">online.gajiku.absensi</string>
-    <string name="custom_url_scheme">online.gajiku.absensi</string>
-</resources>

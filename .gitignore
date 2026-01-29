@@ -30,10 +30,12 @@ Thumbs.db
 node_modules
 
 # Capacitor/mobile
+mobile-capacitor/
 mobile-capacitor/node_modules/
 mobile-capacitor/android/
 mobile-capacitor/android/.gradle/
 mobile-capacitor/android/app/build/
+android-capacitor/
 
 # OneDrive conflict files
 *-AlarifiPC.*
