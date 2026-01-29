@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import csv
 import calendar
 import io
 import json
@@ -19,7 +20,7 @@ from typing import Dict
 
 import qrcode
 
-from flask import Flask, jsonify, render_template, request, session, Blueprint, abort, redirect, url_for, flash, g
+from flask import Flask, jsonify, render_template, request, session, Blueprint, abort, redirect, url_for, flash, g, Response
 from werkzeug.utils import secure_filename
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -271,6 +272,7 @@ def create_app() -> Flask:
         conn = _db_connect()
         selfie_path = None
         committed = False
+        user_id = None
         try:
             conn.execute("BEGIN IMMEDIATE")
             existing = conn.execute(
@@ -311,6 +313,31 @@ def create_app() -> Flask:
             conn.close()
             if not committed and selfie_path:
                 _delete_uploaded_file(selfie_path)
+        if committed and user_id:
+            pending = _pending_assignment_for_email(email)
+            if pending:
+                site_id = int(pending.get("site_id") or 0)
+                start_date = (pending.get("assignment_start_date") or "").strip()
+                if site_id and start_date:
+                    status = (pending.get("assignment_status") or "ACTIVE").strip().upper()
+                    if status not in {"ACTIVE", "ENDED"}:
+                        status = "ACTIVE"
+                    existing = _get_active_assignment(user_id)
+                    if not existing:
+                        _create_assignment(
+                            employee_user_id=user_id,
+                            site_id=site_id,
+                            shift_id=(
+                                int(pending["assignment_shift_id"])
+                                if pending.get("assignment_shift_id") not in (None, "")
+                                else None
+                            ),
+                            job_title=pending.get("assignment_job_title") or None,
+                            start_date=start_date,
+                            end_date=pending.get("assignment_end_date") or None,
+                            status=status,
+                        )
+                        _clear_employee_assignment_plan(email)
         return jsonify(ok=True, message="Signup berhasil (demo)."), 200
 
     @app.route("/api/auth/forgot", methods=["POST"])
@@ -474,6 +501,482 @@ def create_app() -> Flask:
             active_client=client,
             active_shift=shift,
         )
+
+    @app.route("/dashboard/client", methods=["GET"])
+    def dashboard_client():
+        user = _current_user()
+        _require_client_user(user)
+        client_id, site_id, site, client = _client_site_context(user)
+        today = _today_key()
+        employees = _list_employees_by_site(site_id)
+        employee_emails = {
+            (row.get("email") or "").lower()
+            for row in employees
+            if row.get("email")
+        }
+        present_today = _attendance_today_count_for_emails(today, employee_emails)
+        site_summary = _site_operational_summary(today, site_id)
+        leave_breakdown = _client_leave_breakdown(today, employee_emails)
+        leave_pending = _leave_pending_count_for_emails(employee_emails)
+        attendance_records = _attendance_live(limit=20, allowed_emails=employee_emails)
+        policies = _policies_for_site(client_id, site_id)
+        client_users = _client_users_for_site(client_id, site_id)
+        shifts = [s for s in _list_shifts() if int(s.get("is_active") or 0) == 1]
+        return render_template(
+            "dashboard/client.html",
+            user=user,
+            client=client,
+            site=site,
+            today=today,
+            employees=employees,
+            attendance_records=attendance_records,
+            policies=policies,
+            client_users=client_users,
+            shifts=shifts,
+            total_employees=len(employees),
+            present_today=present_today,
+            late_today=int(site_summary.get("late_count") or 0),
+            absent_today=int(site_summary.get("absent_count") or 0),
+            leave_pending=int(leave_pending or 0),
+            leave_sakit=int(leave_breakdown.get("sakit") or 0),
+            leave_izin=int(leave_breakdown.get("izin") or 0),
+            can_manage_site=user.role == "client_admin",
+            can_manage_employees=user.role == "client_admin",
+            can_manage_policies=user.role == "client_admin",
+            can_manage_users=user.role == "client_admin",
+            can_change_password=user.role == "client_admin",
+        )
+
+    @app.route("/client/site/update", methods=["POST"])
+    def client_site_update():
+        user = _current_user()
+        _require_client_admin(user)
+        client_id, site_id, site, _client = _client_site_context(user)
+        name = (request.form.get("name") or "").strip()
+        timezone = (request.form.get("timezone") or "").strip()
+        work_mode = (request.form.get("work_mode") or "").strip().upper()
+        latitude_raw = (request.form.get("latitude") or "").strip()
+        longitude_raw = (request.form.get("longitude") or "").strip()
+        radius_raw = (request.form.get("radius_meters") or "").strip()
+        notes = (request.form.get("notes") or "").strip()
+        if not name:
+            flash("Nama site wajib diisi.")
+            return redirect(url_for("dashboard_client", _anchor="site"))
+        try:
+            latitude = float(latitude_raw)
+            longitude = float(longitude_raw)
+            radius_meters = int(radius_raw)
+        except ValueError:
+            flash("Latitude, longitude, dan radius wajib angka.")
+            return redirect(url_for("dashboard_client", _anchor="site"))
+        if radius_meters <= 0:
+            flash("Radius harus lebih besar dari 0.")
+            return redirect(url_for("dashboard_client", _anchor="site"))
+        _update_site(
+            site_id=site_id,
+            client_id=client_id,
+            name=name,
+            latitude=latitude,
+            longitude=longitude,
+            radius_meters=radius_meters,
+            notes=notes,
+            timezone=timezone or None,
+            work_mode=work_mode or None,
+        )
+        flash("Site berhasil diperbarui.")
+        return redirect(url_for("dashboard_client", _anchor="site"))
+
+    @app.route("/client/employees/create", methods=["POST"])
+    def client_employees_create():
+        user = _current_user()
+        _require_client_admin(user)
+        _client_id, site_id, _site, _client = _client_site_context(user)
+        payload, error = _parse_employee_form(request.form or {})
+        if error:
+            flash(error)
+            return redirect(url_for("dashboard_client", _anchor="employees"))
+        conflict = _employee_conflict(payload["email"], payload["nik"], payload["no_hp"])
+        if conflict:
+            flash(conflict)
+            return redirect(url_for("dashboard_client", _anchor="employees"))
+        use_shift = request.form.get("use_shift") == "1"
+        shift_id_raw = (request.form.get("shift_id") or "").strip()
+        job_title = (request.form.get("job_title") or "").strip()
+        start_date = (request.form.get("start_date") or "").strip()
+        end_date = (request.form.get("end_date") or "").strip()
+        status = (request.form.get("status") or "ACTIVE").strip().upper()
+        if not start_date:
+            flash("Tanggal mulai wajib diisi.")
+            return redirect(url_for("dashboard_client", _anchor="employees"))
+        normalized_start = _normalize_date_input(start_date)
+        if not normalized_start:
+            flash("Tanggal mulai wajib format dd/mm/yyyy.")
+            return redirect(url_for("dashboard_client", _anchor="employees"))
+        normalized_end = _normalize_date_input(end_date) if end_date else None
+        if end_date and not normalized_end:
+            flash("Tanggal selesai wajib format dd/mm/yyyy.")
+            return redirect(url_for("dashboard_client", _anchor="employees"))
+        shift_id = None
+        if use_shift and shift_id_raw:
+            if not shift_id_raw.isdigit():
+                flash("Shift tidak valid.")
+                return redirect(url_for("dashboard_client", _anchor="employees"))
+            shift_id = int(shift_id_raw)
+            shift_row = _get_shift_by_id(shift_id)
+            if not shift_row or int(shift_row["is_active"] or 0) != 1:
+                flash("Shift tidak ditemukan atau nonaktif.")
+                return redirect(url_for("dashboard_client", _anchor="employees"))
+        if status not in {"ACTIVE", "ENDED"}:
+            status = "ACTIVE"
+        _create_employee(
+            nik=payload["nik"],
+            name=payload["name"],
+            email=payload["email"],
+            no_hp=payload["no_hp"],
+            address=payload["address"],
+            gender=payload["gender"],
+            status_nikah=payload["status_nikah"],
+            notes=payload["notes"],
+            is_active=1,
+            site_id=site_id,
+        )
+        _set_employee_assignment_plan(
+            email=payload["email"],
+            site_id=site_id,
+            shift_id=shift_id,
+            job_title=job_title or None,
+            start_date=normalized_start,
+            end_date=normalized_end,
+            status=status,
+        )
+        employee_user = _get_user_by_email(payload["email"])
+        employee_user_id = int(_row_get(employee_user, "id") or 0) if employee_user else 0
+        if employee_user_id and (_row_get(employee_user, "role") or "") == "employee":
+            assignment_id = _create_assignment(
+                employee_user_id=employee_user_id,
+                site_id=site_id,
+                shift_id=shift_id,
+                job_title=job_title or None,
+                start_date=normalized_start,
+                end_date=normalized_end,
+                status=status,
+            )
+            _log_audit_event(
+                entity_type="assignment",
+                entity_id=assignment_id,
+                action="CREATE",
+                actor=user,
+                summary=f"Assignment dibuat dari dashboard client untuk user_id {employee_user_id} ke site_id {site_id}.",
+                details={
+                    "employee_user_id": employee_user_id,
+                    "site_id": site_id,
+                    "shift_id": shift_id,
+                    "job_title": job_title or None,
+                    "start_date": normalized_start,
+                    "end_date": normalized_end,
+                    "status": status,
+                    "source": "client_dashboard",
+                },
+            )
+            flash("Pegawai berhasil ditambahkan dan langsung di-assign ke site ini.")
+        else:
+            flash("Pegawai berhasil ditambahkan. Assignment menunggu akun pegawai terdaftar.")
+        return redirect(url_for("dashboard_client", _anchor="employees"))
+
+    @app.route("/client/employees/delete", methods=["POST"])
+    def client_employees_delete():
+        user = _current_user()
+        _require_client_admin(user)
+        _client_id, site_id, _site, _client = _client_site_context(user)
+        email = (request.form.get("email") or "").strip().lower()
+        if not email or not _looks_like_email(email):
+            flash("Email pegawai tidak valid.")
+            return redirect(url_for("dashboard_client", _anchor="employees"))
+        employee = _employee_by_email(email, only_active=False)
+        if employee and int(employee.get("site_id") or 0) != site_id:
+            flash("Pegawai tidak sesuai site.")
+            return redirect(url_for("dashboard_client", _anchor="employees"))
+        user_row = _get_user_by_email(email)
+        if user_row:
+            _delete_assignments_for_employee_site(int(_row_get(user_row, "id") or 0), site_id)
+        _delete_employee_by_email(email)
+        _log_audit_event(
+            entity_type="employee",
+            entity_id=int(employee.get("id") or 0) if employee else None,
+            action="DELETE",
+            actor=user,
+            summary=f"Pegawai {email} dihapus dari dashboard client.",
+            details={"email": email, "site_id": site_id},
+        )
+        flash("Pegawai dan assignment berhasil dihapus.")
+        return redirect(url_for("dashboard_client", _anchor="employees"))
+
+    @app.route("/client/attendance/csv", methods=["GET"])
+    def client_attendance_csv():
+        user = _current_user()
+        _require_client_admin(user)
+        _client_id, site_id, site, _client = _client_site_context(user)
+        employees = _list_employees_by_site(site_id)
+        employee_emails = {
+            (e.get("email") or "").strip().lower()
+            for e in employees
+            if (e.get("email") or "").strip()
+        }
+        mode = (request.args.get("mode") or "all").strip().lower()
+        from_raw = (request.args.get("from") or "").strip()
+        to_raw = (request.args.get("to") or "").strip()
+        month_raw = (request.args.get("month") or "").strip()
+        date_from = None
+        date_to = None
+        if mode == "range":
+            if from_raw:
+                date_from = _normalize_date_input(from_raw)
+            if to_raw:
+                date_to = _normalize_date_input(to_raw)
+        elif mode == "month":
+            match = re.match(r"^(\d{4})-(\d{2})$", month_raw)
+            if match:
+                year = int(match.group(1))
+                month = int(match.group(2))
+                if 1 <= month <= 12:
+                    start = date(year, month, 1)
+                    last_day = calendar.monthrange(year, month)[1]
+                    end = date(year, month, last_day)
+                    date_from = start.strftime("%Y-%m-%d")
+                    date_to = end.strftime("%Y-%m-%d")
+        records = _attendance_live(
+            limit=20000,
+            allowed_emails=employee_emails,
+            date_from=date_from,
+            date_to=date_to,
+        )
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["Nama", "Email", "Tanggal", "Waktu", "Aksi", "Metode", "Source", "Created At"])
+        for row in records:
+            writer.writerow(
+                [
+                    row.get("employee_name") or "",
+                    row.get("employee_email") or "",
+                    row.get("date") or "",
+                    row.get("time") or "",
+                    (row.get("action") or "").upper(),
+                    row.get("method") or "",
+                    row.get("source") or "",
+                    row.get("created_at") or "",
+                ]
+            )
+        filename_raw = f"attendance_{(site.get('name') or 'site')}_{_today_key()}.csv"
+        filename = secure_filename(filename_raw) or "attendance.csv"
+        response = Response(output.getvalue(), mimetype="text/csv")
+        response.headers["Content-Disposition"] = f"attachment; filename={filename}"
+        return response
+
+    @app.route("/client/policies/create", methods=["POST"])
+    def client_policies_create():
+        user = _current_user()
+        _require_client_admin(user)
+        _client_id, site_id, _site, _client = _client_site_context(user)
+        effective_from_raw = (request.form.get("effective_from") or "").strip()
+        effective_to_raw = (request.form.get("effective_to") or "").strip()
+        work_duration_raw = (request.form.get("work_duration_minutes") or "").strip()
+        grace_raw = (request.form.get("grace_minutes") or "").strip()
+        late_raw = (request.form.get("late_threshold_minutes") or "").strip()
+        allow_gps = 1 if request.form.get("allow_gps") == "1" else 0
+        require_selfie = 1 if request.form.get("require_selfie") == "1" else 0
+        allow_qr = 1 if request.form.get("allow_qr") == "1" else 0
+        auto_checkout = 1 if request.form.get("auto_checkout") == "1" else 0
+        cutoff_time = (request.form.get("cutoff_time") or "").strip()
+        effective_from = _normalize_date_input(effective_from_raw)
+        if not effective_from:
+            flash("Tanggal mulai wajib format dd/mm/yyyy.")
+            return redirect(url_for("dashboard_client", _anchor="policies"))
+        effective_to = _normalize_date_input(effective_to_raw) if effective_to_raw else None
+        if effective_to_raw and not effective_to:
+            flash("Tanggal selesai wajib format dd/mm/yyyy.")
+            return redirect(url_for("dashboard_client", _anchor="policies"))
+        work_duration = int(work_duration_raw) if work_duration_raw.isdigit() else None
+        grace_minutes = int(grace_raw) if grace_raw.isdigit() else None
+        late_minutes = int(late_raw) if late_raw.isdigit() else None
+        policy_id = _create_policy(
+            scope_type="SITE",
+            client_id=None,
+            site_id=site_id,
+            shift_id=None,
+            effective_from=effective_from,
+            effective_to=effective_to or None,
+            work_duration_minutes=work_duration,
+            grace_minutes=grace_minutes,
+            late_threshold_minutes=late_minutes,
+            allow_gps=allow_gps,
+            require_selfie=require_selfie,
+            allow_qr=allow_qr,
+            auto_checkout=auto_checkout,
+            cutoff_time=cutoff_time or None,
+        )
+        _log_audit_event(
+            entity_type="policy",
+            entity_id=policy_id,
+            action="CREATE",
+            actor=user,
+            summary="Policy site dibuat dari dashboard client.",
+            details={
+                "site_id": site_id,
+                "effective_from": effective_from,
+                "effective_to": effective_to,
+            },
+        )
+        flash("Policy berhasil ditambahkan.")
+        return redirect(url_for("dashboard_client", _anchor="policies"))
+
+    @app.route("/client/policies/<int:policy_id>/update", methods=["POST"])
+    def client_policies_update(policy_id: int):
+        user = _current_user()
+        _require_client_admin(user)
+        _client_id, site_id, _site, _client = _client_site_context(user)
+        before = _get_policy_by_id(policy_id)
+        if not before or int(before.get("site_id") or 0) != site_id:
+            flash("Policy tidak ditemukan.")
+            return redirect(url_for("dashboard_client", _anchor="policies"))
+        effective_from_raw = (request.form.get("effective_from") or "").strip()
+        effective_to_raw = (request.form.get("effective_to") or "").strip()
+        work_duration_raw = (request.form.get("work_duration_minutes") or "").strip()
+        grace_raw = (request.form.get("grace_minutes") or "").strip()
+        late_raw = (request.form.get("late_threshold_minutes") or "").strip()
+        allow_gps = 1 if request.form.get("allow_gps") == "1" else 0
+        require_selfie = 1 if request.form.get("require_selfie") == "1" else 0
+        allow_qr = 1 if request.form.get("allow_qr") == "1" else 0
+        auto_checkout = 1 if request.form.get("auto_checkout") == "1" else 0
+        cutoff_time = (request.form.get("cutoff_time") or "").strip()
+        effective_from = _normalize_date_input(effective_from_raw)
+        if not effective_from:
+            flash("Tanggal mulai wajib format dd/mm/yyyy.")
+            return redirect(url_for("dashboard_client", _anchor="policies"))
+        effective_to = _normalize_date_input(effective_to_raw) if effective_to_raw else None
+        if effective_to_raw and not effective_to:
+            flash("Tanggal selesai wajib format dd/mm/yyyy.")
+            return redirect(url_for("dashboard_client", _anchor="policies"))
+        work_duration = int(work_duration_raw) if work_duration_raw.isdigit() else None
+        grace_minutes = int(grace_raw) if grace_raw.isdigit() else None
+        late_minutes = int(late_raw) if late_raw.isdigit() else None
+        _update_policy(
+            policy_id=policy_id,
+            scope_type="SITE",
+            client_id=None,
+            site_id=site_id,
+            shift_id=before.get("shift_id"),
+            effective_from=effective_from,
+            effective_to=effective_to or None,
+            work_duration_minutes=work_duration,
+            grace_minutes=grace_minutes,
+            late_threshold_minutes=late_minutes,
+            allow_gps=allow_gps,
+            require_selfie=require_selfie,
+            allow_qr=allow_qr,
+            auto_checkout=auto_checkout,
+            cutoff_time=cutoff_time or None,
+        )
+        _log_audit_event(
+            entity_type="policy",
+            entity_id=policy_id,
+            action="UPDATE",
+            actor=user,
+            summary="Policy site diperbarui dari dashboard client.",
+            details={"site_id": site_id},
+        )
+        flash("Policy berhasil diperbarui.")
+        return redirect(url_for("dashboard_client", _anchor="policies"))
+
+    @app.route("/client/policies/<int:policy_id>/end", methods=["POST"])
+    def client_policies_end(policy_id: int):
+        user = _current_user()
+        _require_client_admin(user)
+        _client_id, site_id, _site, _client = _client_site_context(user)
+        before = _get_policy_by_id(policy_id)
+        if not before or int(before.get("site_id") or 0) != site_id:
+            flash("Policy tidak ditemukan.")
+            return redirect(url_for("dashboard_client", _anchor="policies"))
+        _end_policy(policy_id)
+        _log_audit_event(
+            entity_type="policy",
+            entity_id=policy_id,
+            action="END",
+            actor=user,
+            summary="Policy site ditutup dari dashboard client.",
+            details={"site_id": site_id},
+        )
+        flash("Policy ditutup.")
+        return redirect(url_for("dashboard_client", _anchor="policies"))
+
+    @app.route("/client/users/create", methods=["POST"])
+    def client_users_create():
+        user = _current_user()
+        _require_client_admin(user)
+        client_id, site_id, _site, _client = _client_site_context(user)
+        name = (request.form.get("name") or "").strip()
+        email = (request.form.get("email") or "").strip().lower()
+        role = (request.form.get("role") or "client_assistant").strip()
+        password = (request.form.get("password") or "").strip()
+        if not name:
+            flash("Nama wajib diisi.")
+            return redirect(url_for("dashboard_client", _anchor="settings"))
+        if not _looks_like_email(email):
+            flash("Email tidak valid.")
+            return redirect(url_for("dashboard_client", _anchor="settings"))
+        if role not in CLIENT_ROLE_OPTIONS:
+            flash("Role tidak valid.")
+            return redirect(url_for("dashboard_client", _anchor="settings"))
+        if _get_user_by_email(email):
+            flash("Email sudah terdaftar.")
+            return redirect(url_for("dashboard_client", _anchor="settings"))
+        if len(password) < 6:
+            flash("Password awal minimal 6 karakter.")
+            return redirect(url_for("dashboard_client", _anchor="settings"))
+        if role == "client_admin":
+            existing_admin = [
+                u
+                for u in _client_users_for_site(client_id, site_id)
+                if u.get("role") == "client_admin"
+            ]
+            if existing_admin:
+                flash("Client admin sudah ada untuk site ini.")
+                return redirect(url_for("dashboard_client", _anchor="settings"))
+        _create_user(
+            name=name,
+            email=email,
+            role=role,
+            password=password,
+            client_id=client_id,
+            site_id=site_id,
+            must_change_password=1,
+        )
+        flash("User client berhasil ditambahkan.")
+        return redirect(url_for("dashboard_client", _anchor="settings"))
+
+    @app.route("/client/users/<int:user_id>/toggle", methods=["POST"])
+    def client_users_toggle(user_id: int):
+        user = _current_user()
+        _require_client_admin(user)
+        client_id, site_id, _site, _client = _client_site_context(user)
+        target = _get_user_by_id(user_id)
+        if not target:
+            flash("User tidak ditemukan.")
+            return redirect(url_for("dashboard_client", _anchor="settings"))
+        if target["role"] not in CLIENT_ROLES:
+            flash("User tidak valid.")
+            return redirect(url_for("dashboard_client", _anchor="settings"))
+        if int(_row_get(target, "client_id") or 0) != client_id or int(_row_get(target, "site_id") or 0) != site_id:
+            flash("User tidak sesuai site.")
+            return redirect(url_for("dashboard_client", _anchor="settings"))
+        is_active = 0 if int(target["is_active"] or 0) == 1 else 1
+        _update_user_basic(
+            user_id=user_id,
+            name=target["name"] or "",
+            role=target["role"],
+            is_active=is_active,
+        )
+        flash("Status user diperbarui.")
+        return redirect(url_for("dashboard_client", _anchor="settings"))
 
     @app.route("/dashboard/manual_attendance", methods=["GET", "POST"])
     def manual_attendance():
@@ -1070,7 +1573,12 @@ def _validate_login(data: Dict[str, str]) -> AuthResult:
     user = _user_row_to_user(row, theme)
     _persist_user(user)
 
-    target = "/dashboard/admin" if user.role in ADMIN_ROLES else "/dashboard/pegawai"
+    if user.role in CLIENT_ROLES:
+        target = "/dashboard/client"
+    elif user.role in ADMIN_ROLES:
+        target = "/dashboard/admin"
+    else:
+        target = "/dashboard/pegawai"
     return AuthResult(True, f"Login (demo). Tema {theme}.", target)
 
 
@@ -1092,9 +1600,10 @@ else:
 # =========================
 # Demo data & helpers
 # =========================
-ADMIN_ROLES = {"hr_superadmin", "manager_operational", "supervisor", "admin_asistent", "client_admin"}
+ADMIN_ROLES = {"hr_superadmin", "manager_operational", "supervisor", "admin_asistent"}
+CLIENT_ROLES = {"client_admin", "client_assistant", "client_supervisor", "client_operational"}
 EMPLOYEE_ROLES = {"employee"}
-APPROVER_ROLES = {"hr_superadmin", "manager_operational", "supervisor", "client_admin"}
+APPROVER_ROLES = {"hr_superadmin", "manager_operational", "supervisor"}
 SEED_USERS: list[dict] = []
 SEED_USERS_JSON = (os.environ.get("SEED_USERS_JSON") or "").strip()
 if not SEED_USERS_JSON:
@@ -1113,8 +1622,9 @@ else:
         raise RuntimeError("SEED_USERS_JSON tidak valid.") from exc
 SEED_EMPLOYEES = [
 ]
-ADMIN_ROLE_OPTIONS = ["hr_superadmin", "manager_operational", "supervisor", "admin_asistent", "client_admin"]
-ROLE_OPTIONS = ADMIN_ROLE_OPTIONS + ["employee"]
+ADMIN_ROLE_OPTIONS = ["hr_superadmin", "manager_operational", "supervisor", "admin_asistent"]
+CLIENT_ROLE_OPTIONS = ["client_admin", "client_assistant", "client_supervisor", "client_operational"]
+ROLE_OPTIONS = ADMIN_ROLE_OPTIONS + CLIENT_ROLE_OPTIONS + ["employee"]
 ROLE_PERMISSION_KEYS = [
     "view_overview",
     "manage_clients_view",
@@ -1153,6 +1663,7 @@ DEMO_GPS_CENTER = (-6.5706, 107.7603)
 DEMO_GPS_RADIUS_METERS = 100
 DEMO_QR_PREFIX = "GMI"
 QR_WINDOW_SECONDS = 12 * 60 * 60
+DEFAULT_CLIENT_PASSWORD = "client@123"
 DEFAULT_ATTENDANCE_POLICY = {
     "work_duration_minutes": None,
     "grace_minutes": None,
@@ -1175,6 +1686,7 @@ class User:
     selfie_path: str | None = None
     must_change_password: int = 0
     client_id: int | None = None
+    site_id: int | None = None
 
 
 def _persist_user(user: User) -> None:
@@ -1187,6 +1699,7 @@ def _persist_user(user: User) -> None:
         "selfie_path": user.selfie_path,
         "must_change_password": user.must_change_password,
         "client_id": user.client_id,
+        "site_id": user.site_id,
     }
 
 
@@ -1204,11 +1717,13 @@ def _current_user() -> User | None:
         email = row["email"] if "email" in row.keys() else data.get("email", "")
         name = row["name"] if "name" in row.keys() else data.get("name", "")
         client_id = row["client_id"] if "client_id" in row.keys() else data.get("client_id")
+        site_id = row["site_id"] if "site_id" in row.keys() else data.get("site_id")
     else:
         role = data.get("role", "employee")
         email = data.get("email", "")
         name = data.get("name", "")
         client_id = data.get("client_id")
+        site_id = data.get("site_id")
     return User(
         id=int(data.get("id") or 0),
         email=email,
@@ -1218,6 +1733,7 @@ def _current_user() -> User | None:
         selfie_path=data.get("selfie_path"),
         must_change_password=int(data.get("must_change_password") or 0),
         client_id=int(client_id) if str(client_id).isdigit() and int(client_id) > 0 else None,
+        site_id=int(site_id) if str(site_id).isdigit() and int(site_id) > 0 else None,
     )
 
 
@@ -1244,6 +1760,32 @@ def _client_admin_client_id(user: User | None) -> int | None:
     return None
 
 
+def _client_user_client_id(user: User | None) -> int | None:
+    if not user or user.role not in CLIENT_ROLES:
+        return None
+    if isinstance(user.client_id, int) and user.client_id > 0:
+        return int(user.client_id)
+    return None
+
+
+def _client_user_site_id(user: User | None) -> int | None:
+    if not user or user.role not in CLIENT_ROLES:
+        return None
+    if isinstance(user.site_id, int) and user.site_id > 0:
+        return int(user.site_id)
+    return None
+
+
+def _require_client_user(user: User | None) -> None:
+    if not user or user.role not in CLIENT_ROLES:
+        abort(403)
+
+
+def _require_client_admin(user: User | None) -> None:
+    if not user or user.role != "client_admin":
+        abort(403)
+
+
 def _require_client_admin_client(user: User | None, client_id: int | None) -> None:
     if not user or user.role != "client_admin":
         return
@@ -1260,8 +1802,24 @@ def _require_client_admin_site(user: User | None, site_id: int | None) -> None:
     _require_client_admin_client(user, client_id)
 
 
+def _client_site_context(user: User | None) -> tuple[int, int, dict, dict]:
+    _require_client_user(user)
+    client_id = _client_user_client_id(user)
+    site_id = _client_user_site_id(user)
+    if not client_id or not site_id:
+        abort(403)
+    site_row = _get_site_by_id(site_id)
+    if not site_row:
+        abort(404)
+    if int(_row_get(site_row, "client_id") or 0) != client_id:
+        abort(403)
+    client_row = _get_client_by_id(client_id)
+    client = dict(client_row) if client_row else {"id": client_id, "name": "Client"}
+    return client_id, site_id, dict(site_row), client
+
+
 def _require_hr_or_client_admin(user: User | None) -> None:
-    if not user or user.role not in {"hr_superadmin", "client_admin"}:
+    if not user or user.role not in ADMIN_ROLES:
         abort(403)
 
 
@@ -1282,12 +1840,9 @@ def _default_role_permissions(role: str) -> dict[str, bool]:
     defaults = {key: True for key in ROLE_PERMISSION_KEYS}
     if role == "hr_superadmin":
         return defaults
-    if role == "client_admin":
-        defaults["manage_clients_add"] = False
-        defaults["manage_employees_view"] = False
-        defaults["manage_employees_add"] = False
-        defaults["manage_employees_actions"] = False
-        defaults["manage_shifts"] = False
+    if role in CLIENT_ROLES:
+        for key in ROLE_PERMISSION_KEYS:
+            defaults[key] = False
     defaults["manage_settings_codes"] = False
     defaults["manage_settings_password"] = False
     return defaults
@@ -1779,6 +2334,160 @@ def _client_operational_summary(
     return summaries
 
 
+def _client_leave_breakdown(today: str, emails: set[str]) -> dict[str, int]:
+    counts = {"sakit": 0, "izin": 0}
+    if not emails:
+        return counts
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "leave_requests"):
+            return counts
+        placeholders = ",".join("?" for _ in emails)
+        query = f"""
+            SELECT lower(leave_type) AS leave_type, COUNT(1) AS total
+            FROM leave_requests
+            WHERE lower(employee_email) IN ({placeholders})
+              AND status = 'approved'
+              AND date_from <= ?
+              AND date_to >= ?
+            GROUP BY lower(leave_type)
+        """
+        params = [*sorted(emails), today, today]
+        cur = conn.execute(query, params)
+        for row in cur.fetchall():
+            leave_type = (row["leave_type"] or "").lower()
+            if leave_type in counts:
+                counts[leave_type] = int(row["total"] or 0)
+        return counts
+    finally:
+        conn.close()
+
+
+def _leave_pending_count_for_emails(emails: set[str]) -> int:
+    if not emails:
+        return 0
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "leave_requests"):
+            return 0
+        placeholders = ",".join("?" for _ in emails)
+        query = f"""
+            SELECT COUNT(1) AS total
+            FROM leave_requests
+            WHERE status = 'pending'
+              AND lower(employee_email) IN ({placeholders})
+        """
+        params = [*sorted({email.lower() for email in emails if email})]
+        row = conn.execute(query, params).fetchone()
+        return int(row["total"] or 0) if row else 0
+    finally:
+        conn.close()
+
+
+def _site_operational_summary(today: str, site_id: int) -> dict[str, int]:
+    assignments = [
+        row
+        for row in _list_active_assignments(today)
+        if int(row.get("site_id") or 0) == site_id
+    ]
+    if not assignments:
+        return {"late_count": 0, "absent_count": 0}
+    assignment_by_employee: dict[int, dict] = {}
+    email_to_user_id: dict[str, int] = {}
+    for row in assignments:
+        user_id = int(row.get("employee_user_id") or 0)
+        if not user_id:
+            continue
+        assignment_by_employee[user_id] = row
+        email = (row.get("employee_email") or "").lower()
+        if email:
+            email_to_user_id[email] = user_id
+    checkins = _attendance_checkins_for_date(today, email_to_user_id)
+    leave_excused_today: set[int] = set()
+    active_leaves = _list_leave_active_for_date(today)
+    for leave in active_leaves:
+        email = (leave.get("employee_email") or "").lower()
+        if not email:
+            continue
+        user_id = email_to_user_id.get(email)
+        if not user_id:
+            user_row = _get_user_by_email(email)
+            user_id = int(user_row["id"]) if user_row else None
+        if not user_id:
+            continue
+        leave_excused_today.add(user_id)
+    late_count = 0
+    absent_count = 0
+    for user_id, assignment in assignment_by_employee.items():
+        if user_id in checkins:
+            if _is_late_checkin(checkins[user_id], assignment):
+                late_count += 1
+        else:
+            if user_id not in leave_excused_today:
+                absent_count += 1
+    return {"late_count": late_count, "absent_count": absent_count}
+
+
+def _policies_for_site(client_id: int, site_id: int) -> list[dict]:
+    policies = _list_policies_by_client(client_id)
+    scoped = []
+    for policy in policies:
+        scope_type = (policy.get("scope_type") or "").upper()
+        if scope_type == "SITE" and int(policy.get("site_id") or 0) == site_id:
+            scoped.append(policy)
+    return scoped
+
+
+def _client_users_for_site(client_id: int, site_id: int) -> list[dict]:
+    return [
+        u
+        for u in _list_users()
+        if u.get("role") in CLIENT_ROLES
+        and int(u.get("client_id") or 0) == client_id
+        and int(u.get("site_id") or 0) == site_id
+    ]
+
+
+def _ensure_client_superadmin_user(
+    email: str, client_id: int, site_id: int
+) -> tuple[bool, str]:
+    if not _looks_like_email(email):
+        return False, "Email PIC tidak valid."
+    normalized = email.strip().lower()
+    existing = _get_user_by_email(normalized)
+    if existing:
+        if existing["role"] != "client_admin":
+            return False, "Email PIC sudah dipakai role lain."
+        existing_client = int(_row_get(existing, "client_id") or 0)
+        existing_site = int(_row_get(existing, "site_id") or 0)
+        if existing_client and existing_client != client_id:
+            return False, "Email PIC sudah terikat client lain."
+        if existing_site and existing_site != site_id:
+            return False, "Email PIC sudah terikat site lain."
+        if not existing_client or not existing_site:
+            _update_user_basic(
+                user_id=int(existing["id"]),
+                name=existing["name"] or "",
+                role=existing["role"],
+                is_active=int(existing["is_active"] or 1),
+                client_id=client_id,
+                update_client_id=True,
+                site_id=site_id,
+                update_site_id=True,
+            )
+        return True, "User client superadmin sudah terdaftar."
+    _create_user(
+        name=normalized.split("@")[0],
+        email=normalized,
+        role="client_admin",
+        password=DEFAULT_CLIENT_PASSWORD,
+        client_id=client_id,
+        site_id=site_id,
+        must_change_password=1,
+    )
+    return True, "User client superadmin dibuat."
+
+
 def _active_policy_sets(today: str) -> tuple[set[int], set[int]]:
     policies = _list_policies()
     site_policy_ids: set[int] = set()
@@ -2127,6 +2836,7 @@ def _user_row_to_user(row: sqlite3.Row, theme: str) -> User:
         selfie_path=row["selfie_path"] if "selfie_path" in row.keys() else None,
         must_change_password=int(row["must_change_password"] or 0),
         client_id=int(row["client_id"]) if "client_id" in row.keys() and row["client_id"] is not None else None,
+        site_id=int(row["site_id"]) if "site_id" in row.keys() and row["site_id"] is not None else None,
     )
 
 
@@ -2392,6 +3102,7 @@ def _create_user(
     must_change_password: int = 0,
     selfie_path: str | None = None,
     client_id: int | None = None,
+    site_id: int | None = None,
 ) -> int:
     conn = _db_connect()
     try:
@@ -2399,8 +3110,8 @@ def _create_user(
             """
             INSERT INTO users (
                 name, email, role, password_hash, is_active,
-                created_at, updated_at, must_change_password, selfie_path, client_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                created_at, updated_at, must_change_password, selfie_path, client_id, site_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 name,
@@ -2413,6 +3124,7 @@ def _create_user(
                 must_change_password,
                 selfie_path,
                 client_id,
+                site_id,
             ),
         )
         return int(cur.lastrowid)
@@ -2431,13 +3143,14 @@ def _create_user_with_conn(
     must_change_password: int = 0,
     selfie_path: str | None = None,
     client_id: int | None = None,
+    site_id: int | None = None,
 ) -> int:
     cur = conn.execute(
         """
         INSERT INTO users (
             name, email, role, password_hash, is_active,
-            created_at, updated_at, must_change_password, selfie_path, client_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            created_at, updated_at, must_change_password, selfie_path, client_id, site_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             name,
@@ -2450,6 +3163,7 @@ def _create_user_with_conn(
             must_change_password,
             selfie_path,
             client_id,
+            site_id,
         ),
     )
     return int(cur.lastrowid)
@@ -2463,6 +3177,8 @@ def _update_user_basic(
     email: str | None = None,
     client_id: int | None = None,
     update_client_id: bool = False,
+    site_id: int | None = None,
+    update_site_id: bool = False,
 ) -> None:
     conn = _db_connect()
     try:
@@ -2474,6 +3190,9 @@ def _update_user_basic(
         if update_client_id:
             updates.append("client_id = ?")
             params.append(client_id)
+        if update_site_id:
+            updates.append("site_id = ?")
+            params.append(site_id)
         params.append(user_id)
         conn.execute(
             f"""
@@ -2569,9 +3288,12 @@ def _list_users() -> list[dict]:
                 u.created_at,
                 u.must_change_password,
                 u.client_id,
-                c.name AS client_name
+                u.site_id,
+                c.name AS client_name,
+                s.name AS site_name
             FROM users u
             LEFT JOIN clients c ON c.id = u.client_id
+            LEFT JOIN sites s ON s.id = u.site_id
             ORDER BY u.created_at DESC
             """
         )
@@ -2636,7 +3358,7 @@ def _list_employees(
         base_query = """
             SELECT
                 id, nik, name, email, no_hp, address,
-                gender, status_nikah, notes, is_active, created_at
+                gender, status_nikah, notes, is_active, created_at, site_id
             FROM employees
         """
         clauses = []
@@ -2661,6 +3383,88 @@ def _list_employees(
         conn.close()
 
 
+def _list_employees_by_site(site_id: int) -> list[dict]:
+    conn = _db_connect()
+    try:
+        if _table_exists(conn, "assignments") and _table_exists(conn, "users"):
+            today = _today_key()
+            cur = conn.execute(
+                """
+                SELECT DISTINCT
+                    COALESCE(e.id, u.id) AS id,
+                    e.nik,
+                    COALESCE(e.name, u.name) AS name,
+                    COALESCE(e.email, u.email) AS email,
+                    e.no_hp,
+                    e.address,
+                    e.gender,
+                    e.status_nikah,
+                    e.notes,
+                    COALESCE(e.is_active, u.is_active, 1) AS is_active,
+                    e.created_at,
+                    a.site_id
+                FROM assignments a
+                JOIN users u ON u.id = a.employee_user_id
+                LEFT JOIN employees e ON lower(e.email) = lower(u.email)
+                WHERE a.site_id = ?
+                  AND a.status = 'ACTIVE'
+                  AND a.start_date <= ?
+                  AND (a.end_date IS NULL OR a.end_date = '' OR a.end_date >= ?)
+                ORDER BY COALESCE(e.created_at, a.created_at) DESC
+                """,
+                (site_id, today, today),
+            )
+            rows = [dict(row) for row in cur.fetchall()]
+            assigned_emails = {
+                (row.get("email") or "").lower() for row in rows if row.get("email")
+            }
+            for row in rows:
+                row["assignment_pending"] = False
+            if _table_exists(conn, "employees"):
+                pending_query = """
+                    SELECT
+                        id, nik, name, email, no_hp, address,
+                        gender, status_nikah, notes, is_active, created_at, site_id,
+                        assignment_start_date, assignment_end_date, assignment_status
+                    FROM employees
+                    WHERE site_id = ?
+                """
+                params: list = [site_id]
+                if assigned_emails:
+                    placeholders = ", ".join(["?"] * len(assigned_emails))
+                    pending_query += f" AND lower(email) NOT IN ({placeholders})"
+                    params.extend(sorted(assigned_emails))
+                pending_query += " ORDER BY created_at DESC"
+                pending_rows = [
+                    dict(row)
+                    for row in conn.execute(pending_query, tuple(params)).fetchall()
+                ]
+                for row in pending_rows:
+                    row["assignment_pending"] = bool(row.get("assignment_start_date"))
+                rows.extend(pending_rows)
+            return rows
+        if not _table_exists(conn, "employees"):
+            return []
+        cur = conn.execute(
+            """
+            SELECT
+                id, nik, name, email, no_hp, address,
+                gender, status_nikah, notes, is_active, created_at, site_id,
+                assignment_start_date, assignment_end_date, assignment_status
+            FROM employees
+            WHERE site_id = ?
+            ORDER BY created_at DESC
+            """,
+            (site_id,),
+        )
+        rows = [dict(row) for row in cur.fetchall()]
+        for row in rows:
+            row["assignment_pending"] = bool(row.get("assignment_start_date"))
+        return rows
+    finally:
+        conn.close()
+
+
 def _create_employee(
     nik: str,
     name: str,
@@ -2671,6 +3475,7 @@ def _create_employee(
     status_nikah: str,
     notes: str | None,
     is_active: int = 1,
+    site_id: int | None = None,
 ) -> None:
     conn = _db_connect()
     try:
@@ -2678,9 +3483,9 @@ def _create_employee(
             """
             INSERT INTO employees (
                 nik, name, email, no_hp, address, gender,
-                status_nikah, notes, is_active, created_at
+                status_nikah, notes, is_active, created_at, site_id
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 nik,
@@ -2693,6 +3498,7 @@ def _create_employee(
                 notes or None,
                 is_active,
                 _now_ts(),
+                site_id,
             ),
         )
     finally:
@@ -2735,6 +3541,129 @@ def _parse_employee_form(form: dict) -> tuple[dict, str | None]:
         "status_nikah": status_nikah,
         "notes": notes or None,
     }, None
+
+
+def _set_employee_assignment_plan(
+    email: str,
+    site_id: int | None,
+    shift_id: int | None,
+    job_title: str | None,
+    start_date: str,
+    end_date: str | None,
+    status: str,
+) -> None:
+    if not email:
+        return
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "employees"):
+            return
+        conn.execute(
+            """
+            UPDATE employees
+            SET site_id = ?,
+                assignment_shift_id = ?,
+                assignment_job_title = ?,
+                assignment_start_date = ?,
+                assignment_end_date = ?,
+                assignment_status = ?
+            WHERE lower(email) = ?
+            """,
+            (
+                site_id,
+                shift_id,
+                job_title or None,
+                start_date,
+                end_date,
+                status,
+                email.lower(),
+            ),
+        )
+    finally:
+        conn.commit()
+        conn.close()
+
+
+def _pending_assignment_for_email(email: str) -> dict | None:
+    if not email:
+        return None
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "employees"):
+            return None
+        cur = conn.execute(
+            """
+            SELECT
+                site_id,
+                assignment_shift_id,
+                assignment_job_title,
+                assignment_start_date,
+                assignment_end_date,
+                assignment_status
+            FROM employees
+            WHERE lower(email) = ?
+            LIMIT 1
+            """,
+            (email.lower(),),
+        )
+        row = cur.fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def _clear_employee_assignment_plan(email: str) -> None:
+    if not email:
+        return
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "employees"):
+            return
+        conn.execute(
+            """
+            UPDATE employees
+            SET assignment_shift_id = NULL,
+                assignment_job_title = NULL,
+                assignment_start_date = NULL,
+                assignment_end_date = NULL,
+                assignment_status = NULL
+            WHERE lower(email) = ?
+            """,
+            (email.lower(),),
+        )
+    finally:
+        conn.commit()
+        conn.close()
+
+
+def _delete_employee_by_email(email: str) -> None:
+    if not email:
+        return
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "employees"):
+            return
+        conn.execute("DELETE FROM employees WHERE lower(email) = ?", (email.lower(),))
+    finally:
+        conn.commit()
+        conn.close()
+
+
+def _delete_assignments_for_employee_site(employee_user_id: int, site_id: int) -> int:
+    if not employee_user_id or not site_id:
+        return 0
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "assignments"):
+            return 0
+        cur = conn.execute(
+            "DELETE FROM assignments WHERE employee_user_id = ? AND site_id = ?",
+            (employee_user_id, site_id),
+        )
+        return cur.rowcount or 0
+    finally:
+        conn.commit()
+        conn.close()
 
 
 def _set_employee_active_with_conn(conn: sqlite3.Connection, email: str, is_active: int) -> None:
@@ -3136,6 +4065,8 @@ def _list_sites() -> list[dict]:
                 s.longitude,
                 s.radius_meters,
                 s.notes,
+                s.pic_name,
+                s.pic_email,
                 s.is_active,
                 s.created_at,
                 CASE
@@ -3168,6 +4099,8 @@ def _list_sites_by_client(client_id: int) -> list[dict]:
                 s.longitude,
                 s.radius_meters,
                 s.notes,
+                s.pic_name,
+                s.pic_email,
                 s.is_active,
                 s.created_at
             FROM sites s
@@ -3752,17 +4685,19 @@ def _create_site(
     notes: str | None,
     timezone: str | None,
     work_mode: str | None,
-) -> None:
+    pic_name: str | None = None,
+    pic_email: str | None = None,
+) -> int:
     client_name = _client_name_by_id(client_id) or ""
     conn = _db_connect()
     try:
-        conn.execute(
+        cur = conn.execute(
             """
             INSERT INTO sites (
                 client_id, client_name, name, timezone, work_mode, latitude,
-                longitude, radius_meters, notes, is_active, created_at
+                longitude, radius_meters, notes, pic_name, pic_email, is_active, created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 client_id,
@@ -3774,10 +4709,13 @@ def _create_site(
                 longitude,
                 radius_meters,
                 notes or None,
+                pic_name,
+                pic_email,
                 1,
                 _now_ts(),
             ),
         )
+        return int(cur.lastrowid)
     finally:
         conn.commit()
         conn.close()
@@ -3793,6 +4731,8 @@ def _update_site(
     notes: str | None,
     timezone: str | None,
     work_mode: str | None,
+    pic_name: str | None = None,
+    pic_email: str | None = None,
 ) -> None:
     client_name = _client_name_by_id(client_id) or ""
     conn = _db_connect()
@@ -3801,7 +4741,7 @@ def _update_site(
             """
             UPDATE sites
             SET client_id = ?, client_name = ?, name = ?, timezone = ?, work_mode = ?,
-                latitude = ?, longitude = ?, radius_meters = ?, notes = ?, updated_at = ?
+                latitude = ?, longitude = ?, radius_meters = ?, notes = ?, pic_name = ?, pic_email = ?, updated_at = ?
             WHERE id = ?
             """,
             (
@@ -3814,9 +4754,27 @@ def _update_site(
                 longitude,
                 radius_meters,
                 notes or None,
+                pic_name,
+                pic_email,
                 _now_ts(),
                 site_id,
             ),
+        )
+    finally:
+        conn.commit()
+        conn.close()
+
+
+def _end_policy(policy_id: int) -> None:
+    conn = _db_connect()
+    try:
+        conn.execute(
+            """
+            UPDATE attendance_policies
+            SET effective_to = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (_today_key(), _now_ts(), policy_id),
         )
     finally:
         conn.commit()
@@ -4133,7 +5091,8 @@ def _init_db() -> None:
                 updated_at TEXT,
                 must_change_password INTEGER DEFAULT 0,
                 selfie_path TEXT,
-                client_id INTEGER
+                client_id INTEGER,
+                site_id INTEGER
             )
             """
         )
@@ -4195,7 +5154,8 @@ def _init_db() -> None:
                 status_nikah TEXT NOT NULL,
                 notes TEXT,
                 is_active INTEGER DEFAULT 1,
-                created_at TEXT
+                created_at TEXT,
+                site_id INTEGER
             )
             """
         )
@@ -4226,6 +5186,8 @@ def _init_db() -> None:
                 longitude REAL,
                 radius_meters INTEGER,
                 notes TEXT,
+                pic_name TEXT,
+                pic_email TEXT,
                 is_active INTEGER DEFAULT 1,
                 created_at TEXT,
                 updated_at TEXT,
@@ -4445,6 +5407,7 @@ def _init_db() -> None:
             )
         else:
             _ensure_column(conn, "users", "client_id", "client_id INTEGER")
+            _ensure_column(conn, "users", "site_id", "site_id INTEGER")
             _ensure_column(conn, "attendance", "source", "source TEXT")
             _ensure_column(conn, "attendance", "manual_request_id", "manual_request_id INTEGER")
             _ensure_column(conn, "attendance", "selfie_path", "selfie_path TEXT")
@@ -4456,6 +5419,8 @@ def _init_db() -> None:
             _ensure_column(conn, "sites", "latitude", "latitude REAL")
             _ensure_column(conn, "sites", "longitude", "longitude REAL")
             _ensure_column(conn, "sites", "radius_meters", "radius_meters INTEGER")
+            _ensure_column(conn, "sites", "pic_name", "pic_name TEXT")
+            _ensure_column(conn, "sites", "pic_email", "pic_email TEXT")
             _ensure_column(conn, "sites", "updated_at", "updated_at TEXT")
         if _table_exists(conn, "clients"):
             _ensure_column(conn, "clients", "is_active", "is_active INTEGER DEFAULT 1")
@@ -4486,6 +5451,12 @@ def _init_db() -> None:
             _ensure_column(conn, "employees", "notes", "notes TEXT")
             _ensure_column(conn, "employees", "is_active", "is_active INTEGER DEFAULT 1")
             _ensure_column(conn, "employees", "created_at", "created_at TEXT")
+            _ensure_column(conn, "employees", "site_id", "site_id INTEGER")
+            _ensure_column(conn, "employees", "assignment_shift_id", "assignment_shift_id INTEGER")
+            _ensure_column(conn, "employees", "assignment_job_title", "assignment_job_title TEXT")
+            _ensure_column(conn, "employees", "assignment_start_date", "assignment_start_date TEXT")
+            _ensure_column(conn, "employees", "assignment_end_date", "assignment_end_date TEXT")
+            _ensure_column(conn, "employees", "assignment_status", "assignment_status TEXT")
             _dedupe_employees(conn)
             try:
                 conn.execute(
@@ -6884,7 +7855,7 @@ def admin_bp() -> Blueprint:
                 return abort(403)
             if tab not in allowed_tabs:
                 tab = allowed_tabs[0]
-        users = [u for u in _list_users() if u.get("role") != "employee"]
+        users = [u for u in _list_users() if u.get("role") in ADMIN_ROLES]
         sites = _list_sites()
         clients = _clients()
         supervisor_sites = _get_supervisor_sites_map()
@@ -6932,7 +7903,6 @@ def admin_bp() -> Blueprint:
         email = (request.form.get("email") or "").strip().lower()
         role = (request.form.get("role") or "admin_asistent").strip()
         password = (request.form.get("password") or "").strip()
-        client_id_raw = (request.form.get("client_id") or "").strip()
 
         if not _looks_like_email(email):
             flash("Email tidak valid.")
@@ -6949,17 +7919,7 @@ def admin_bp() -> Blueprint:
         if len(password) < 6:
             flash("Password awal minimal 6 karakter.")
             return redirect(url_for("admin.settings", tab="users"))
-        client_id = None
-        if role == "client_admin":
-            if not client_id_raw.isdigit():
-                flash("Client wajib dipilih untuk Client Admin.")
-                return redirect(url_for("admin.settings", tab="users"))
-            client_id = int(client_id_raw)
-            if not _get_client_by_id(client_id):
-                flash("Client tidak ditemukan.")
-                return redirect(url_for("admin.settings", tab="users"))
-
-        _create_user(name=name, email=email, role=role, password=password, client_id=client_id)
+        _create_user(name=name, email=email, role=role, password=password)
         flash("User berhasil ditambahkan.")
         return redirect(url_for("admin.settings", tab="users"))
 
@@ -6971,11 +7931,13 @@ def admin_bp() -> Blueprint:
         if not target:
             flash("User tidak ditemukan.")
             return redirect(url_for("admin.settings", tab="users"))
+        if _row_get(target, "role") not in ADMIN_ROLES:
+            flash("User bukan admin.")
+            return redirect(url_for("admin.settings", tab="users"))
         name = (request.form.get("name") or "").strip()
         email = (request.form.get("email") or "").strip().lower()
         role = (request.form.get("role") or "admin_asistent").strip()
         is_active = 1 if request.form.get("is_active") == "1" else 0
-        client_id_raw = (request.form.get("client_id") or "").strip()
 
         if not _looks_like_email(email):
             flash("Email tidak valid.")
@@ -6996,15 +7958,6 @@ def admin_bp() -> Blueprint:
         if existing and int(existing["id"]) != user_id:
             flash("Email sudah terdaftar.")
             return redirect(url_for("admin.settings", tab="users"))
-        client_id = None
-        if role == "client_admin":
-            if not client_id_raw.isdigit():
-                flash("Client wajib dipilih untuk Client Admin.")
-                return redirect(url_for("admin.settings", tab="users"))
-            client_id = int(client_id_raw)
-            if not _get_client_by_id(client_id):
-                flash("Client tidak ditemukan.")
-                return redirect(url_for("admin.settings", tab="users"))
 
         _update_user_basic(
             user_id=user_id,
@@ -7012,8 +7965,6 @@ def admin_bp() -> Blueprint:
             role=role,
             is_active=is_active,
             email=email,
-            client_id=client_id,
-            update_client_id=True,
         )
         flash("User berhasil diperbarui.")
         return redirect(url_for("admin.settings", tab="users"))
@@ -7025,6 +7976,9 @@ def admin_bp() -> Blueprint:
         target = _get_user_by_id(user_id)
         if not target:
             flash("User tidak ditemukan.")
+            return redirect(url_for("admin.settings", tab="users"))
+        if _row_get(target, "role") not in ADMIN_ROLES:
+            flash("User bukan admin.")
             return redirect(url_for("admin.settings", tab="users"))
         if user_id == user.id:
             flash("HR Superadmin tidak boleh dinonaktifkan.")
@@ -7041,6 +7995,13 @@ def admin_bp() -> Blueprint:
     def settings_users_reset_password(user_id: int):
         user = _current_user()
         _require_hr_superadmin(user)
+        target = _get_user_by_id(user_id)
+        if not target:
+            flash("User tidak ditemukan.")
+            return redirect(url_for("admin.settings", tab="users"))
+        if _row_get(target, "role") not in ADMIN_ROLES:
+            flash("User bukan admin.")
+            return redirect(url_for("admin.settings", tab="users"))
         hr_password = (request.form.get("hr_password") or "").strip()
         new_password = (request.form.get("new_password") or "").strip()
         new_password2 = (request.form.get("new_password2") or "").strip()
@@ -7066,6 +8027,9 @@ def admin_bp() -> Blueprint:
         if not target:
             flash("User tidak ditemukan.")
             return redirect(url_for("admin.settings", tab="users"))
+        if _row_get(target, "role") not in ADMIN_ROLES:
+            flash("User bukan admin.")
+            return redirect(url_for("admin.settings", tab="users"))
         if user_id == user.id:
             flash("HR Superadmin tidak boleh menghapus akun sendiri.")
             return redirect(url_for("admin.settings", tab="users"))
@@ -7084,6 +8048,9 @@ def admin_bp() -> Blueprint:
         target = _get_user_by_id(user_id)
         if not target:
             flash("User tidak ditemukan.")
+            return redirect(url_for("admin.settings", tab="users"))
+        if _row_get(target, "role") not in ADMIN_ROLES:
+            flash("User bukan admin.")
             return redirect(url_for("admin.settings", tab="users"))
         if target["role"] != "supervisor":
             flash("Assign sites hanya untuk supervisor.")
@@ -7120,9 +8087,14 @@ def admin_bp() -> Blueprint:
         longitude_raw = (request.form.get("longitude") or "").strip()
         radius_raw = (request.form.get("radius_meters") or "").strip()
         notes = (request.form.get("notes") or "").strip()
+        pic_name = (request.form.get("pic_name") or "").strip()
+        pic_email = (request.form.get("pic_email") or "").strip().lower()
         if not client_id_raw:
             flash("Client wajib dipilih.")
             return redirect(url_for("admin.sites"))
+        if not pic_email:
+            flash("Email PIC wajib diisi.")
+            return redirect(url_for("admin.sites", _anchor="add-site"))
         try:
             client_id = int(client_id_raw)
         except ValueError:
@@ -7133,6 +8105,19 @@ def admin_bp() -> Blueprint:
         if not _get_client_by_id(client_id):
             flash("Client tidak ditemukan.")
             return redirect(url_for("admin.sites"))
+        existing_pic = _get_user_by_email(pic_email)
+        if existing_pic:
+            if _row_get(existing_pic, "role") != "client_admin":
+                flash("Email PIC sudah dipakai role lain.")
+                return redirect(url_for("admin.sites"))
+            existing_client = int(_row_get(existing_pic, "client_id") or 0)
+            existing_site = int(_row_get(existing_pic, "site_id") or 0)
+            if existing_client and existing_client != client_id:
+                flash("Email PIC sudah terikat client lain.")
+                return redirect(url_for("admin.sites"))
+            if existing_site:
+                flash("Email PIC sudah terikat site lain.")
+                return redirect(url_for("admin.sites"))
         if not name:
             flash("Nama site wajib diisi.")
             return redirect(url_for("admin.sites"))
@@ -7146,7 +8131,7 @@ def admin_bp() -> Blueprint:
         if radius_meters <= 0:
             flash("Radius harus lebih besar dari 0.")
             return redirect(url_for("admin.sites"))
-        _create_site(
+        site_id = _create_site(
             client_id=client_id,
             name=name,
             latitude=latitude,
@@ -7155,7 +8140,18 @@ def admin_bp() -> Blueprint:
             notes=notes,
             timezone=timezone or None,
             work_mode=work_mode or None,
+            pic_name=pic_name or None,
+            pic_email=pic_email,
         )
+        ok, message = _ensure_client_superadmin_user(pic_email, client_id, site_id)
+        if not ok:
+            flash(message)
+            return redirect(url_for("admin.sites"))
+        if message:
+            if "dibuat" in message.lower():
+                flash(f"{message} Password awal: {DEFAULT_CLIENT_PASSWORD} (segera ganti).")
+            else:
+                flash(message)
         flash("Site berhasil ditambahkan.")
         return redirect(url_for("admin.sites"))
 
@@ -7171,8 +8167,13 @@ def admin_bp() -> Blueprint:
         longitude_raw = (request.form.get("longitude") or "").strip()
         radius_raw = (request.form.get("radius_meters") or "").strip()
         notes = (request.form.get("notes") or "").strip()
+        pic_name = (request.form.get("pic_name") or "").strip()
+        pic_email = (request.form.get("pic_email") or "").strip().lower()
         if not client_id_raw:
             flash("Client wajib dipilih.")
+            return redirect(url_for("admin.sites"))
+        if not pic_email:
+            flash("Email PIC wajib diisi.")
             return redirect(url_for("admin.sites"))
         try:
             client_id = int(client_id_raw)
@@ -7184,6 +8185,19 @@ def admin_bp() -> Blueprint:
         if not _get_client_by_id(client_id):
             flash("Client tidak ditemukan.")
             return redirect(url_for("admin.sites"))
+        existing_pic = _get_user_by_email(pic_email)
+        if existing_pic:
+            if _row_get(existing_pic, "role") != "client_admin":
+                flash("Email PIC sudah dipakai role lain.")
+                return redirect(url_for("admin.sites"))
+            existing_client = int(_row_get(existing_pic, "client_id") or 0)
+            existing_site = int(_row_get(existing_pic, "site_id") or 0)
+            if existing_client and existing_client != client_id:
+                flash("Email PIC sudah terikat client lain.")
+                return redirect(url_for("admin.sites"))
+            if existing_site and existing_site != site_id:
+                flash("Email PIC sudah terikat site lain.")
+                return redirect(url_for("admin.sites"))
         if not name:
             flash("Nama site wajib diisi.")
             return redirect(url_for("admin.sites"))
@@ -7197,6 +8211,10 @@ def admin_bp() -> Blueprint:
         if radius_meters <= 0:
             flash("Radius harus lebih besar dari 0.")
             return redirect(url_for("admin.sites"))
+        ok, message = _ensure_client_superadmin_user(pic_email, client_id, site_id)
+        if not ok:
+            flash(message)
+            return redirect(url_for("admin.sites"))
         _update_site(
             site_id=site_id,
             client_id=client_id,
@@ -7207,7 +8225,14 @@ def admin_bp() -> Blueprint:
             notes=notes,
             timezone=timezone or None,
             work_mode=work_mode or None,
+            pic_name=pic_name or None,
+            pic_email=pic_email,
         )
+        if message:
+            if "dibuat" in message.lower():
+                flash(f"{message} Password awal: {DEFAULT_CLIENT_PASSWORD} (segera ganti).")
+            else:
+                flash(message)
         flash("Site berhasil diperbarui.")
         return redirect(url_for("admin.sites"))
 

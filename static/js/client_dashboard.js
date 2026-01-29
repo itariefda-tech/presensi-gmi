@@ -6,7 +6,7 @@
   let swipeIndex = 0;
 
   function go(index){
-    const max = 5;
+    const max = 4;
     swipeIndex = Math.max(0, Math.min(max, index));
     if (swipeTrack) {
       swipeTrack.style.transform = `translateX(-${swipeIndex * 100}%)`;
@@ -167,6 +167,49 @@
     });
   }
 
+  function initEmployeeAssignmentForm(){
+    const form = document.getElementById("employee-create-form");
+    if (!form) return;
+    const shiftToggle = document.getElementById("assignment-shift-toggle");
+    const shiftSelect = document.getElementById("assignment-shift");
+    const statusToggle = document.getElementById("assignment-status-toggle");
+    const statusInput = document.getElementById("assignment-status");
+    const statusLabel = document.getElementById("assignment-status-label");
+    const toIsoDate = (value) => {
+      const raw = (value || "").trim();
+      if (!raw) return "";
+      const match = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+      if (match) {
+        return `${match[3]}-${match[2]}-${match[1]}`;
+      }
+      return raw;
+    };
+    const syncShift = () => {
+      if (!shiftToggle || !shiftSelect) return;
+      const enabled = shiftToggle.checked;
+      shiftSelect.disabled = !enabled;
+      if (!enabled) shiftSelect.value = "";
+    };
+    const syncStatus = () => {
+      if (!statusToggle || !statusInput) return;
+      const value = statusToggle.checked ? "ENDED" : "ACTIVE";
+      statusInput.value = value;
+      if (statusLabel) statusLabel.textContent = value;
+    };
+    syncShift();
+    syncStatus();
+    if (shiftToggle) shiftToggle.addEventListener("change", syncShift);
+    if (statusToggle) statusToggle.addEventListener("change", syncStatus);
+    form.addEventListener("submit", () => {
+      const startInput = form.querySelector('input[name="start_date"]');
+      const endInput = form.querySelector('input[name="end_date"]');
+      if (startInput) startInput.value = toIsoDate(startInput.value);
+      if (endInput) endInput.value = toIsoDate(endInput.value);
+      syncShift();
+      syncStatus();
+    });
+  }
+
   function initModals(){
     const openers = Array.from(document.querySelectorAll("[data-modal-open]"));
     const closers = Array.from(document.querySelectorAll("[data-modal-close]"));
@@ -197,12 +240,154 @@
     });
   }
 
+  function initCollapsiblePanels(){
+    const toggles = document.querySelectorAll("[data-collapse-toggle]");
+    toggles.forEach((btn) => {
+      const targetId = btn.getAttribute("data-collapse-toggle");
+      const panel = targetId ? document.getElementById(targetId) : null;
+      const bodyId = btn.getAttribute("aria-controls");
+      const body = bodyId ? document.getElementById(bodyId) : null;
+      if (!panel) return;
+      const setState = (open) => {
+        panel.classList.toggle("is-open", open);
+        panel.classList.toggle("is-collapsed", !open);
+        btn.setAttribute("aria-expanded", open ? "true" : "false");
+        if (body) body.setAttribute("aria-hidden", open ? "false" : "true");
+      };
+      setState(panel.classList.contains("is-open"));
+      btn.addEventListener("click", () => {
+        setState(!panel.classList.contains("is-open"));
+      });
+    });
+  }
+
+  function initEmployeeTablePagination(){
+    const table = document.getElementById("employee-table");
+    const pager = document.getElementById("employee-pagination");
+    if (!table || !pager) return;
+    const pageSize = parseInt(table.dataset.pageSize || "6", 10);
+    const tbody = table.querySelector("tbody");
+    if (!tbody) return;
+    const allRows = Array.from(tbody.querySelectorAll("tr")).filter((row) => !row.classList.contains("empty-row"));
+    if (allRows.length <= pageSize) {
+      pager.style.display = "none";
+      return;
+    }
+    let page = 1;
+    const totalPages = Math.max(1, Math.ceil(allRows.length / pageSize));
+    const info = pager.querySelector("[data-page-info]");
+    const prevBtn = pager.querySelector("[data-page='prev']");
+    const nextBtn = pager.querySelector("[data-page='next']");
+    const render = () => {
+      const start = (page - 1) * pageSize;
+      const end = start + pageSize;
+      allRows.forEach((row, idx) => {
+        row.style.display = idx >= start && idx < end ? "" : "none";
+      });
+      if (info) info.textContent = `Page ${page} of ${totalPages}`;
+      if (prevBtn) prevBtn.disabled = page <= 1;
+      if (nextBtn) nextBtn.disabled = page >= totalPages;
+    };
+    if (prevBtn) prevBtn.addEventListener("click", () => {
+      if (page > 1) {
+        page -= 1;
+        render();
+      }
+    });
+    if (nextBtn) nextBtn.addEventListener("click", () => {
+      if (page < totalPages) {
+        page += 1;
+        render();
+      }
+    });
+    render();
+  }
+
+  function initAttendanceTablePagination(){
+    const table = document.getElementById("attendance-table");
+    const pager = document.getElementById("attendance-pagination");
+    if (!table || !pager) return;
+    const pageSize = parseInt(table.dataset.pageSize || "6", 10);
+    const tbody = table.querySelector("tbody");
+    if (!tbody) return;
+    const allRows = Array.from(tbody.querySelectorAll("tr")).filter((row) => !row.classList.contains("empty-row"));
+    if (allRows.length <= pageSize) {
+      pager.style.display = "none";
+      return;
+    }
+    let page = 1;
+    const totalPages = Math.max(1, Math.ceil(allRows.length / pageSize));
+    const info = pager.querySelector("[data-page-info]");
+    const prevBtn = pager.querySelector("[data-page='prev']");
+    const nextBtn = pager.querySelector("[data-page='next']");
+    const render = () => {
+      const start = (page - 1) * pageSize;
+      const end = start + pageSize;
+      allRows.forEach((row, idx) => {
+        row.style.display = idx >= start && idx < end ? "" : "none";
+      });
+      if (info) info.textContent = `Page ${page} of ${totalPages}`;
+      if (prevBtn) prevBtn.disabled = page <= 1;
+      if (nextBtn) nextBtn.disabled = page >= totalPages;
+    };
+    if (prevBtn) prevBtn.addEventListener("click", () => {
+      if (page > 1) {
+        page -= 1;
+        render();
+      }
+    });
+    if (nextBtn) nextBtn.addEventListener("click", () => {
+      if (page < totalPages) {
+        page += 1;
+        render();
+      }
+    });
+    render();
+  }
+
+  function initAttendanceReportToggle(){
+    const panel = document.getElementById("attendance-report");
+    if (!panel) return;
+    const radios = panel.querySelectorAll("input[name='mode']");
+    const rangeFields = panel.querySelectorAll("[data-attendance-field='range']");
+    const monthFields = panel.querySelectorAll("[data-attendance-field='month']");
+    const setVisible = (nodes, visible) => {
+      nodes.forEach((node) => {
+        node.style.display = visible ? "" : "none";
+        const input = node.querySelector("input");
+        if (input) input.disabled = !visible;
+      });
+    };
+    const applyMode = () => {
+      const selected = panel.querySelector("input[name='mode']:checked")?.value || "all";
+      if (selected === "range") {
+        setVisible(rangeFields, true);
+        setVisible(monthFields, false);
+      } else if (selected === "month") {
+        setVisible(rangeFields, false);
+        setVisible(monthFields, true);
+      } else {
+        setVisible(rangeFields, false);
+        setVisible(monthFields, false);
+      }
+    };
+    radios.forEach((radio) => {
+      radio.addEventListener("change", applyMode);
+    });
+    applyMode();
+  }
+
   document.addEventListener("DOMContentLoaded", () => {
     initSwipe();
     initGps();
     initSiteLocationPicker();
     initChangePassword();
+    initEmployeeAssignmentForm();
     initModals();
+    initCollapsiblePanels();
+    initEmployeeTablePagination();
+    initAttendanceTablePagination();
+    initAttendanceReportToggle();
     go(0);
   });
 })();

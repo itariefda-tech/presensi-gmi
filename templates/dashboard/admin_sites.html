@@ -34,6 +34,14 @@
       <input class="input" id="site-name" type="text" name="name" placeholder="Nama site" required />
     </div>
     <div class="form-row">
+      <label class="label" for="site-pic-name">Nama PIC :</label>
+      <input class="input" id="site-pic-name" type="text" name="pic_name" placeholder="Nama PIC (opsional)" />
+    </div>
+    <div class="form-row">
+      <label class="label" for="site-pic-email">PIC Email :</label>
+      <input class="input" id="site-pic-email" type="email" name="pic_email" placeholder="email PIC untuk login" required />
+    </div>
+    <div class="form-row">
       <label class="label" for="site-timezone">Timezone :</label>
       <input class="input" id="site-timezone" type="text" name="timezone" placeholder="contoh : Jakarta" />
     </div>
@@ -59,14 +67,17 @@
     </div>
     <div class="form-row">
       <label class="label" for="site-radius">Radius (meter) :</label>
-      <input class="input" id="site-radius" type="number" name="radius_meters" placeholder="Radius (meter)" min="1" required />
+      <input class="input" id="site-radius" type="number" name="radius_meters" placeholder="Radius (meter), wajib Minimal 100 M" min="1" required />
     </div>
     <div class="form-row">
       <label class="label" for="site-notes">Catatan :</label>
       <input class="input" id="site-notes" type="text" name="notes" placeholder="Catatan (opsional)" />
     </div>
     <div class="form-row single" style="grid-column: 1 / -1;">
-      <div class="form-inline">
+      <div class="form-inline" style="align-items:center; justify-content:space-between; gap:12px;">
+        <div class="muted">
+          Catatan : PIC sebagai client superadmin di dashboard Client, Password awal default: <strong>client@123</strong> (harap segera diganti demi keamanan).
+        </div>
         <button class="btn primary btn-fixed-100" type="submit">Tambah</button>
       </div>
     </div>
@@ -99,6 +110,8 @@
           <th>Latitude</th>
           <th>Longitude</th>
           <th>radius (m)</th>
+          <th>Nama PIC</th>
+          <th>PIC Email</th>
           <th>Compliance</th>
           <th>Status</th>
           <th>Aksi</th>
@@ -106,7 +119,7 @@
       </thead>
       <tbody>
         {% if not sites %}
-        <tr><td colspan="8" class="muted">Belum ada site.</td></tr>
+        <tr><td colspan="12" class="muted">Belum ada site.</td></tr>
         {% endif %}
         {% for s in sites %}
         <tr>
@@ -122,6 +135,8 @@
           <td>{{ "%.6f"|format(s.latitude or 0) }}</td>
           <td>{{ "%.6f"|format(s.longitude or 0) }}</td>
           <td>{{ s.radius_meters or 0 }}</td>
+          <td>{{ s.pic_name or "-" }}</td>
+          <td>{{ s.pic_email or "-" }}</td>
           <td>
             <span class="badge {{ s.compliance_class }}">
               {{ s.compliance_label }} ({{ s.compliance_score }}/3)
@@ -177,6 +192,14 @@
           <input class="input" id="site-name-{{ s.id }}" type="text" name="name" value="{{ s.name }}" required />
         </div>
         <div class="form-row">
+          <label class="label" for="site-pic-name-{{ s.id }}">Nama PIC</label>
+          <input class="input" id="site-pic-name-{{ s.id }}" type="text" name="pic_name" value="{{ s.pic_name or '' }}" />
+        </div>
+        <div class="form-row">
+          <label class="label" for="site-pic-email-{{ s.id }}">PIC Email</label>
+          <input class="input" id="site-pic-email-{{ s.id }}" type="email" name="pic_email" value="{{ s.pic_email or '' }}" required />
+        </div>
+        <div class="form-row">
           <label class="label" for="site-timezone-{{ s.id }}">Timezone</label>
           <input class="input" id="site-timezone-{{ s.id }}" type="text" name="timezone" value="{{ s.timezone or '' }}" />
         </div>
@@ -208,7 +231,10 @@
           <label class="label" for="site-notes-{{ s.id }}">Catatan</label>
           <input class="input" id="site-notes-{{ s.id }}" type="text" name="notes" value="{{ s.notes or '' }}" />
         </div>
-        <div class="btn-row">
+        <div class="btn-row" style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+          <div class="muted">
+            Catatan : PIC sebagai client superadmin di dashboard Client, Password awal default: <strong>client@123</strong> (harap segera diganti demi keamanan).
+          </div>
           <button class="btn primary btn-fixed-100" type="submit">Simpan</button>
         </div>
       </form>

@@ -34,14 +34,6 @@
         <option value="{{ role }}">{{ role|replace('_',' ')|title }}</option>
         {% endfor %}
       </select>
-      <div class="role-client-toggle" data-role-client>
-        <select class="input" name="client_id">
-          <option value="" selected>Client (khusus Client Admin)</option>
-          {% for c in clients %}
-          <option value="{{ c.id }}">{{ c.name }}</option>
-          {% endfor %}
-        </select>
-      </div>
       <input class="input" type="password" name="password" placeholder="Password awal" required />
       <button class="btn primary btn-fixed-100" type="submit">Tambah</button>
     </form>
@@ -123,15 +115,6 @@
             <select class="input" id="user-role-{{ u.id }}" name="role" data-role-select>
               {% for role in role_options %}
               <option value="{{ role }}" {% if u.role == role %}selected{% endif %}>{{ role|replace('_',' ')|title }}</option>
-              {% endfor %}
-            </select>
-          </div>
-          <div class="form-row role-client-toggle" data-role-client>
-            <label class="label" for="user-client-{{ u.id }}">Client (Client Admin)</label>
-            <select class="input" id="user-client-{{ u.id }}" name="client_id">
-              <option value="">-</option>
-              {% for c in clients %}
-              <option value="{{ c.id }}" {% if u.client_id == c.id %}selected{% endif %}>{{ c.name }}</option>
               {% endfor %}
             </select>
           </div>
@@ -285,23 +268,6 @@
       });
     });
 
-    const syncClientToggle = (root) => {
-      const select = root.querySelector("[data-role-select]");
-      const clientWrap = root.querySelector("[data-role-client]");
-      if (!select || !clientWrap) return;
-      clientWrap.style.display = select.value === "client_admin" ? "" : "none";
-    };
-
-    const bindRoleToggles = () => {
-      document.querySelectorAll("form").forEach((form) => {
-        const select = form.querySelector("[data-role-select]");
-        if (!select) return;
-        syncClientToggle(form);
-        select.addEventListener("change", () => syncClientToggle(form));
-      });
-    };
-
-    bindRoleToggles();
   })();
 </script>
 {% endif %}

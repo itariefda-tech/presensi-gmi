@@ -6,7 +6,8 @@ module.exports = {
     "static/**/*.js"
   ],
   port: 3000,
-  open: true,
+  open: "local",
+  browser: "C:\\\\Program Files (x86)\\\\Microsoft\\\\Edge\\\\Application\\\\msedge.exe",
   notify: false,
   reloadDelay: 200
 };

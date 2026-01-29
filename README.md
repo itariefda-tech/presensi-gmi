@@ -32,6 +32,20 @@ Fokus Phase 8: role access real (SQLite), HR settings, dan flow aplikasi stabil.
 
 App: `http://localhost:5020/`
 
+## Run (Docker)
+
+1. Build the container image from the repo root:
+
+   ```bash
+   docker build -t presensi-app .
+   ```
+
+2. Start the container and expose the application port:
+
+   ```bash
+   docker run -d --name presensi-app -p 5050:5050 presensi-app
+   ```
+
 ## Demo Accounts (Seed)
 
 Seed data aktif secara default. Untuk menonaktifkan:

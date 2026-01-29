@@ -1,3 +1,12 @@
+// IMPORTANT: Make sure to install the correct version of the Capacitor Geolocation plugin first
+// Run this command in your terminal in the `android-capacitor` directory:
+// npm install @capacitor/geolocation@^5.0.0
+//
+// After installation, sync the project with Android:
+// npx cap sync android
+
+import { Geolocation } from "@capacitor/geolocation";
+
 const themeToggle = document.querySelector("[data-theme-toggle]");
 const clockHH = document.getElementById("clockHH");
 const clockMM = document.getElementById("clockMM");
@@ -262,30 +271,24 @@ function refreshAbsentKpi(){
   // Kept for legacy hooks; no KPI card to update.
 }
 
-async function checkLocationStatus(){
-  if (!navigator.geolocation) {
-    setLocationStatus(false);
-    return;
-  }
-  if (navigator.permissions && navigator.permissions.query) {
+async function requestLocationPermission() {
     try {
-      const perm = await navigator.permissions.query({ name: "geolocation" });
-      const applyState = () => {
-        if (perm.state === "granted") {
-          setLocationStatus(true);
-        } else {
-          setLocationStatus(false);
-        }
-      };
-      applyState();
-      perm.onchange = applyState;
-      return;
-    } catch (err) {
-      setLocationStatus(false);
-      return;
+        const status = await Geolocation.requestPermissions();
+        return status.location === 'granted';
+    } catch (e) {
+        console.error('Geolocation permission request failed.', e);
+        return false;
     }
+}
+
+async function checkLocationStatus(){
+  try {
+    const status = await Geolocation.checkPermissions();
+    setLocationStatus(status.location === 'granted');
+  } catch (e) {
+    console.error('Geolocation status check failed.', e);
+    setLocationStatus(false);
   }
-  setLocationStatus(false);
 }
 
 function setTheme(theme){
@@ -420,6 +423,21 @@ function formatDateDisplay(value){
   return `${parts[2]}/${parts[1]}`;
 }
 
+function createMethodBadge(method) {
+  const methodName = (method || "N/A").toUpperCase().replace(/_/g, " + ");
+  let badgeClass = "secondary";
+  if (method === "gps_selfie") {
+    badgeClass = "primary";
+  } else if (method === "qr") {
+    badgeClass = "success";
+  } else if (method === "gps") {
+    badgeClass = "info";
+  } else if (method === "manual") {
+    badgeClass = "warning";
+  }
+  return `<span class="badge ${badgeClass}">${methodName}</span>`;
+}
+
 function renderDailyReport(records){
   if (!dailyReportRows) return;
   dailyReportRows.innerHTML = "";
@@ -432,12 +450,12 @@ function renderDailyReport(records){
   records.forEach((row) => {
     const tr = document.createElement("tr");
     const statusLabel = row.action === "checkout" ? "Pulang" : "Hadir";
-    const methodLabel = (row.method || "-").toUpperCase();
+    const methodBadge = createMethodBadge(row.method);
     const timeText = row.time ? row.time.slice(0,5) : "-";
     tr.innerHTML = `
       <td>${formatDateDisplay(row.date)}<div class="muted">${timeText}</div></td>
       <td>${statusLabel}</td>
-      <td>${methodLabel}</td>
+      <td>${methodBadge}</td>
     `;
     dailyReportRows.appendChild(tr);
   });
@@ -566,29 +584,25 @@ function initNavDrag(){
   });
 }
 
-function getLocation(){
-  return new Promise((resolve, reject) => {
-    if (!navigator.geolocation) {
-      setLocationStatus(false);
-      reject(new Error("Browser tidak mendukung GPS."));
-      return;
+async function getLocation(){
+    const permission = await requestLocationPermission();
+    if (!permission) {
+        setLocationStatus(false);
+        throw new Error("Izin lokasi ditolak.");
     }
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
+
+    try {
+        const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 12000 });
         setLocationStatus(true);
         hasLocation = true;
         updatePresenceReadiness();
-        resolve(pos);
-      },
-      (err) => {
+        return pos;
+    } catch (err) {
         setLocationStatus(false);
         hasLocation = Boolean(latEl?.value && lonEl?.value);
         updatePresenceReadiness();
-        reject(err);
-      },
-      { enableHighAccuracy: true, timeout: 12000 }
-    );
-  });
+        throw err;
+    }
 }
 
 function validateQrPayload(value){
