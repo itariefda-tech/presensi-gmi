@@ -582,6 +582,8 @@ def create_app() -> Flask:
             notes=notes,
             timezone=timezone or None,
             work_mode=work_mode or None,
+            pic_name=_row_get(site, "pic_name"),
+            pic_email=_row_get(site, "pic_email"),
         )
         flash("Site berhasil diperbarui.")
         return redirect(url_for("dashboard_client", _anchor="site"))
