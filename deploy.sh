@@ -17,9 +17,13 @@ cd "$APP_DIR"
 
 echo "==> Git pull"
 git pull origin main
+echo "==> Git status"
+git status -sb
+echo "==> Git head"
+git log -1 --oneline
 
 echo "==> Build image"
-docker build -t "$IMAGE" .
+docker build --no-cache -t "$IMAGE" .
 
 echo "==> Stop/remove old container (if exists)"
 docker stop "$CONTAINER" >/dev/null 2>&1 || true
