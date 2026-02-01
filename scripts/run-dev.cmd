@@ -1,9 +1,23 @@
 @echo off
 setlocal
 
-if exist ".\.venv\Scripts\python.exe" (
-  set "FLASK_PY=.\\.venv\Scripts\python.exe"
-) else (
+set "FLASK_PY="
+
+if exist ".\.venv\pyvenv.cfg" (
+  for /f "tokens=2* delims==" %%A in ('findstr /b /c:"home = " ".\.venv\pyvenv.cfg"') do set "VENV_HOME=%%A"
+  if defined VENV_HOME (
+    set "VENV_HOME=%VENV_HOME:~1%"
+    if exist "%VENV_HOME%\python.exe" (
+      set "FLASK_PY=.\\.venv\Scripts\python.exe"
+    )
+  )
+)
+
+if not defined FLASK_PY if exist "C:\Users\Administrator\.venv-presensi\Scripts\python.exe" (
+  set "FLASK_PY=C:\Users\Administrator\.venv-presensi\Scripts\python.exe"
+)
+
+if not defined FLASK_PY (
   set "FLASK_PY=python"
 )
 

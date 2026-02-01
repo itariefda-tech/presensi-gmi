@@ -103,6 +103,87 @@
     });
   }
 
+  function initHeaderClock(){
+    const hourEl = document.getElementById("headerClockHour");
+    const minuteEl = document.getElementById("headerClockMinute");
+    if (!hourEl || !minuteEl) return;
+    const pad = (value) => value.toString().padStart(2, "0");
+    const update = () => {
+      const now = new Date();
+      hourEl.textContent = pad(now.getHours());
+      minuteEl.textContent = pad(now.getMinutes());
+    };
+    update();
+    setInterval(update, 1000);
+  }
+
+  function initHeaderDate(){
+    const dateWrapper = document.querySelector(".brand-date");
+    const dateValue = document.getElementById("headerDateValue");
+    if (!dateWrapper || !dateValue) return;
+    const raw = (dateWrapper.dataset.rawDate || "").trim();
+    const parts = raw.split("-");
+    if (parts.length !== 3) {
+      dateValue.textContent = raw;
+      return;
+    }
+    const day = String(Number(parts[0]));
+    const monthIndex = Number(parts[1]) - 1;
+    const months = ["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agu","Sep","Okt","Nov","Des"];
+    const month = months[monthIndex] || parts[1];
+    const year = parts[2].slice(-2);
+    dateValue.textContent = `${day} ${month}'${year}`;
+  }
+
+  function initDatePickers(){
+    const formatDateValue = (value, mode) => {
+      if (!value) return "";
+      const dateValue = mode === "month" ? `${value}-01` : value;
+      const date = new Date(dateValue);
+      if (Number.isNaN(date)) return value;
+      const day = String(date.getDate()).padStart(2, "0");
+      const month = String(date.getMonth() + 1).padStart(2, "0");
+      const year = date.getFullYear();
+      if (mode === "month") {
+        return `${month}-${year}`;
+      }
+      return `${day}-${month}-${year}`;
+    };
+
+    const activatePicker = (input) => {
+      const mode = input.dataset.dateMode;
+      if (!mode) return;
+      const targetType = mode === "month" ? "month" : "date";
+      input.type = targetType;
+      if (typeof input.showPicker === "function") {
+        input.showPicker();
+      }
+      const handleBlur = () => {
+        input.type = "text";
+        if (input.value) {
+          input.value = formatDateValue(input.value, mode);
+        }
+        input.removeEventListener("blur", handleBlur);
+      };
+      input.addEventListener("blur", handleBlur);
+    };
+
+    document.querySelectorAll(".date-icon").forEach((icon) => {
+      icon.addEventListener("click", (event) => {
+        event.preventDefault();
+        const input = icon.parentElement.querySelector("input");
+        if (!input) return;
+        activatePicker(input);
+      });
+    });
+
+    document.querySelectorAll(".date-input input[data-date-mode]").forEach((input) => {
+      input.addEventListener("focus", () => {
+        activatePicker(input);
+      });
+    });
+  }
+
   function initSiteLocationPicker(){
     const btn = document.getElementById("sitePickLocation");
     const latInput = document.getElementById("site-latitude");
@@ -378,14 +459,19 @@
         setVisible(rangeFields, true);
         setVisible(monthFields, false);
         moveExportButton("range");
+        exportGrid?.classList.add("is-range");
+        exportGrid?.classList.remove("is-month");
       } else if (selected === "month") {
         setVisible(rangeFields, false);
         setVisible(monthFields, true);
         moveExportButton("month");
+        exportGrid?.classList.remove("is-range");
+        exportGrid?.classList.add("is-month");
       } else {
         setVisible(rangeFields, false);
         setVisible(monthFields, false);
         moveExportButton("range");
+        exportGrid?.classList.remove("is-range", "is-month");
       }
     };
     const moveExportButton = (mode) => {
@@ -545,6 +631,9 @@
     initSwipe();
     initGps();
     initSiteLocationPicker();
+    initHeaderClock();
+    initHeaderDate();
+    initDatePickers();
     initChangePassword();
     initEmployeeAssignmentForm();
     initModals();
