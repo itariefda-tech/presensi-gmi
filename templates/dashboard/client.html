@@ -16,47 +16,56 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/client_dashboard.css') }}" />
 </head>
 <body>
+  {% set raw_user_name = (user.name or user.email or "User") %}
+  {% set user_first_name = raw_user_name.split(" ")[0] %}
   <header class="client-top">
     <div class="brand">
-      <div class="brand-pill">{{ client.name if client else "Client" }}</div>
-      <div class="brand-title">{{ site.name or "Site" }}</div>
-      <div class="brand-meta">Ringkasan hari ini • {{ today|ddmmyyyy }}</div>
-    </div>
-    <div class="top-actions">
-      <div class="top-actions-group">
-        <div class="themePick" aria-label="Pemilih tema">
-          <button type="button" class="themeToggle toggle" aria-label="Ubah tema" data-theme-toggle>
-            <div class="handle"></div>
-          </button>
-        </div>
-        <div class="header-action-group">
-          <button class="nav-btn header-nav-btn" type="button" data-tab="5" aria-label="Settings">
-            <span class="nav-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none">
-                <path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z" stroke="currentColor" stroke-width="1.5"/>
-                <path d="M19.4 15a7.9 7.9 0 0 0 .1-2l2-1.5-2-3.5-2.3.8a7.6 7.6 0 0 0-1.7-1l-.4-2.4h-4l-.4 2.4a7.6 7.6 0 0 0-1.7 1l-2.3-.8-2 3.5 2 1.5a7.9 7.9 0 0 0 .1 2l-2 1.5 2 3.5 2.3-.8a7.6 7.6 0 0 0 1.7 1l.4 2.4h4l.4-2.4a7.6 7.6 0 0 0 1.7-1l2.3.8 2-3.5-2-1.5Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
-              </svg>
-            </span>
-          </button>
-          <form class="header-logout-form" method="post" action="{{ url_for('logout') }}">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-            <button class="nav-btn nav-logout header-nav-btn" type="submit" aria-label="Logout">
-              <span class="nav-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none">
-                  <path d="M15 7.5V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h7a2 2 0 0 0 2-2v-1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-                  <path d="M10 12h9m0 0-3-3m3 3-3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-              </span>
-            </button>
-          </form>
+      <div class="brand-site-row">
+        <div class="brand-title">{{ site.name or "Site" }}</div>
+      </div>
+      <div class="brand-client-row">
+        <div class="brand-pill">{{ client.name if client else "Client" }}</div>
+        <div class="brand-meta">
+          <span class="brand-date" data-raw-date="{{ today|ddmmyyyy }}">Date <span class="brand-date-value" id="headerDateValue"></span></span>
+          <span class="brand-divider" aria-hidden="true">|</span>
+          <span class="brand-clock" aria-label="Jam saat ini"><span class="clock-value" id="headerClockHour">00</span><span class="digital-colon blink">:</span><span class="clock-value" id="headerClockMinute">00</span></span>
         </div>
       </div>
-      <div class="top-actions-avatar">
+    </div>
+      <div class="header-avatar-column">
         {% set avatar_src = user.selfie_path and url_for('static', filename=user.selfie_path) or url_for('static', filename='img/gmi_logo.gif') %}
         <label class="avatar-upload" for="avatarInput" title="Upload foto profil">
           <div class="user-avatar" id="userAvatar" style="background-image:url('{{ avatar_src }}');" aria-hidden="true"></div>
         </label>
-        <input class="avatar-input" type="file" id="avatarInput" accept="image/*" />
+        <div class="avatar-name">{{ user_first_name.upper() }}</div>
+      <input class="avatar-input" type="file" id="avatarInput" accept="image/*" />
+    </div>
+    <div class="top-actions">
+      <div class="top-actions-controls">
+        <button class="nav-btn header-nav-btn settings-btn" type="button" data-tab="5" aria-label="Settings">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none">
+              <path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z" stroke="currentColor" stroke-width="1.5"/>
+              <path d="M19.4 15a7.9 7.9 0 0 0 .1-2l2-1.5-2-3.5-2.3.8a7.6 7.6 0 0 0-1.7-1l-.4-2.4h-4l-.4 2.4a7.6 7.6 0 0 0-1.7 1l-2.3-.8-2 3.5 2 1.5a7.9 7.9 0 0 0 .1 2l-2 1.5 2 3.5 2.3-.8a7.6 7.6 0 0 0 1.7 1l.4 2.4h4l.4-2.4a7.6 7.6 0 0 0 1.7-1l2.3.8 2-3.5-2-1.5Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
+            </svg>
+          </span>
+        </button>
+        <form class="section-head-logout" method="post" action="{{ url_for('logout') }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <button class="nav-btn nav-logout header-nav-btn logout-btn" type="submit" aria-label="Logout">
+            <span class="nav-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none">
+                <path d="M15 7.5V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h7a2 2 0 0 0 2-2v-1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                <path d="M10 12h9m0 0-3-3m3 3-3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </span>
+          </button>
+        </form>
+      </div>
+      <div class="themePick" aria-label="Pemilih tema">
+        <button type="button" class="themeToggle toggle" aria-label="Ubah tema" data-theme-toggle>
+          <div class="handle"></div>
+        </button>
       </div>
     </div>
   </header>
@@ -66,10 +75,6 @@
       <div class="swipe-track" id="swipeTrack">
         <section class="swipe-pane" data-pane="0" aria-label="Halaman Utama">
           <section class="kpi-section">
-              <div class="section-head">
-                <h2>Operasional Hari Ini</h2>
-                <span class="section-sub"></span>
-              </div>
             <div class="kpi-grid">
               <article class="kpi-card kpi-primary">
                 <div class="kpi-label">Total Pegawai</div>
@@ -581,11 +586,15 @@
                     <div class="range-fields">
                       <div class="form-row">
                         <label class="label" for="attendance-range-from">Dari</label>
-                        <input class="input" id="attendance-range-from" name="from" type="text" placeholder="DD-MM-YYYY" />
+                        <div class="date-input">
+                          <input class="input" id="attendance-range-from" name="from" type="text" data-date-mode="date" placeholder="DD-MM-YYYY" />
+                        </div>
                       </div>
                       <div class="form-row">
                         <label class="label" for="attendance-range-to">Sampai</label>
-                        <input class="input" id="attendance-range-to" name="to" type="text" placeholder="DD-MM-YYYY" />
+                        <div class="date-input">
+                          <input class="input" id="attendance-range-to" name="to" type="text" data-date-mode="date" placeholder="DD-MM-YYYY" />
+                        </div>
                       </div>
                     </div>
                     <button class="btn primary range-action" type="submit">Rekap</button>
@@ -638,11 +647,15 @@
                   <div class="attendance-export-grid">
                     <div class="form-row" data-attendance-field="range">
                       <label class="label" for="attendance-from">Dari</label>
-                      <input class="input" id="attendance-from" name="from" type="text" placeholder="DD-MM-YYYY" />
+                      <div class="date-input">
+                        <input class="input" id="attendance-from" name="from" type="text" data-date-mode="date" placeholder="DD-MM-YYYY" />
+                      </div>
                     </div>
                     <div class="form-row" data-attendance-field="range">
                       <label class="label" for="attendance-to">Sampai</label>
-                      <input class="input" id="attendance-to" name="to" type="text" placeholder="DD-MM-YYYY" />
+                      <div class="date-input">
+                        <input class="input" id="attendance-to" name="to" type="text" data-date-mode="date" placeholder="DD-MM-YYYY" />
+                      </div>
                     </div>
                     <div class="form-row export-actions">
                       <button class="btn primary" type="submit">CSV</button>
@@ -650,7 +663,9 @@
                     <div class="form-row attendance-month-row" data-attendance-field="month">
                       <div class="month-input">
                         <label class="label" for="attendance-month">Bulan</label>
-                      <input class="input" id="attendance-month" name="month" type="text" placeholder="MM-YYYY" />
+                        <div class="date-input">
+                          <input class="input" id="attendance-month" name="month" type="text" data-date-mode="month" placeholder="MM-YYYY" />
+                        </div>
                       </div>
                     </div>
                   </div>

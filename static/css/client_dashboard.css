@@ -816,14 +816,19 @@ html[data-theme="light"] .site-meta{
 
 .attendance-month-row{
   grid-column: 1 / -1;
-  display: flex;
-  align-items: flex-end;
-  justify-content: flex-end;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
+  align-items: flex-end;
 }
-
 .attendance-month-row .month-input{
-  flex: 1;
+  grid-column: 1;
+}
+.attendance-month-row .export-actions{
+  grid-column: 2;
+  justify-self: flex-end;
+  margin: 0;
+  align-self: flex-end;
 }
 
 @media (max-width: 640px){
@@ -1445,8 +1450,17 @@ body.modal-open{
 
 @media (max-width: 640px){
   .attendance-range-row{
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 8px;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+    gap: 10px;
+  }
+  .attendance-range-row .date-input,
+  .attendance-range-row .form-row .input{
+    width: 100%;
+  }
+  .attendance-range-row .range-action{
+    min-width: 72px;
+    padding: 6px 10px;
+    white-space: nowrap;
   }
   .attendance-range-row .form-row label,
   .attendance-range-row .form-row .input{
