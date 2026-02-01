@@ -94,6 +94,30 @@ html[data-theme="light"] body{
 
 .top-actions{
   display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.top-actions-group{
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.header-action-group{
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.header-logout-form{
+  margin: 0;
+}
+
+.top-actions-avatar{
+  display: flex;
   align-items: center;
   gap: 12px;
 }
