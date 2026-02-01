@@ -16,7 +16,7 @@
   }
 
   function go(index){
-    const max = 4;
+    const max = 5;
     swipeIndex = Math.max(0, Math.min(max, index));
     if (swipeTrack) {
       swipeTrack.style.transform = `translateX(-${swipeIndex * 100}%)`;
