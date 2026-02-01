@@ -156,7 +156,7 @@
           <tr>
             <td>{{ p.scope_type }}</td>
             <td>{% if p.scope_type == "SITE" %}{{ p.site_name or '-' }}{% else %}{{ p.client_name or '-' }}{% endif %}</td>
-            <td>{{ p.effective_from }}{% if p.effective_to %} - {{ p.effective_to }}{% endif %}</td>
+            <td>{{ p.effective_from|ddmmyyyy }}{% if p.effective_to %} - {{ p.effective_to|ddmmyyyy }}{% endif %}</td>
             <td>
               GPS: {{ "Ya" if p.allow_gps else "Tidak" }},
               Selfie: {{ "Ya" if p.require_selfie else "Tidak" }},

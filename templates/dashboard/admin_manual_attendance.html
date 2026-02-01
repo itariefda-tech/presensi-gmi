@@ -42,7 +42,7 @@
             <div>{{ r.employee_name or r.employee_email }}</div>
             <div class="muted">{{ r.employee_email }}</div>
           </td>
-          <td>{{ r.date }}</td>
+          <td>{{ r.date|ddmmyyyy }}</td>
           <td>{{ r.time }}</td>
           <td><span class="badge">{{ r.action }}</span></td>
           <td>{{ r.reason }}</td>
@@ -50,7 +50,7 @@
             <div>{{ r.created_by_user_id }}</div>
             <div class="muted">{{ r.created_by_role|title }}</div>
           </td>
-          <td>{{ r.created_at }}</td>
+          <td>{{ r.created_at|display_datetime }}</td>
           <td><span class="badge {{ r.status|lower }}">{{ r.status }}</span></td>
           {% if status == 'pending' and can_approve_manual %}
           <td>

@@ -5,6 +5,16 @@
   const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || "";
   let swipeIndex = 0;
 
+  function scrollToTop(){
+    const root = document.scrollingElement || document.documentElement;
+    if (root) {
+      root.scrollTop = 0;
+    }
+    if (window.scrollTo) {
+      window.scrollTo(0, 0);
+    }
+  }
+
   function go(index){
     const max = 4;
     swipeIndex = Math.max(0, Math.min(max, index));
@@ -16,6 +26,7 @@
       if (Number.isNaN(tab)) return;
       btn.classList.toggle("active", tab === swipeIndex);
     });
+    scrollToTop();
   }
 
   navButtons.forEach((btn) => {
@@ -351,6 +362,9 @@
     const radios = panel.querySelectorAll("input[name='mode']");
     const rangeFields = panel.querySelectorAll("[data-attendance-field='range']");
     const monthFields = panel.querySelectorAll("[data-attendance-field='month']");
+    const exportGrid = panel.querySelector(".attendance-export-grid");
+    const exportActions = panel.querySelector(".export-actions");
+    const monthRow = panel.querySelector(".attendance-month-row");
     const setVisible = (nodes, visible) => {
       nodes.forEach((node) => {
         node.style.display = visible ? "" : "none";
@@ -363,18 +377,168 @@
       if (selected === "range") {
         setVisible(rangeFields, true);
         setVisible(monthFields, false);
+        moveExportButton("range");
       } else if (selected === "month") {
         setVisible(rangeFields, false);
         setVisible(monthFields, true);
+        moveExportButton("month");
       } else {
         setVisible(rangeFields, false);
         setVisible(monthFields, false);
+        moveExportButton("range");
+      }
+    };
+    const moveExportButton = (mode) => {
+      if (!exportActions || !exportGrid) return;
+      if (mode === "month" && monthRow) {
+        monthRow.appendChild(exportActions);
+      } else {
+        const monthField = exportGrid.querySelector(".attendance-month-row");
+        if (monthField) {
+          exportGrid.insertBefore(exportActions, monthField);
+        }
       }
     };
     radios.forEach((radio) => {
       radio.addEventListener("change", applyMode);
     });
     applyMode();
+  }
+
+  function initAttendanceRangeReport(){
+    const form = document.getElementById("attendance-range-form");
+    const table = document.getElementById("attendance-range-table");
+    const pager = document.getElementById("attendance-range-pagination");
+    const messageEl = document.getElementById("attendance-range-message");
+    if (!form || !table || !pager) return;
+    const tbody = table.querySelector("tbody");
+    if (!tbody) return;
+    const info = pager.querySelector("[data-page-info]");
+    const prevBtn = pager.querySelector("[data-page='prev']");
+    const nextBtn = pager.querySelector("[data-page='next']");
+    const pageSize = parseInt(table.dataset.pageSize || "6", 10) || 6;
+    const submitBtn = form.querySelector("button[type='submit']");
+    let currentRows = [];
+    let currentPage = 1;
+
+    const flashMessage = (text, type) => {
+      if (!messageEl) return;
+      messageEl.textContent = text || "";
+      messageEl.classList.toggle("is-error", type === "error");
+    };
+
+    const prunePager = () => {
+      const totalPages = currentRows.length ? Math.ceil(currentRows.length / pageSize) : 0;
+      if (totalPages && currentPage > totalPages) {
+        currentPage = totalPages;
+      }
+      const hasData = currentRows.length > 0;
+      pager.style.display = hasData ? "flex" : "none";
+      if (info) {
+        info.textContent = hasData ? `Page ${currentPage} of ${totalPages}` : "Page 0 of 0";
+      }
+      if (prevBtn) prevBtn.disabled = !hasData || currentPage <= 1;
+      if (nextBtn) nextBtn.disabled = !hasData || currentPage >= totalPages;
+    };
+
+    const renderRow = (row) => {
+      const tr = document.createElement("tr");
+      const actionLower = (row.action || "").toLowerCase();
+      const isCheckout = actionLower.includes("out");
+      const checkInValue = isCheckout ? "-" : row.time || "-";
+      const checkOutValue = isCheckout ? row.time || "-" : "-";
+      const cells = [
+        row.employee || "-",
+        row.date || "-",
+        checkInValue,
+        checkOutValue,
+        row.method || "-",
+      ];
+      cells.forEach((value) => {
+        const td = document.createElement("td");
+        td.textContent = value;
+        tr.appendChild(td);
+      });
+      return tr;
+    };
+
+    const renderTable = () => {
+      tbody.innerHTML = "";
+      if (!currentRows.length) {
+        const emptyRow = document.createElement("tr");
+        emptyRow.innerHTML = "<td colspan='5' class='empty-row'>Tidak ada data pada rentang ini.</td>";
+        tbody.appendChild(emptyRow);
+      } else {
+        const start = (currentPage - 1) * pageSize;
+        const slice = currentRows.slice(start, start + pageSize);
+        slice.forEach((row) => {
+          tbody.appendChild(renderRow(row));
+        });
+      }
+      prunePager();
+    };
+
+    const setLoading = (isLoading) => {
+      if (submitBtn) submitBtn.disabled = isLoading;
+    };
+
+    const updateRows = (rows) => {
+      currentRows = Array.isArray(rows) ? rows : [];
+      currentPage = 1;
+      renderTable();
+    };
+
+    if (prevBtn) {
+      prevBtn.addEventListener("click", () => {
+        if (currentPage > 1) {
+          currentPage -= 1;
+          renderTable();
+        }
+      });
+    }
+    if (nextBtn) {
+      nextBtn.addEventListener("click", () => {
+        const totalPages = currentRows.length ? Math.ceil(currentRows.length / pageSize) : 0;
+        if (currentPage < totalPages) {
+          currentPage += 1;
+          renderTable();
+        }
+      });
+    }
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const fromField = form.querySelector("[name='from']");
+      const toField = form.querySelector("[name='to']");
+      const fromValue = (fromField?.value || "").trim();
+      const toValue = (toField?.value || "").trim();
+      if (!fromValue || !toValue) {
+        flashMessage("Rentang tanggal wajib diisi.", "error");
+        updateRows([]);
+        return;
+      }
+      setLoading(true);
+      flashMessage("Memuat data...");
+      try {
+        const params = new URLSearchParams({ from: fromValue, to: toValue });
+        const response = await fetch(`/client/attendance/records?${params.toString()}`, {
+          headers: { Accept: "application/json" },
+        });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok || !payload?.ok) {
+          throw new Error(payload?.message || "Gagal memuat data attendance.");
+        }
+        const records = Array.isArray(payload.data) ? payload.data : [];
+        const count = typeof payload?.total === "number" ? payload.total : records.length;
+        flashMessage(count ? `Menampilkan ${count} baris.` : "Tidak ada data untuk rentang ini.");
+        updateRows(records);
+      } catch (err) {
+        flashMessage(err.message || "Gagal memuat data attendance.", "error");
+        updateRows([]);
+      } finally {
+        setLoading(false);
+      }
+    });
   }
 
   document.addEventListener("DOMContentLoaded", () => {
@@ -388,6 +552,7 @@
     initEmployeeTablePagination();
     initAttendanceTablePagination();
     initAttendanceReportToggle();
+    initAttendanceRangeReport();
     go(0);
   });
 })();

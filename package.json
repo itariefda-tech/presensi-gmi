@@ -2,9 +2,9 @@
   "name": "presensi",
   "private": true,
   "scripts": {
-    "dev:flask": "set \"COMSPEC=%SystemRoot%\\System32\\cmd.exe\" && set \"PATH=%SystemRoot%\\System32;%SystemRoot%;%SystemRoot%\\System32\\Wbem;%PATH%\" && py -3 -m flask --app app:create_app --debug run --host 127.0.0.1 --port 5000",
+    "dev:flask": "scripts\\run-flask.cmd",
     "dev:sync": "set \"COMSPEC=%SystemRoot%\\System32\\cmd.exe\" && set \"PATH=%SystemRoot%\\System32;%SystemRoot%;%SystemRoot%\\System32\\Wbem;%PATH%\" && wait-on tcp:127.0.0.1:5000 && browser-sync start --config bs-config.js",
-    "dev": "set \"COMSPEC=%SystemRoot%\\System32\\cmd.exe\" && set \"PATH=%SystemRoot%\\System32;%SystemRoot%;%SystemRoot%\\System32\\Wbem;%PATH%\" && concurrently --shell \"%SystemRoot%\\\\System32\\\\cmd.exe\" -n flask,sync -c blue,green \"py -3 -m flask --app app:create_app --debug run --host 127.0.0.1 --port 5000\" \"wait-on tcp:127.0.0.1:5000 && browser-sync start --config bs-config.js\""
+    "dev": "scripts\\run-dev.cmd"
   },
   "devDependencies": {
     "browser-sync": "^2.29.3",

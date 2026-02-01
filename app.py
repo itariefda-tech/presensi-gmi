@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import base64
-import csv
 import calendar
+import csv
 import io
 import json
 import re
@@ -20,7 +20,7 @@ from typing import Dict
 
 import qrcode
 
-from flask import Flask, jsonify, render_template, request, session, Blueprint, abort, redirect, url_for, flash, g, Response
+from flask import Flask, jsonify, render_template, request, session, Blueprint, abort, redirect, url_for, flash, g
 from werkzeug.utils import secure_filename
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -171,23 +171,51 @@ def create_app() -> Flask:
             "pending_manual_count": pending_manual_count,
         }
 
-    @app.template_filter("ddmmyyyy")
-    def _format_ddmmyyyy(value: str | None) -> str:
+    def _parse_display_datetime(value: str | None) -> datetime | None:
         if not value:
-            return ""
+            return None
         raw = str(value).strip()
         if not raw:
-            return ""
-        if "/" in raw:
-            parts = raw.split("/")
-            if len(parts) == 3 and all(part.isdigit() for part in parts):
-                return f"{parts[1]}/{parts[0]}/{parts[2]}"
-            return raw
-        if "-" in raw:
-            parts = raw.split("-")
-            if len(parts) == 3 and len(parts[0]) == 4:
-                return f"{parts[2]}/{parts[1]}/{parts[0]}"
-        return raw
+            return None
+        candidate = raw
+        if candidate.endswith("Z"):
+            candidate = candidate[:-1] + "+00:00"
+        try:
+            return datetime.fromisoformat(candidate)
+        except ValueError:
+            pass
+        for fmt in ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M", "%d/%m/%Y", "%d-%m-%Y %H:%M:%S", "%d-%m-%Y %H:%M", "%d-%m-%Y"):
+            try:
+                return datetime.strptime(raw, fmt)
+            except ValueError:
+                continue
+        return None
+
+    def _format_display_date(value: str | None) -> str:
+        dt = _parse_display_datetime(value)
+        if dt:
+            return dt.strftime("%d-%m-%Y")
+        if value:
+            return str(value).strip()
+        return "-"
+
+    @app.template_filter("ddmmyyyy")
+    def _format_ddmmyyyy(value: str | None) -> str:
+        dt = _parse_display_datetime(value)
+        if dt:
+            return dt.strftime("%d-%m-%Y")
+        if value:
+            return str(value).strip()
+        return ""
+
+    @app.template_filter("display_datetime")
+    def _format_display_datetime(value: str | None) -> str:
+        dt = _parse_display_datetime(value)
+        if dt:
+            return dt.strftime("%d-%m-%Y %H:%M")
+        if value:
+            return str(value).strip()
+        return ""
 
     app.register_blueprint(admin_bp())
     _init_db()
@@ -272,7 +300,6 @@ def create_app() -> Flask:
         conn = _db_connect()
         selfie_path = None
         committed = False
-        user_id = None
         try:
             conn.execute("BEGIN IMMEDIATE")
             existing = conn.execute(
@@ -313,31 +340,6 @@ def create_app() -> Flask:
             conn.close()
             if not committed and selfie_path:
                 _delete_uploaded_file(selfie_path)
-        if committed and user_id:
-            pending = _pending_assignment_for_email(email)
-            if pending:
-                site_id = int(pending.get("site_id") or 0)
-                start_date = (pending.get("assignment_start_date") or "").strip()
-                if site_id and start_date:
-                    status = (pending.get("assignment_status") or "ACTIVE").strip().upper()
-                    if status not in {"ACTIVE", "ENDED"}:
-                        status = "ACTIVE"
-                    existing = _get_active_assignment(user_id)
-                    if not existing:
-                        _create_assignment(
-                            employee_user_id=user_id,
-                            site_id=site_id,
-                            shift_id=(
-                                int(pending["assignment_shift_id"])
-                                if pending.get("assignment_shift_id") not in (None, "")
-                                else None
-                            ),
-                            job_title=pending.get("assignment_job_title") or None,
-                            start_date=start_date,
-                            end_date=pending.get("assignment_end_date") or None,
-                            status=status,
-                        )
-                        _clear_employee_assignment_plan(email)
         return jsonify(ok=True, message="Signup berhasil (demo)."), 200
 
     @app.route("/api/auth/forgot", methods=["POST"])
@@ -521,7 +523,6 @@ def create_app() -> Flask:
         attendance_records = _attendance_live(limit=20, allowed_emails=employee_emails)
         policies = _policies_for_site(client_id, site_id)
         client_users = _client_users_for_site(client_id, site_id)
-        shifts = [s for s in _list_shifts() if int(s.get("is_active") or 0) == 1]
         return render_template(
             "dashboard/client.html",
             user=user,
@@ -532,7 +533,6 @@ def create_app() -> Flask:
             attendance_records=attendance_records,
             policies=policies,
             client_users=client_users,
-            shifts=shifts,
             total_employees=len(employees),
             present_today=present_today,
             late_today=int(site_summary.get("late_count") or 0),
@@ -582,8 +582,6 @@ def create_app() -> Flask:
             notes=notes,
             timezone=timezone or None,
             work_mode=work_mode or None,
-            pic_name=_row_get(site, "pic_name"),
-            pic_email=_row_get(site, "pic_email"),
         )
         flash("Site berhasil diperbarui.")
         return redirect(url_for("dashboard_client", _anchor="site"))
@@ -601,35 +599,19 @@ def create_app() -> Flask:
         if conflict:
             flash(conflict)
             return redirect(url_for("dashboard_client", _anchor="employees"))
-        use_shift = request.form.get("use_shift") == "1"
-        shift_id_raw = (request.form.get("shift_id") or "").strip()
-        job_title = (request.form.get("job_title") or "").strip()
-        start_date = (request.form.get("start_date") or "").strip()
-        end_date = (request.form.get("end_date") or "").strip()
-        status = (request.form.get("status") or "ACTIVE").strip().upper()
-        if not start_date:
-            flash("Tanggal mulai wajib diisi.")
+        assignment_payload, assignment_error = _parse_assignment_payload(request.form or {})
+        if assignment_error:
+            flash(assignment_error)
             return redirect(url_for("dashboard_client", _anchor="employees"))
-        normalized_start = _normalize_date_input(start_date)
-        if not normalized_start:
-            flash("Tanggal mulai wajib format dd/mm/yyyy.")
-            return redirect(url_for("dashboard_client", _anchor="employees"))
-        normalized_end = _normalize_date_input(end_date) if end_date else None
-        if end_date and not normalized_end:
-            flash("Tanggal selesai wajib format dd/mm/yyyy.")
-            return redirect(url_for("dashboard_client", _anchor="employees"))
-        shift_id = None
-        if use_shift and shift_id_raw:
-            if not shift_id_raw.isdigit():
-                flash("Shift tidak valid.")
-                return redirect(url_for("dashboard_client", _anchor="employees"))
-            shift_id = int(shift_id_raw)
+        shift_id = assignment_payload["shift_id"]
+        if shift_id:
             shift_row = _get_shift_by_id(shift_id)
-            if not shift_row or int(shift_row["is_active"] or 0) != 1:
+            if not shift_row or int(shift_row.get("is_active") or 0) != 1:
                 flash("Shift tidak ditemukan atau nonaktif.")
                 return redirect(url_for("dashboard_client", _anchor="employees"))
-        if status not in {"ACTIVE", "ENDED"}:
-            status = "ACTIVE"
+        if int(_row_get(_site, "is_active") or 0) != 1:
+            flash("Site penempatan sedang nonaktif.")
+            return redirect(url_for("dashboard_client", _anchor="employees"))
         _create_employee(
             nik=payload["nik"],
             name=payload["name"],
@@ -642,47 +624,31 @@ def create_app() -> Flask:
             is_active=1,
             site_id=site_id,
         )
-        _set_employee_assignment_plan(
-            email=payload["email"],
-            site_id=site_id,
-            shift_id=shift_id,
-            job_title=job_title or None,
-            start_date=normalized_start,
-            end_date=normalized_end,
-            status=status,
-        )
-        employee_user = _get_user_by_email(payload["email"])
-        employee_user_id = int(_row_get(employee_user, "id") or 0) if employee_user else 0
-        if employee_user_id and (_row_get(employee_user, "role") or "") == "employee":
-            assignment_id = _create_assignment(
-                employee_user_id=employee_user_id,
-                site_id=site_id,
-                shift_id=shift_id,
-                job_title=job_title or None,
-                start_date=normalized_start,
-                end_date=normalized_end,
-                status=status,
-            )
-            _log_audit_event(
-                entity_type="assignment",
-                entity_id=assignment_id,
-                action="CREATE",
-                actor=user,
-                summary=f"Assignment dibuat dari dashboard client untuk user_id {employee_user_id} ke site_id {site_id}.",
-                details={
-                    "employee_user_id": employee_user_id,
-                    "site_id": site_id,
-                    "shift_id": shift_id,
-                    "job_title": job_title or None,
-                    "start_date": normalized_start,
-                    "end_date": normalized_end,
-                    "status": status,
-                    "source": "client_dashboard",
-                },
-            )
-            flash("Pegawai berhasil ditambahkan dan langsung di-assign ke site ini.")
+        message = "Pegawai berhasil ditambahkan."
+        user_row = _get_user_by_email(payload["email"])
+        if user_row:
+            employee_user_id = int(_row_get(user_row, "id") or 0)
+            if employee_user_id:
+                try:
+                    _create_assignment_with_log(
+                        actor=user,
+                        employee_user_id=employee_user_id,
+                        site_id=site_id,
+                        shift_id=shift_id,
+                        job_title=assignment_payload["job_title"],
+                        start_date=assignment_payload["start_date"],
+                        end_date=assignment_payload["end_date"],
+                        status=assignment_payload["status"],
+                        summary=f"Assignment dibuat dari dashboard client untuk user_id {employee_user_id} ke site_id {site_id}.",
+                        portal="client_dashboard",
+                        extra_details={"source": "client_dashboard"},
+                    )
+                    message = "Pegawai berhasil ditambahkan dan assignment tersimpan."
+                except sqlite3.Error as exc:
+                    message = f"Pegawai berhasil ditambahkan. Assignment gagal: {str(exc)}"
         else:
-            flash("Pegawai berhasil ditambahkan. Assignment menunggu akun pegawai terdaftar.")
+            message = "Pegawai berhasil ditambahkan. Assignment akan aktif setelah akun pegawai tersedia."
+        flash(message)
         return redirect(url_for("dashboard_client", _anchor="employees"))
 
     @app.route("/client/employees/delete", methods=["POST"])
@@ -691,88 +657,143 @@ def create_app() -> Flask:
         _require_client_admin(user)
         _client_id, site_id, _site, _client = _client_site_context(user)
         email = (request.form.get("email") or "").strip().lower()
-        if not email or not _looks_like_email(email):
+        if not email:
             flash("Email pegawai tidak valid.")
             return redirect(url_for("dashboard_client", _anchor="employees"))
         employee = _employee_by_email(email, only_active=False)
-        if employee and int(employee.get("site_id") or 0) != site_id:
-            flash("Pegawai tidak sesuai site.")
+        employee_site_id = int(employee.get("site_id") or 0) if employee else 0
+        if not employee or employee_site_id != site_id:
+            flash("Pegawai tidak ditemukan.")
             return redirect(url_for("dashboard_client", _anchor="employees"))
         user_row = _get_user_by_email(email)
-        if user_row:
-            _delete_assignments_for_employee_site(int(_row_get(user_row, "id") or 0), site_id)
-        _delete_employee_by_email(email)
+        employee_user_id = int(_row_get(user_row, "id") or 0) if user_row else 0
+        if employee_user_id:
+            deleted = _delete_assignments_for_employee(employee_user_id, site_id)
+        else:
+            deleted = 0
+        _delete_employee(int(employee["id"]))
         _log_audit_event(
             entity_type="employee",
-            entity_id=int(employee.get("id") or 0) if employee else None,
+            entity_id=int(employee.get("id") or 0),
             action="DELETE",
             actor=user,
             summary=f"Pegawai {email} dihapus dari dashboard client.",
-            details={"email": email, "site_id": site_id},
+            details={"email": email, "site_id": site_id, "assignments_deleted": deleted},
         )
-        flash("Pegawai dan assignment berhasil dihapus.")
+        flash("Pegawai berhasil dihapus.")
         return redirect(url_for("dashboard_client", _anchor="employees"))
 
     @app.route("/client/attendance/csv", methods=["GET"])
     def client_attendance_csv():
         user = _current_user()
-        _require_client_admin(user)
-        _client_id, site_id, site, _client = _client_site_context(user)
-        employees = _list_employees_by_site(site_id)
-        employee_emails = {
-            (e.get("email") or "").strip().lower()
-            for e in employees
-            if (e.get("email") or "").strip()
-        }
+        _require_client_user(user)
+        client_id, site_id, site, _client = _client_site_context(user)
+        attendance_anchor = "attendance-report"
         mode = (request.args.get("mode") or "all").strip().lower()
-        from_raw = (request.args.get("from") or "").strip()
-        to_raw = (request.args.get("to") or "").strip()
-        month_raw = (request.args.get("month") or "").strip()
-        date_from = None
-        date_to = None
+        date_from: str | None = None
+        date_to: str | None = None
+
         if mode == "range":
-            if from_raw:
-                date_from = _normalize_date_input(from_raw)
-            if to_raw:
-                date_to = _normalize_date_input(to_raw)
+            start_raw = request.args.get("from") or ""
+            end_raw = request.args.get("to") or ""
+            date_from = _normalize_date_input(start_raw)
+            date_to = _normalize_date_input(end_raw)
+            if not date_from or not date_to:
+                flash("Rentang tanggal tidak valid.")
+                return redirect(url_for("dashboard_client", _anchor=attendance_anchor))
+            if date_from > date_to:
+                date_from, date_to = date_to, date_from
         elif mode == "month":
-            match = re.match(r"^(\d{4})-(\d{2})$", month_raw)
-            if match:
-                year = int(match.group(1))
-                month = int(match.group(2))
-                if 1 <= month <= 12:
-                    start = date(year, month, 1)
-                    last_day = calendar.monthrange(year, month)[1]
-                    end = date(year, month, last_day)
-                    date_from = start.strftime("%Y-%m-%d")
-                    date_to = end.strftime("%Y-%m-%d")
-        records = _attendance_live(
-            limit=20000,
-            allowed_emails=employee_emails,
+            month_raw = (request.args.get("month") or "").strip()
+            if not month_raw:
+                flash("Bulan wajib diisi untuk mode Bulan.")
+                return redirect(url_for("dashboard_client", _anchor=attendance_anchor))
+            try:
+                month_dt = datetime.strptime(month_raw, "%m-%Y")
+            except ValueError:
+                flash("Format bulan harus MM-YYYY.")
+                return redirect(url_for("dashboard_client", _anchor=attendance_anchor))
+            date_from = month_dt.strftime("%Y-%m-01")
+            last_day = calendar.monthrange(month_dt.year, month_dt.month)[1]
+            date_to = datetime(month_dt.year, month_dt.month, last_day).strftime("%Y-%m-%d")
+        else:
+            mode = "all"
+
+        employees = _list_employees_by_site(site_id)
+        allowed_emails = {
+            (row.get("email") or "").strip().lower()
+            for row in employees
+            if (row.get("email") or "").strip()
+        }
+
+        rows = _attendance_rows_for_emails(
+            allowed_emails,
             date_from=date_from,
             date_to=date_to,
         )
-        output = io.StringIO()
-        writer = csv.writer(output)
-        writer.writerow(["Nama", "Email", "Tanggal", "Waktu", "Aksi", "Metode", "Source", "Created At"])
-        for row in records:
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
+        writer.writerow(["Pegawai", "Email", "Tanggal", "Waktu", "Aksi", "Metode", "Sumber", "Dicatat"])
+        for row in rows:
             writer.writerow(
                 [
-                    row.get("employee_name") or "",
-                    row.get("employee_email") or "",
-                    row.get("date") or "",
-                    row.get("time") or "",
-                    (row.get("action") or "").upper(),
-                    row.get("method") or "",
-                    row.get("source") or "",
-                    row.get("created_at") or "",
+                    row["employee"],
+                    row["email"],
+                    row["date"],
+                    row["time"],
+                    row["action"],
+                    row["method"],
+                    row["source"],
+                    row["created_at"],
                 ]
             )
-        filename_raw = f"attendance_{(site.get('name') or 'site')}_{_today_key()}.csv"
-        filename = secure_filename(filename_raw) or "attendance.csv"
-        response = Response(output.getvalue(), mimetype="text/csv")
-        response.headers["Content-Disposition"] = f"attachment; filename={filename}"
+        filename = f"attendance-{site.get('name') or 'site'}-{datetime.now().strftime('%Y%m%d%H%M%S')}.csv"
+        safe_filename = re.sub(r"[^0-9A-Za-z._-]+", "-", filename)
+        response = app.response_class(buffer.getvalue(), mimetype="text/csv")
+        response.headers["Content-Disposition"] = f'attachment; filename="{safe_filename}"'
         return response
+
+    @app.route("/client/attendance/records", methods=["GET"])
+    def client_attendance_records():
+        user = _current_user()
+        _require_client_user(user)
+        client_id, site_id, site, _client = _client_site_context(user)
+        start_raw = (request.args.get("from") or "").strip()
+        end_raw = (request.args.get("to") or "").strip()
+        if not start_raw or not end_raw:
+            return jsonify(ok=False, message="Rentang tanggal wajib diisi."), 400
+        date_from = _normalize_date_input(start_raw)
+        date_to = _normalize_date_input(end_raw)
+        if not date_from or not date_to:
+            return jsonify(ok=False, message="Rentang tanggal tidak valid."), 400
+        if date_from > date_to:
+            date_from, date_to = date_to, date_from
+
+        employees = _list_employees_by_site(site_id)
+        allowed_emails = {
+            (row.get("email") or "").strip().lower()
+            for row in employees
+            if (row.get("email") or "").strip()
+        }
+
+        rows = _attendance_rows_for_emails(
+            allowed_emails,
+            date_from=date_from,
+            date_to=date_to,
+        )
+        sanitized: list[dict] = []
+        max_rows = 250
+        for row in rows[:max_rows]:
+            sanitized.append(
+                {
+                    "employee": row["employee"] or "-",
+                    "date": _format_display_date(row["date"]),
+                    "time": row["time"] or "-",
+                    "action": (row["action"] or "").upper(),
+                    "method": row["method"] or "-",
+                }
+            )
+        return jsonify(ok=True, data=sanitized, total=len(sanitized))
 
     @app.route("/client/policies/create", methods=["POST"])
     def client_policies_create():
@@ -791,11 +812,11 @@ def create_app() -> Flask:
         cutoff_time = (request.form.get("cutoff_time") or "").strip()
         effective_from = _normalize_date_input(effective_from_raw)
         if not effective_from:
-            flash("Tanggal mulai wajib format dd/mm/yyyy.")
+            flash("Tanggal mulai wajib format DD-MM-YYYY (contoh 01-02-2026) atau 1 Feb 2026.")
             return redirect(url_for("dashboard_client", _anchor="policies"))
         effective_to = _normalize_date_input(effective_to_raw) if effective_to_raw else None
         if effective_to_raw and not effective_to:
-            flash("Tanggal selesai wajib format dd/mm/yyyy.")
+            flash("Tanggal selesai wajib format DD-MM-YYYY (contoh 01-02-2026) atau 1 Feb 2026.")
             return redirect(url_for("dashboard_client", _anchor="policies"))
         work_duration = int(work_duration_raw) if work_duration_raw.isdigit() else None
         grace_minutes = int(grace_raw) if grace_raw.isdigit() else None
@@ -852,11 +873,11 @@ def create_app() -> Flask:
         cutoff_time = (request.form.get("cutoff_time") or "").strip()
         effective_from = _normalize_date_input(effective_from_raw)
         if not effective_from:
-            flash("Tanggal mulai wajib format dd/mm/yyyy.")
+            flash("Tanggal mulai wajib format DD-MM-YYYY (contoh 01-02-2026) atau 1 Feb 2026.")
             return redirect(url_for("dashboard_client", _anchor="policies"))
         effective_to = _normalize_date_input(effective_to_raw) if effective_to_raw else None
         if effective_to_raw and not effective_to:
-            flash("Tanggal selesai wajib format dd/mm/yyyy.")
+            flash("Tanggal selesai wajib format DD-MM-YYYY (contoh 01-02-2026) atau 1 Feb 2026.")
             return redirect(url_for("dashboard_client", _anchor="policies"))
         work_duration = int(work_duration_raw) if work_duration_raw.isdigit() else None
         grace_minutes = int(grace_raw) if grace_raw.isdigit() else None
@@ -1762,6 +1783,17 @@ def _client_admin_client_id(user: User | None) -> int | None:
     return None
 
 
+def _approver_client_scope_id(user: User | None) -> int | None:
+    if not user:
+        return None
+    if user.role == "client_admin":
+        return _client_admin_client_id(user)
+    if user.role == "manager_operational":
+        if isinstance(user.client_id, int) and user.client_id > 0:
+            return int(user.client_id)
+    return None
+
+
 def _client_user_client_id(user: User | None) -> int | None:
     if not user or user.role not in CLIENT_ROLES:
         return None
@@ -1968,11 +2000,24 @@ def _normalize_date_input(value: str | None) -> str | None:
                 except ValueError:
                     return None
         return None
+    if "-" in raw:
+        try:
+            dt = datetime.strptime(raw, "%d-%m-%Y")
+            return dt.strftime("%Y-%m-%d")
+        except ValueError:
+            pass
     try:
         dt = datetime.fromisoformat(raw)
         return dt.strftime("%Y-%m-%d")
     except ValueError:
-        return None
+        pass
+    for fmt in ("%d %b %Y", "%d %B %Y"):
+        try:
+            dt = datetime.strptime(raw, fmt)
+            return dt.strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+    return None
 
 
 def _date_from_input(value: str | None) -> datetime.date | None:
@@ -3416,53 +3461,21 @@ def _list_employees_by_site(site_id: int) -> list[dict]:
                 """,
                 (site_id, today, today),
             )
-            rows = [dict(row) for row in cur.fetchall()]
-            assigned_emails = {
-                (row.get("email") or "").lower() for row in rows if row.get("email")
-            }
-            for row in rows:
-                row["assignment_pending"] = False
-            if _table_exists(conn, "employees"):
-                pending_query = """
-                    SELECT
-                        id, nik, name, email, no_hp, address,
-                        gender, status_nikah, notes, is_active, created_at, site_id,
-                        assignment_start_date, assignment_end_date, assignment_status
-                    FROM employees
-                    WHERE site_id = ?
-                """
-                params: list = [site_id]
-                if assigned_emails:
-                    placeholders = ", ".join(["?"] * len(assigned_emails))
-                    pending_query += f" AND lower(email) NOT IN ({placeholders})"
-                    params.extend(sorted(assigned_emails))
-                pending_query += " ORDER BY created_at DESC"
-                pending_rows = [
-                    dict(row)
-                    for row in conn.execute(pending_query, tuple(params)).fetchall()
-                ]
-                for row in pending_rows:
-                    row["assignment_pending"] = bool(row.get("assignment_start_date"))
-                rows.extend(pending_rows)
-            return rows
+            return [dict(row) for row in cur.fetchall()]
         if not _table_exists(conn, "employees"):
             return []
         cur = conn.execute(
             """
             SELECT
                 id, nik, name, email, no_hp, address,
-                gender, status_nikah, notes, is_active, created_at, site_id,
-                assignment_start_date, assignment_end_date, assignment_status
+                gender, status_nikah, notes, is_active, created_at, site_id
             FROM employees
             WHERE site_id = ?
             ORDER BY created_at DESC
             """,
             (site_id,),
         )
-        rows = [dict(row) for row in cur.fetchall()]
-        for row in rows:
-            row["assignment_pending"] = bool(row.get("assignment_start_date"))
-        return rows
+        return [dict(row) for row in cur.fetchall()]
     finally:
         conn.close()
 
@@ -3545,127 +3558,37 @@ def _parse_employee_form(form: dict) -> tuple[dict, str | None]:
     }, None
 
 
-def _set_employee_assignment_plan(
-    email: str,
-    site_id: int | None,
-    shift_id: int | None,
-    job_title: str | None,
-    start_date: str,
-    end_date: str | None,
-    status: str,
-) -> None:
-    if not email:
-        return
-    conn = _db_connect()
-    try:
-        if not _table_exists(conn, "employees"):
-            return
-        conn.execute(
-            """
-            UPDATE employees
-            SET site_id = ?,
-                assignment_shift_id = ?,
-                assignment_job_title = ?,
-                assignment_start_date = ?,
-                assignment_end_date = ?,
-                assignment_status = ?
-            WHERE lower(email) = ?
-            """,
-            (
-                site_id,
-                shift_id,
-                job_title or None,
-                start_date,
-                end_date,
-                status,
-                email.lower(),
-            ),
-        )
-    finally:
-        conn.commit()
-        conn.close()
-
-
-def _pending_assignment_for_email(email: str) -> dict | None:
-    if not email:
-        return None
-    conn = _db_connect()
-    try:
-        if not _table_exists(conn, "employees"):
-            return None
-        cur = conn.execute(
-            """
-            SELECT
-                site_id,
-                assignment_shift_id,
-                assignment_job_title,
-                assignment_start_date,
-                assignment_end_date,
-                assignment_status
-            FROM employees
-            WHERE lower(email) = ?
-            LIMIT 1
-            """,
-            (email.lower(),),
-        )
-        row = cur.fetchone()
-        return dict(row) if row else None
-    finally:
-        conn.close()
-
-
-def _clear_employee_assignment_plan(email: str) -> None:
-    if not email:
-        return
-    conn = _db_connect()
-    try:
-        if not _table_exists(conn, "employees"):
-            return
-        conn.execute(
-            """
-            UPDATE employees
-            SET assignment_shift_id = NULL,
-                assignment_job_title = NULL,
-                assignment_start_date = NULL,
-                assignment_end_date = NULL,
-                assignment_status = NULL
-            WHERE lower(email) = ?
-            """,
-            (email.lower(),),
-        )
-    finally:
-        conn.commit()
-        conn.close()
-
-
-def _delete_employee_by_email(email: str) -> None:
-    if not email:
-        return
-    conn = _db_connect()
-    try:
-        if not _table_exists(conn, "employees"):
-            return
-        conn.execute("DELETE FROM employees WHERE lower(email) = ?", (email.lower(),))
-    finally:
-        conn.commit()
-        conn.close()
-
-
-def _delete_assignments_for_employee_site(employee_user_id: int, site_id: int) -> int:
-    if not employee_user_id or not site_id:
-        return 0
-    conn = _db_connect()
-    try:
-        if not _table_exists(conn, "assignments"):
-            return 0
-        cur = conn.execute(
-            "DELETE FROM assignments WHERE employee_user_id = ? AND site_id = ?",
-            (employee_user_id, site_id),
-        )
-        return cur.rowcount or 0
-    finally:
-        conn.commit()
-        conn.close()
+def _parse_assignment_payload(form: dict) -> tuple[dict | None, str | None]:
+    start_date_raw = (form.get("start_date") or "").strip()
+    if not start_date_raw:
+        return None, "Tanggal mulai assignment wajib diisi."
+    normalized_start = _normalize_date_input(start_date_raw)
+    if not normalized_start:
+        return None, "Tanggal mulai assignment wajib format DD-MM-YYYY (contoh 01-02-2026) atau 1 Feb 2026."
+    end_date_raw = (form.get("end_date") or "").strip()
+    normalized_end = None
+    if end_date_raw:
+        normalized_end = _normalize_date_input(end_date_raw)
+        if not normalized_end:
+            return None, "Tanggal selesai assignment wajib format DD-MM-YYYY (contoh 01-02-2026) atau 1 Feb 2026."
+    use_shift = (form.get("use_shift") or "").strip() == "1"
+    shift_id = None
+    shift_id_raw = (form.get("shift_id") or "").strip()
+    if use_shift and shift_id_raw:
+        if not shift_id_raw.isdigit():
+            return None, "Shift tidak valid."
+        shift_id = int(shift_id_raw)
+    job_title = (form.get("job_title") or "").strip() or None
+    status = (form.get("status") or "ACTIVE").strip().upper()
+    if status not in {"ACTIVE", "ENDED"}:
+        status = "ACTIVE"
+    return {
+        "shift_id": shift_id,
+        "job_title": job_title,
+        "start_date": normalized_start,
+        "end_date": normalized_end,
+        "status": status,
+    }, None
 
 
 def _set_employee_active_with_conn(conn: sqlite3.Connection, email: str, is_active: int) -> None:
@@ -3719,6 +3642,29 @@ def _delete_employee(employee_id: int) -> None:
     conn = _db_connect()
     try:
         conn.execute("DELETE FROM employees WHERE id = ?", (employee_id,))
+    finally:
+        conn.commit()
+        conn.close()
+
+
+def _delete_assignments_for_employee(employee_user_id: int, site_id: int | None = None) -> int:
+    if not employee_user_id:
+        return 0
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "assignments"):
+            return 0
+        if site_id:
+            cur = conn.execute(
+                "DELETE FROM assignments WHERE employee_user_id = ? AND site_id = ?",
+                (employee_user_id, site_id),
+            )
+        else:
+            cur = conn.execute(
+                "DELETE FROM assignments WHERE employee_user_id = ?",
+                (employee_user_id,),
+            )
+        return cur.rowcount or 0
     finally:
         conn.commit()
         conn.close()
@@ -4580,6 +4526,52 @@ def _create_assignment(
     finally:
         conn.commit()
         conn.close()
+
+
+def _create_assignment_with_log(
+    *,
+    actor: User | None,
+    employee_user_id: int,
+    site_id: int,
+    shift_id: int | None,
+    job_title: str | None,
+    start_date: str,
+    end_date: str | None,
+    status: str,
+    summary: str,
+    portal: str,
+    extra_details: dict | None = None,
+) -> int:
+    assignment_id = _create_assignment(
+        employee_user_id=employee_user_id,
+        site_id=site_id,
+        shift_id=shift_id,
+        job_title=job_title,
+        start_date=start_date,
+        end_date=end_date,
+        status=status,
+    )
+    details: dict = {
+        "employee_user_id": employee_user_id,
+        "site_id": site_id,
+        "shift_id": shift_id,
+        "job_title": job_title,
+        "start_date": start_date,
+        "end_date": end_date,
+        "status": status,
+        "portal": portal,
+    }
+    if extra_details:
+        details.update(extra_details)
+    _log_audit_event(
+        entity_type="assignment",
+        entity_id=assignment_id,
+        action="CREATE",
+        actor=actor,
+        summary=summary,
+        details=details,
+    )
+    return assignment_id
 
 
 def _update_assignment(
@@ -5454,11 +5446,6 @@ def _init_db() -> None:
             _ensure_column(conn, "employees", "is_active", "is_active INTEGER DEFAULT 1")
             _ensure_column(conn, "employees", "created_at", "created_at TEXT")
             _ensure_column(conn, "employees", "site_id", "site_id INTEGER")
-            _ensure_column(conn, "employees", "assignment_shift_id", "assignment_shift_id INTEGER")
-            _ensure_column(conn, "employees", "assignment_job_title", "assignment_job_title TEXT")
-            _ensure_column(conn, "employees", "assignment_start_date", "assignment_start_date TEXT")
-            _ensure_column(conn, "employees", "assignment_end_date", "assignment_end_date TEXT")
-            _ensure_column(conn, "employees", "assignment_status", "assignment_status TEXT")
             _dedupe_employees(conn)
             try:
                 conn.execute(
@@ -5794,14 +5781,12 @@ def _approver_scope_emails(user: User | None) -> set[str] | None:
         return set()
     if user.role == "hr_superadmin":
         return None
-    if user.role == "client_admin":
-        client_id = _client_admin_client_id(user)
-        if not client_id:
-            return set()
+    client_scope = _approver_client_scope_id(user)
+    if client_scope:
         today = _today_key()
         emails: set[str] = set()
         for row in _list_active_assignments(today):
-            if int(_row_get(row, "client_id") or 0) == client_id:
+            if int(_row_get(row, "client_id") or 0) == client_scope:
                 email = (_row_get(row, "employee_email") or "").strip().lower()
                 if email:
                     emails.add(email)
@@ -7166,14 +7151,15 @@ def admin_bp() -> Blueprint:
 
         normalized_start = _normalize_date_input(start_date)
         if not normalized_start:
-            flash("Tanggal mulai wajib format dd/mm/yyyy.")
+            flash("Tanggal mulai wajib format DD-MM-YYYY (contoh 01-02-2026) atau 1 Feb 2026.")
             return redirect(url_for("admin.assignments", _anchor="add-assignment"))
         normalized_end = _normalize_date_input(end_date) if end_date else None
         if end_date and not normalized_end:
-            flash("Tanggal selesai wajib format dd/mm/yyyy.")
+            flash("Tanggal selesai wajib format DD-MM-YYYY (contoh 01-02-2026) atau 1 Feb 2026.")
             return redirect(url_for("admin.assignments", _anchor="add-assignment"))
 
-        assignment_id = _create_assignment(
+        assignment_id = _create_assignment_with_log(
+            actor=user,
             employee_user_id=employee_id,
             site_id=site_id,
             shift_id=shift_id,
@@ -7181,22 +7167,8 @@ def admin_bp() -> Blueprint:
             start_date=normalized_start,
             end_date=normalized_end,
             status=status,
-        )
-        _log_audit_event(
-            entity_type="assignment",
-            entity_id=assignment_id,
-            action="CREATE",
-            actor=user,
             summary=f"Assignment dibuat untuk user_id {employee_id} ke site_id {site_id}.",
-            details={
-                "employee_user_id": employee_id,
-                "site_id": site_id,
-                "shift_id": shift_id,
-                "job_title": job_title or None,
-                "start_date": normalized_start,
-                "end_date": normalized_end,
-                "status": status,
-            },
+            portal="admin_dashboard",
         )
         flash("Assignment berhasil ditambahkan.")
         return redirect(url_for("admin.assignments", _anchor="add-assignment"))
@@ -7242,11 +7214,11 @@ def admin_bp() -> Blueprint:
 
         normalized_start = _normalize_date_input(start_date)
         if not normalized_start:
-            flash("Tanggal mulai wajib format dd/mm/yyyy.")
+            flash("Tanggal mulai wajib format DD-MM-YYYY (contoh 01-02-2026) atau 1 Feb 2026.")
             return redirect(url_for("admin.assignments"))
         normalized_end = _normalize_date_input(end_date) if end_date else None
         if end_date and not normalized_end:
-            flash("Tanggal selesai wajib format dd/mm/yyyy.")
+            flash("Tanggal selesai wajib format DD-MM-YYYY (contoh 01-02-2026) atau 1 Feb 2026.")
             return redirect(url_for("admin.assignments"))
 
         current = _get_assignment_by_id(assignment_id)
@@ -7287,7 +7259,8 @@ def admin_bp() -> Blueprint:
                             "end_date": normalized_start,
                         },
                     )
-                new_assignment_id = _create_assignment(
+                new_assignment_id = _create_assignment_with_log(
+                    actor=user,
                     employee_user_id=employee_id,
                     site_id=site_id,
                     shift_id=shift_id,
@@ -7295,23 +7268,9 @@ def admin_bp() -> Blueprint:
                     start_date=normalized_start,
                     end_date=normalized_end,
                     status=status,
-                )
-                _log_audit_event(
-                    entity_type="assignment",
-                    entity_id=new_assignment_id,
-                    action="CREATE",
-                    actor=user,
                     summary=f"Assignment baru dibuat untuk user_id {employee_id} ke site_id {site_id}.",
-                    details={
-                        "employee_user_id": employee_id,
-                        "site_id": site_id,
-                        "shift_id": shift_id,
-                        "job_title": job_title or None,
-                        "start_date": normalized_start,
-                        "end_date": normalized_end,
-                        "status": status,
-                        "previous_assignment_id": assignment_id,
-                    },
+                    portal="admin_dashboard",
+                    extra_details={"previous_assignment_id": assignment_id},
                 )
                 flash("Assignment baru dibuat (history tersimpan).")
                 return redirect(url_for("admin.assignments"))
@@ -7733,7 +7692,28 @@ def admin_bp() -> Blueprint:
     def employees_delete(employee_id: int):
         user = _current_user()
         _require_hr_superadmin(user)
+        employee = _employee_by_id(employee_id)
+        if not employee:
+            flash("Pegawai tidak ditemukan.")
+            return redirect(url_for("admin.employees"))
+        employee_email = employee.get("email") or ""
+        user_row = _get_user_by_email(employee_email)
+        employee_user_id = int(_row_get(user_row, "id") or 0) if user_row else 0
+        deleted_assignments = 0
+        if employee_user_id:
+            deleted_assignments = _delete_assignments_for_employee(employee_user_id)
         _delete_employee(employee_id)
+        _log_audit_event(
+            entity_type="employee",
+            entity_id=employee_id,
+            action="DELETE",
+            actor=user,
+            summary=f"Pegawai {employee_email} dihapus dari admin.",
+            details={
+                "email": employee_email,
+                "assignments_deleted": deleted_assignments,
+            },
+        )
         flash("Pegawai berhasil dihapus.")
         return redirect(url_for("admin.employees"))
 
@@ -8422,6 +8402,75 @@ def _attendance_live(
     records = records[:limit]
     _perf_log("attendance_live", start, f"rows={len(records)} limit={limit}")
     return records
+
+
+def _chunk_items(items: list[str], size: int) -> list[list[str]]:
+    return [items[i : i + size] for i in range(0, len(items), size)]
+
+
+def _attendance_rows_for_emails(
+    allowed_emails: set[str],
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> list[dict]:
+    start = time.perf_counter()
+    normalized_emails = sorted(
+        {email.strip().lower() for email in allowed_emails if email and email.strip()}
+    )
+    if not normalized_emails:
+        return []
+    chunk_size = 300
+    conn = _db_connect()
+    try:
+        records: list[dict] = []
+        base_query = """
+            SELECT employee_name, employee_email, date, time, action, method, source, created_at
+            FROM attendance
+        """
+        date_clauses: list[str] = []
+        date_params: list[str] = []
+        if date_from:
+            date_clauses.append("COALESCE(date, substr(created_at, 1, 10)) >= ?")
+            date_params.append(date_from)
+        if date_to:
+            date_clauses.append("COALESCE(date, substr(created_at, 1, 10)) <= ?")
+            date_params.append(date_to)
+        for chunk in _chunk_items(normalized_emails, chunk_size):
+            clauses = date_clauses.copy()
+            params = list(date_params)
+            placeholders = ",".join("?" for _ in chunk)
+            clauses.insert(0, f"lower(employee_email) IN ({placeholders})")
+            params = list(chunk) + params
+            query = base_query
+            if clauses:
+                query += " WHERE " + " AND ".join(clauses)
+            query += " ORDER BY created_at DESC"
+            cur = conn.execute(query, tuple(params))
+            for row in cur.fetchall():
+                created_at = row["created_at"] or ""
+                date_value = row["date"] or (created_at.split(" ")[0] if " " in created_at else "-")
+                time_value = row["time"] or (created_at.split(" ")[1] if " " in created_at else "-")
+                name = row["employee_name"] or row["employee_email"] or "-"
+                raw_source = row["source"] or "sqlite"
+                source_label = "-" if raw_source == "manual_request" else "sqlite"
+                method = row["method"] or ("manual" if raw_source == "manual_request" else "-")
+                records.append(
+                    {
+                        "employee": name,
+                        "email": row["employee_email"] or "-",
+                        "date": date_value,
+                        "time": time_value,
+                        "action": row["action"] or "-",
+                        "method": method,
+                        "source": source_label,
+                        "created_at": created_at,
+                    }
+                )
+        records = sorted(records, key=lambda row: row.get("created_at", ""), reverse=True)
+        _perf_log("attendance_csv_rows", start, f"rows={len(records)}")
+        return records
+    finally:
+        conn.close()
 
 
 if __name__ == "__main__":

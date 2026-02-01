@@ -24,11 +24,11 @@
         <tr>
           <td>{{ r.employee }}</td>
           <td>{{ r.email }}</td>
-          <td>{{ r.date }}</td>
+          <td>{{ r.date|ddmmyyyy }}</td>
           <td>{{ r.time }}</td>
           <td><span class="badge">{{ r.action }}</span></td>
           <td>{{ r.method }}{% if r.source and r.source != "-" %} ({{ r.source }}){% endif %}</td>
-          <td>{{ r.created_at }}</td>
+          <td>{{ r.created_at|display_datetime }}</td>
         </tr>
         {% endfor %}
       </tbody>

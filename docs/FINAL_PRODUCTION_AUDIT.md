@@ -1,60 +1,40 @@
-# Audit Kesiapan Produksi Akhir
+# Audit Kesiapan Produksi Akhir (Diperbarui 31 Januari 2026)
 
 ## 1. Logika & Alur Kontrol
-- [x] Masalah: Multi check-in/check-out diizinkan tanpa penegakan invariant per hari. Lokasi: `app.py:355` (`attendance_checkin`), `app.py:425` (`attendance_checkout`). Keparahan: medium. Dampak: duplikasi atau kontradiksi data presensi dan kesalahan perhitungan payroll. Rekomendasi perbaikan: terapkan satu check-in dan satu check-out per hari per pegawai (atau aturan multi-shift yang eksplisit) dengan pemeriksaan transaksi.
-- [x] Masalah: Checkout dapat dilakukan tanpa check-in sebelumnya. Lokasi: `app.py:425` (`attendance_checkout`). Keparahan: medium. Dampak: transisi status presensi tidak valid dan kesalahan pelaporan. Rekomendasi perbaikan: validasi status presensi terakhir sebelum mengizinkan checkout.
-- [x] Masalah: Tidak ada pencegahan multiple assignment aktif; sistem memilih yang paling baru berdasarkan start_date. Lokasi: `app.py:1463` (`_get_active_assignment`). Keparahan: medium. Dampak: pemilihan policy/site tidak deterministik saat assignment tumpang tindih. Rekomendasi perbaikan: paksa hanya satu assignment aktif per pegawai melalui validasi dan constraint.
+- [x] Sistem sebelumnya memiliki jalur admin dan jalur client yang mengeksekusi creation assignment secara independen, membuat validasi/status, logging, dan constraint menjadi berbeda. Lokasi: `app.py:4281-4335` (helper `_create_assignment_with_log`), `app.py:6916-7056` (admin assignments create/update), dan `app.py:561-605` (client employees create). Severity: medium. Dampak: tanpa pintu tunggal, legitimitas assignment untuk HRD atau client bisa berbeda sehingga data penempatan tidak konsisten. Rekomendasi perbaikan: pertahankan helper tunggal tersebut untuk semua assignment creation (misalnya `client_employees_create` sudah memakai `_create_assignment_with_log`) dan pastikan update/sekunder lainnya tidak memanggil `_create_assignment` secara langsung agar always single pathway. (Telah diimplementasikan helper, server validasi shift/tanggal, dan client/admin memanggil helper yang sama.)
 
 ## 2. Integritas Status & Alur Kerja
-- [x] Masalah: Approval manual attendance mengubah status dan menambah attendance dalam transaksi terpisah. Lokasi: `app.py:4849` (`manual_attendance_approve`), `app.py:3880` (`_approve_manual_request`), `app.py:3912` (`_insert_manual_attendance_record`). Keparahan: high. Dampak: race condition dapat menyebabkan insert ganda atau request approved tanpa record attendance. Rekomendasi perbaikan: bungkus approval dan insert attendance dalam satu transaksi dengan re-check status.
-- [x] Masalah: Endpoint API mengizinkan pengajuan manual attendance walau kebijakan UI memblokir manager. Lokasi: `app.py:505` (`attendance_manual`) vs `app.py:3592` (`_can_submit_manual`). Keparahan: medium. Dampak: bypass kebijakan dan inkonsistensi aturan workflow antara UI dan API. Rekomendasi perbaikan: terapkan `_can_submit_manual` pada route API.
-- [x] Masalah: Upload selfie presensi disimpan namun tidak dicatat di database. Lokasi: `app.py:355` (`attendance_checkin`), `app.py:425` (`attendance_checkout`), `app.py:3292` (skema tabel attendance). Keparahan: medium. Dampak: file orphaned dan bukti audit hilang. Rekomendasi perbaikan: tambahkan kolom path selfie di attendance atau hentikan penyimpanan jika tidak dipersist.
+- [x] Endpoint hapus pegawai client/admin sebelumnya hanya menghapus baris `employees`, meninggalkan `assignments` dan tanpa audit trail. Lokasi: `app.py:589-605` (client), `app.py:7562-7570` (admin). Severity: medium. Dampak: assignment tetap terlihat walaupun master pegawai dihapus, membuat status workflow tidak sinkron dan tidak dapat diaudit. Rekomendasi perbaikan: hapus assignment terkait dalam satu transaksi sebelum menghapus employee, dan log event tersebut. (Sudah diterapkan: `_delete_assignments_for_employee` dipanggil sebelum `_delete_employee`, dan `_log_audit_event` merekam jumlah assignment yang dihapus.)
 
 ## 3. Otorisasi, Peran & Kebijakan
-- [x] Masalah: Tidak ada proteksi CSRF untuk form POST berbasis sesi. Lokasi: `templates/dashboard/admin_settings.html:21` (dan form POST lain) dengan route terkait di `app.py`. Keparahan: high. Dampak: CSRF bisa memicu aksi admin tanpa izin. Rekomendasi perbaikan: aktifkan token CSRF dan validasi pada semua route yang mengubah state.
-- [x] Masalah: User nonaktif tetap bisa akses karena session tidak memvalidasi `is_active`. Lokasi: `app.py:827` (`_current_user`), `app.py:842` (`_require_role`). Keparahan: high. Dampak: user yang dinonaktifkan masih bisa beroperasi sampai logout. Rekomendasi perbaikan: cek `is_active` ke database di setiap request atau cabut sesi saat dinonaktifkan.
-- [x] Masalah: Otoritas approval manager_operational diblokir jika ada supervisor aktif, tanpa mempertimbangkan konteks assignment. Lokasi: `app.py:3608` (`_can_approve_leave`), `app.py:3620` (`_can_approve_manual`). Keparahan: medium. Dampak: deadlock approval saat supervisor ada tetapi tidak bisa approve. Rekomendasi perbaikan: basis approval pada scope/assignment, bukan sekadar keberadaan role global.
-- [x] Masalah: Daftar leave pending dapat diakses semua admin role, termasuk yang tidak punya hak approval. Lokasi: `app.py:652` (`leave_pending`). Keparahan: low. Dampak: paparan data leave pegawai yang tidak perlu. Rekomendasi perbaikan: batasi ke role approver atau definisikan kebijakan eksplisit.
+- [x] Role `manager_operational` memang termasuk `APPROVER_ROLES` tapi `_approver_scope_emails` sebelumnya hanya melihat `supervisor_sites`, sehingga manager tidak mendapat scope dan ditolak mengeksekusi approval. Lokasi: `app.py:1505-1508`, `app.py:5532-5570`. Severity: medium-high. Dampak: manager tidak bisa approve manual attendance/leave dan approval bottleneck terjadi pada HR superadmin. Rekomendasi perbaikan: berikan scope berdasarkan `client_id` dan biarkan manager mengelola seluruh pegawai client tersebut. (Sudah diperbaiki dengan helper `_approver_client_scope_id` yang mengembalikan client_id untuk manager_operational sehingga `_approver_scope_emails` mencakup assignment client yang tepat.)
 
 ## 4. Integritas Data & Database
-- [x] Masalah: Tabel employees tidak memiliki UNIQUE constraint untuk `email`, `nik`, atau `no_hp`. Lokasi: `app.py:3096` (skema employees). Keparahan: high. Dampak: identitas duplikat menyebabkan ambiguitas login dan mapping yang salah. Rekomendasi perbaikan: tambahkan UNIQUE index dan remediasi duplikasi data yang sudah ada.
-- [x] Masalah: Tabel relasional inti tidak memiliki foreign key (assignments, supervisor_sites, employee_site, attendance, manual_attendance_requests). Lokasi: `app.py:3161` (supervisor_sites), `app.py:3171` (employee_site), `app.py:3181` (assignments), `app.py:3260` (manual_attendance_requests), `app.py:3292` (attendance). Keparahan: medium. Dampak: record orphan dan join yang inkonsisten. Rekomendasi perbaikan: tambah foreign key dan bersihkan record orphan.
-- [x] Masalah: `manual_attendance_requests.created_by_user_id` menyimpan email walau namanya user ID. Lokasi: `app.py:3260` (skema), `app.py:3818` (`_create_manual_request`). Keparahan: low. Dampak: kebingungan dan join rusak bila ID numerik diterapkan nanti. Rekomendasi perbaikan: ganti nama field atau simpan ID numerik.
-- [x] Masalah: Tabel attendance tidak memiliki constraint untuk mencegah multi check-in/out per hari per pegawai. Lokasi: `app.py:3292` (skema attendance). Keparahan: medium. Dampak: perhitungan presensi tidak konsisten. Rekomendasi perbaikan: tambahkan unique constraint atau enforce di logika dengan transaksi.
+- [x] `_attendance_rows_for_emails` sebelumnya membuat placeholder `IN` seluas jumlah pegawai sehingga klien besar bisa melampaui batas `sqlite3` (maks 999 parameter). Lokasi: `app.py:607-655` (route CSV) dan helper `app.py:8167-8246`. Severity: medium. Dampak: CSV untuk site besar selalu gagal. Rekomendasi perbaikan: pecah menjadi beberapa batch. (Sudah diperbaiki: helper membuat chunk 300 email per query dan menggabungkan hasil, menghindari limit parameter.) 
 
 ## 5. Sistem File & Kebersihan Kode
-- [x] Masalah: File database runtime tersimpan di repo (`app.db`, `presensi.db`). Lokasi: root repository. Keparahan: high. Dampak: kebocoran data dan drift konfigurasi antar environment. Rekomendasi perbaikan: keluarkan dari repo, tambahkan ke `.gitignore`, dan kelola data di luar version control.
-- [x] Masalah: Helper `_role_from_email` tidak digunakan (dead code). Lokasi: `app.py:802`. Keparahan: low. Dampak: beban pemeliharaan dan kebingungan soal penentuan role. Rekomendasi perbaikan: hapus atau hubungkan ke alur yang terdokumentasi.
-- [x] Masalah: Asset gambar demo dipakai di UI produksi. Lokasi: `templates/dashboard/employee.html` dan `templates/dashboard/base.html` (avatar default). Keparahan: low. Dampak: branding tidak profesional atau risiko IP. Rekomendasi perbaikan: ganti dengan aset produksi atau hapus.
+- [x] File database runtime `presensi.db` sudah tidak dikomit dan sekarang diabaikan lewat `.gitignore`; `app.py` terus menggunakan `PRESENSI_DB_PATH` bila tersedia agar runtime bisa menunjuk berkas di luar repo. Lokasi awal: `app.py:1493-1499`. Severity: high. Dampak: data sensitif tidak lagi terkunci di repo. Rekomendasi perbaikan: pastikan setiap lingkungan menyet `PRESENSI_DB_PATH` ke volume/berkas terpisah saat deploy.
 
 ## 6. Kesiapan UI & UX
-- [x] Masalah: Teks di admin overview menyatakan fitur belum diimplementasi padahal dashboard sudah menyediakan pembuatan user. Lokasi: `templates/dashboard/admin_overview.html:140`. Keparahan: low. Dampak: kebingungan pengguna dan ketidakjelasan status readiness. Rekomendasi perbaikan: sesuaikan copy dengan fungsi yang ada.
+- [ ] Form tambah pegawai client masih menampilkan field shift, job title, dan tanggal assignment namun backend `client_employees_create` tidak pernah memproses input tersebut (hanya memanggil `_create_employee`). Lokasi: `templates/dashboard/client.html:442-476` dan `app.py:601-605`. Severity: medium. Dampak: user mengira assignment tersimpan padahal data hilang, membuat planning site kehilangan informasi shift dan tanggal mulai yang baru saja diinput. Rekomendasi perbaikan: sesuaikan UI (hilangkan field) atau sambungkan kembali proses assignment (pisahkan pengiriman ke `_create_assignment` dan pastikan audit mencatatnya).
 
 ## 7. Stabilitas & Keamanan Produksi
-- [x] Masalah: Default secret key Flask di-hardcode sebagai fallback. Lokasi: `app.py:30` (`create_app`). Keparahan: blocker. Dampak: integritas sesi terancam jika secret environment tidak diset. Rekomendasi perbaikan: wajibkan `FLASK_SECRET` di produksi dan fail fast jika tidak ada.
-- [x] Masalah: Seed user dan default password di-hardcode dalam code dan dokumentasi. Lokasi: `app.py:766` (`SEED_USERS`), `app.py:773` (`DEFAULT_RESET_PASSWORD`), `templates/README.md:17`. Keparahan: blocker. Dampak: kredensial diketahui di produksi. Rekomendasi perbaikan: hapus seed untuk produksi atau gate dengan flag environment; paksa rotasi password.
-- [x] Masalah: Endpoint reset password adalah stub demo tanpa alur reset nyata. Lokasi: `app.py:186` (`forgot`). Keparahan: high. Dampak: user tidak bisa recovery akun secara aman. Rekomendasi perbaikan: implementasikan reset dengan token time-bound atau OTP.
-- [x] Masalah: Validasi QR memakai prefix statis dan aturan demo. Lokasi: `app.py:4057` (`_validate_qr_data`). Keparahan: high. Dampak: QR mudah dipalsukan. Rekomendasi perbaikan: gunakan token QR yang ditandatangani dan time-bound.
-- [x] Masalah: Logout menggunakan endpoint GET. Lokasi: `app.py:350` (`logout`). Keparahan: low. Dampak: logout tidak sengaja atau dipicu CSRF. Rekomendasi perbaikan: ubah ke POST dengan proteksi CSRF.
-- [x] Masalah: Audit log tidak mencakup alur kritikal (login, attendance, approval cuti, perubahan password). Lokasi: `app.py:1239` (`_log_audit_event`) dan tidak digunakan di route auth/attendance. Keparahan: medium. Dampak: jejak audit untuk insiden keamanan terbatas. Rekomendasi perbaikan: tambahkan audit event untuk auth, attendance, dan approval.
+- [ ] `create_app` masih menambal `secret = "presensi-default-secret"` ketika `FLASK_SECRET` tidak tersedia, sehingga instance produksi tanpa env var berjalan dengan secret yang diketahui publik. Lokasi: `app.py:26-36`. Severity: blocker. Dampak: sesi bisa dipalsukan, data pengguna intepretatif, dan security header jadi sia-sia. Rekomendasi perbaikan: hentikan bootstrap ketika `FLASK_SECRET` kosong (raise error) atau ambil dari vault/secrets manager; jangan fallback ke string yang bisa ditebak.
+- [ ] `ENABLE_SEED_DATA` default masih `True` dan `SEED_USERS` memuat `hrd@gmi.com` dengan password `hrd123`. Lokasi: `app.py:1493-1525`. Severity: blocker. Dampak: setiap deployment otomatis memunculkan akun admin dengan kredensial publik tanpa kontrol, memudahkan akses tidak sah jika variabel tidak diganti. Rekomendasi perbaikan: ubah default `ENABLE_SEED_DATA` ke `False`, jangan hardcode password, dan hanya masukkan seed lewat `SEED_USERS_JSON` yang di-override secara eksplisit untuk staging/testing.
 
 ## 8. Runbook Operasional
+- [ ] Runbook deployment masih mengandalkan langkah build/run container dengan seed dan jaringan hosting yang disebutkan dalam dokumentasi lama. Lokasi: `deploy.sh`, `docs/push_deploy.md`, `templates/README.md`. Severity: low. Dampak: bila operator lupa override seed atau tidak menyambungkan container ke `hosting_web`, service tidak akan terhubung ke reverse proxy dan akun default tetap aktif. Rekomendasi perbaikan: perkuat runbook dengan daftar env yang wajib di-override (mis. `ENABLE_SEED_DATA=0` atau `SEED_USERS_JSON` khusus) dan pastikan langkah network tercatat.
 
-- Masalah operasional: Saat running image di NAS, pastikan akun seed tersedia. Default seed menyediakan `hrd@gmi.com / hrd123`. Jika ingin override, jalankan container dengan `SEED_USERS_JSON`:
-  1. Build image dari root repo: `docker build -t presensi-app .`.
-  2. Jalankan container (opsional: override seed):
-     ```
-     docker run -d \
-       --name presensi-app \
-       -e ENABLE_SEED_DATA=1 \
-       -e SEED_USERS_JSON='[{"email":"hrd@gmi.com","name":"HR Superadmin","role":"hr_superadmin","password":"hrd123"}]' \
-       -p 5050:5050 \
-       presensi-app
-     ```
-  3. Login pertama pakai `hrd@gmi.com / hrd123`, lalu segera ubah password melalui menu profil.
-
-- Masalah networking: reverse proxy (hosting_web) perlu bisa reach container, sehingga setelah container jalan pastikan ia terhubung ke network itu:
-  ```
-  docker network connect hosting_web presensi-app
-  ```
-  Setelah koneksi, Cloudflare atau Nginx yang run di `hosting_web` akan melihat service dan akses `absensi.gajiku.online` tidak lagi mengembalikan 502.
+Runbook steps:
+1. Dari root repo: `docker build -t presensi-app .`.
+2. Jalankan container (sesuaikan seed jika tidak hendak pakai credential standar):
+   ```
+   docker run -d \
+     --name presensi-app \
+     -e ENABLE_SEED_DATA=1 \
+     -e SEED_USERS_JSON='[{"email":"hrd@gmi.com","name":"HR Superadmin","role":"hr_superadmin","password":"hrd123"}]' \
+     -p 5050:5050 \
+     presensi-app
+   ```
+3. Setelah berjalan, sambungkan ke network `hosting_web` agar reverse proxy/Cloudflare bisa mengakses: `docker network connect hosting_web presensi-app`.
+4. Login pertama dengan `hrd@gmi.com / hrd123`, lalu segera ubah password melalui menu profil.

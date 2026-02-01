@@ -47,11 +47,11 @@
     </div>
     <div class="form-row">
       <label class="label" for="policy-from">Berlaku Mulai :</label>
-      <input class="input" id="policy-from" type="text" name="effective_from" placeholder="dd/mm/yyyy" required data-policy-date />
+      <input class="input" id="policy-from" type="text" name="effective_from" placeholder="DD-MM-YYYY" required data-policy-date />
     </div>
     <div class="form-row">
       <label class="label" for="policy-to">Berlaku Sampai :</label>
-      <input class="input" id="policy-to" type="text" name="effective_to" placeholder="dd/mm/yyyy" data-policy-date />
+      <input class="input" id="policy-to" type="text" name="effective_to" placeholder="DD-MM-YYYY" data-policy-date />
     </div>
     <div class="form-row">
       <label class="label" for="policy-work">Durasi Kerja (menit) :</label>
@@ -125,7 +125,7 @@
         <td>{{ p.client_name or '-' }}</td>
         <td>{{ p.site_name or '-' }}</td>
         <td>{{ p.shift_name or '-' }}</td>
-        <td>{{ p.effective_from }}{% if p.effective_to %} - {{ p.effective_to }}{% endif %}</td>
+        <td>{{ p.effective_from|ddmmyyyy }}{% if p.effective_to %} - {{ p.effective_to|ddmmyyyy }}{% endif %}</td>
         <td>
           GPS: {{ 'Ya' if p.allow_gps else 'Tidak' }},
           QR: {{ 'Ya' if p.allow_qr else 'Tidak' }},
@@ -189,13 +189,13 @@
             {% endfor %}
           </select>
         </div>
-        <div class="form-row">
-          <label class="label" for="policy-from-{{ p.id }}">Berlaku Mulai</label>
-          <input class="input" id="policy-from-{{ p.id }}" type="text" name="effective_from" value="{{ p.effective_from|ddmmyyyy }}" placeholder="dd/mm/yyyy" required data-policy-date />
-        </div>
-        <div class="form-row">
-          <label class="label" for="policy-to-{{ p.id }}">Berlaku Sampai</label>
-          <input class="input" id="policy-to-{{ p.id }}" type="text" name="effective_to" value="{{ p.effective_to|ddmmyyyy or '' }}" placeholder="dd/mm/yyyy" data-policy-date />
+          <div class="form-row">
+            <label class="label" for="policy-from-{{ p.id }}">Berlaku Mulai</label>
+            <input class="input" id="policy-from-{{ p.id }}" type="text" name="effective_from" value="{{ p.effective_from|ddmmyyyy }}" placeholder="DD-MM-YYYY" required data-policy-date />
+          </div>
+          <div class="form-row">
+            <label class="label" for="policy-to-{{ p.id }}">Berlaku Sampai</label>
+            <input class="input" id="policy-to-{{ p.id }}" type="text" name="effective_to" value="{{ p.effective_to|ddmmyyyy or '' }}" placeholder="DD-MM-YYYY" data-policy-date />
         </div>
         <div class="form-row">
           <label class="label" for="policy-work-{{ p.id }}">Durasi Kerja (menit)</label>
@@ -334,9 +334,17 @@
   (function(){
     function toIsoDate(value){
       if (!value) return "";
-      const match = value.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-      if (!match) return value;
-      return `${match[3]}-${match[2]}-${match[1]}`;
+      const trimmed = value.trim();
+      const normalized = trimmed.replace(/-/g, "/");
+      let match = normalized.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+      if (match) {
+        return `${match[3]}-${match[2]}-${match[1].padStart(2, "0")}`;
+      }
+      const parsed = Date.parse(trimmed);
+      if (!Number.isNaN(parsed)) {
+        return new Date(parsed).toISOString().split("T")[0];
+      }
+      return value;
     }
     document.querySelectorAll("[data-policy-form]").forEach((form) => {
       form.addEventListener("submit", () => {

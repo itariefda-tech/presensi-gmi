@@ -66,21 +66,7 @@
             {% if u.must_change_password %}<div class="muted">Must change</div>{% endif %}
           </td>
           <td>{{ u.client_name or "-" }}</td>
-          <td>
-            {% set created_at = u.created_at or "" %}
-            {% if created_at and " " in created_at %}
-              {% set date_part = created_at.split(" ")[0] %}
-              {% set time_part = created_at.split(" ")[1] %}
-              {% set date_bits = date_part.split("-") %}
-              {% if date_bits|length == 3 %}
-                {{ date_bits[2] ~ "/" ~ date_bits[1] ~ "/" ~ date_bits[0][2:] }} | {{ time_part[:5] }}
-              {% else %}
-                {{ created_at }}
-              {% endif %}
-            {% else %}
-              -
-            {% endif %}
-          </td>
+          <td>{{ u.created_at|display_datetime or "-" }}</td>
           <td>
             <div class="inline">
               <button class="btn secondary" type="button" data-modal-open="user-edit-modal-{{ u.id }}">Edit</button>
@@ -219,7 +205,7 @@
             <td>{{ code.registrant_count }}</td>
             <td>{{ code.used_count or 0 }}</td>
             <td>{{ (code.registrant_count or 0) - (code.used_count or 0) }}</td>
-            <td>{{ code.created_at or "-" }}</td>
+            <td>{{ code.created_at|display_datetime or "-" }}</td>
           </tr>
           {% endfor %}
         </tbody>

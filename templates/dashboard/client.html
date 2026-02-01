@@ -168,8 +168,8 @@
               </div>
               {% if current_policy %}
               <div class="policy-tags">
-                <span>{{ current_policy.scope_type }} • {{ current_policy.effective_from }}</span>
-                <span>Sampai {{ current_policy.effective_to or "-" }}</span>
+                <span>{{ current_policy.scope_type }} • {{ current_policy.effective_from|ddmmyyyy }}</span>
+                <span>Sampai {{ current_policy.effective_to|ddmmyyyy or "-" }}</span>
                 <span>GPS {{ "On" if current_policy.allow_gps else "Off" }}</span>
                 <span>QR {{ "On" if current_policy.allow_qr else "Off" }}</span>
                 <span>Selfie {{ "On" if current_policy.require_selfie else "Off" }}</span>
@@ -195,54 +195,55 @@
                   <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                   <div class="form-grid">
                     <div class="form-row">
-                      <label class="label">Mulai</label>
-                      <input class="input" name="effective_from" type="text" value="{{ current_policy.effective_from }}" required />
+                      <label class="label">Tanggal mulai</label>
+                      <input class="input" name="effective_from" type="text" value="{{ current_policy.effective_from|ddmmyyyy }}" placeholder="DD-MM-YYYY" required />
                     </div>
                     <div class="form-row">
-                      <label class="label">Selesai</label>
-                      <input class="input" name="effective_to" type="text" value="{{ current_policy.effective_to or '' }}" />
+                      <label class="label">Tanggal selesai</label>
+                      <input class="input" name="effective_to" type="text" value="{{ current_policy.effective_to|ddmmyyyy or '' }}" placeholder="DD-MM-YYYY" />
                     </div>
                     <div class="form-row">
-                      <label class="label">Work duration</label>
+                      <label class="label">Durasi kerja (menit)</label>
                       <input class="input" name="work_duration_minutes" type="number" value="{{ current_policy.work_duration_minutes or '' }}" />
                     </div>
                     <div class="form-row">
-                      <label class="label">Grace (menit)</label>
+                      <label class="label">Toleransi telat (menit)</label>
                       <input class="input" name="grace_minutes" type="number" value="{{ current_policy.grace_minutes or '' }}" />
                     </div>
                     <div class="form-row">
-                      <label class="label">Late threshold</label>
+                      <label class="label">Ambang terlambat (menit)</label>
                       <input class="input" name="late_threshold_minutes" type="number" value="{{ current_policy.late_threshold_minutes or '' }}" />
                     </div>
                     <div class="form-row">
-                      <label class="label">Cutoff time</label>
+                      <label class="label">Waktu cutoff</label>
                       <input class="input" name="cutoff_time" type="text" value="{{ current_policy.cutoff_time or '' }}" />
                     </div>
                     <div class="form-row">
                       <label class="toggle-line">
                         <input type="checkbox" name="allow_gps" value="1" {% if current_policy.allow_gps %}checked{% endif %} />
-                        Allow GPS
+                        Izinkan GPS
                       </label>
                     </div>
                     <div class="form-row">
                       <label class="toggle-line">
                         <input type="checkbox" name="allow_qr" value="1" {% if current_policy.allow_qr %}checked{% endif %} />
-                        Allow QR
+                        Izinkan QR
                       </label>
                     </div>
                     <div class="form-row">
                       <label class="toggle-line">
                         <input type="checkbox" name="require_selfie" value="1" {% if current_policy.require_selfie %}checked{% endif %} />
-                        Require Selfie
+                        Wajib selfie
                       </label>
                     </div>
-                    <div class="form-row">
-                      <label class="toggle-line">
-                        <input type="checkbox" name="auto_checkout" value="1" {% if current_policy.auto_checkout %}checked{% endif %} />
-                        Auto Checkout
-                      </label>
-                    </div>
+                  <div class="form-row toggle-divider">
+                    <label class="toggle-line">
+                      <input type="checkbox" name="auto_checkout" value="1" {% if current_policy.auto_checkout %}checked{% endif %} />
+                      Checkout otomatis
+                    </label>
                   </div>
+                  <div class="toggle-note">Toggle ini hanya penanda bahwa checkout otomatis tersedia; tidak memicu jalur/logic lain di klien.</div>
+                </div>
                   <div class="form-actions">
                     <button class="btn primary" type="submit">Simpan</button>
                   </div>
@@ -253,52 +254,53 @@
                   <div class="form-grid">
                     <div class="form-row">
                       <label class="label" for="policy-start">Mulai</label>
-                      <input class="input" id="policy-start" name="effective_from" type="text" placeholder="dd/mm/yyyy" required />
+                      <input class="input" id="policy-start" name="effective_from" type="text" placeholder="DD-MM-YYYY" required />
                     </div>
                     <div class="form-row">
                       <label class="label" for="policy-end">Selesai</label>
-                      <input class="input" id="policy-end" name="effective_to" type="text" placeholder="dd/mm/yyyy" />
+                      <input class="input" id="policy-end" name="effective_to" type="text" placeholder="DD-MM-YYYY" />
                     </div>
                     <div class="form-row">
-                      <label class="label" for="policy-work">Work duration</label>
+                      <label class="label" for="policy-work">Durasi kerja (menit)</label>
                       <input class="input" id="policy-work" name="work_duration_minutes" type="number" />
                     </div>
                     <div class="form-row">
-                      <label class="label" for="policy-grace">Grace (menit)</label>
+                      <label class="label" for="policy-grace">Toleransi telat (menit)</label>
                       <input class="input" id="policy-grace" name="grace_minutes" type="number" />
                     </div>
                     <div class="form-row">
-                      <label class="label" for="policy-late">Late threshold</label>
+                      <label class="label" for="policy-late">Ambang terlambat (menit)</label>
                       <input class="input" id="policy-late" name="late_threshold_minutes" type="number" />
                     </div>
                     <div class="form-row">
-                      <label class="label" for="policy-cutoff">Cutoff time</label>
+                      <label class="label" for="policy-cutoff">Waktu cutoff</label>
                       <input class="input" id="policy-cutoff" name="cutoff_time" type="text" placeholder="HH:MM" />
                     </div>
                     <div class="form-row">
                       <label class="toggle-line">
                         <input type="checkbox" name="allow_gps" value="1" checked />
-                        Allow GPS
+                        Izinkan GPS
                       </label>
                     </div>
                     <div class="form-row">
                       <label class="toggle-line">
                         <input type="checkbox" name="allow_qr" value="1" checked />
-                        Allow QR
+                        Izinkan QR
                       </label>
                     </div>
                     <div class="form-row">
                       <label class="toggle-line">
                         <input type="checkbox" name="require_selfie" value="1" />
-                        Require Selfie
+                        Wajib selfie
                       </label>
                     </div>
-                    <div class="form-row">
+                    <div class="form-row toggle-divider">
                       <label class="toggle-line">
                         <input type="checkbox" name="auto_checkout" value="1" />
-                        Auto Checkout
+                        Checkout otomatis
                       </label>
                     </div>
+                    <div class="toggle-note">Toggle ini hanya penanda bahwa checkout otomatis tersedia; tidak memicu jalur/logic lain di klien.</div>
                   </div>
                   <div class="form-actions">
                     <button class="btn primary" type="submit">Simpan</button>
@@ -354,7 +356,15 @@
                       <form method="post" action="{{ url_for('client_employees_delete') }}" onsubmit="return confirm('Hapus pegawai ini beserta assignment-nya?');">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                         <input type="hidden" name="email" value="{{ e.email }}" />
-                        <button class="btn danger" type="submit">Delete</button>
+                        <button class="btn danger btn-icon" type="submit" aria-label="Hapus pegawai" data-tooltip="Hapus">
+                          <svg class="icon icon-bin" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                            <path d="M9 6V4h6v2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                            <path d="M5 6h14l-1 13H6z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                            <path d="M10 11v6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+                            <path d="M14 11v6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+                            <path d="M3 6h18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+                          </svg>
+                        </button>
                       </form>
                       {% else %}
                       <span class="note">-</span>
@@ -458,11 +468,11 @@
                   </div>
                   <div class="form-row">
                     <label class="label" for="assignment-start">Mulai</label>
-                    <input class="input" id="assignment-start" name="start_date" type="text" placeholder="dd/mm/yyyy" required />
+                    <input class="input" id="assignment-start" name="start_date" type="text" placeholder="DD-MM-YYYY" required />
                   </div>
                   <div class="form-row">
                     <label class="label" for="assignment-end">Selesai</label>
-                    <input class="input" id="assignment-end" name="end_date" type="text" placeholder="dd/mm/yyyy" />
+                    <input class="input" id="assignment-end" name="end_date" type="text" placeholder="DD-MM-YYYY" />
                   </div>
                   <div class="form-row">
                     <label class="label">Status</label>
@@ -499,8 +509,8 @@
                   <tr>
                     <th>Pegawai</th>
                     <th>Tanggal</th>
-                    <th>Waktu</th>
-                    <th>Aksi</th>
+                    <th>Cek in</th>
+                    <th>Cek out</th>
                     <th>Metode</th>
                   </tr>
                 </thead>
@@ -508,10 +518,12 @@
                   {% if attendance_records %}
                   {% for row in attendance_records %}
                   <tr>
+                    {% set action_lower = (row.action or '').lower() %}
+                    {% set is_checkout = action_lower and 'out' in action_lower %}
                     <td>{{ row.employee }}</td>
-                    <td>{{ row.date }}</td>
-                    <td>{{ row.time }}</td>
-                    <td>{{ row.action|upper }}</td>
+                    <td>{{ row.date|ddmmyyyy }}</td>
+                    <td>{{ "-" if is_checkout else row.time }}</td>
+                    <td>{{ row.time if is_checkout else "-" }}</td>
                     <td>{{ row.method }}</td>
                   </tr>
                   {% endfor %}
@@ -533,46 +545,93 @@
           <article class="panel" id="attendance-report">
             <div class="panel-head">
               <div>
-                <h3>Attendance Report</h3>
-                <div class="panel-sub">Tarik rekap attendance site ini dalam format CSV.</div>
+                <h3>Attendance Report & Rekap</h3>
+                <div class="panel-sub">Lihat ringkasan attendance dan tarik CSV sesuai kebutuhan.</div>
               </div>
             </div>
-            <form class="site-form" method="get" action="{{ url_for('client_attendance_csv') }}">
-              <div class="form-grid">
-                <div class="form-row full">
-                  <label class="label">Mode</label>
-                  <div class="toggle-line attendance-toggle">
-                    <label class="toggle-line">
-                      <input type="radio" name="mode" value="all" checked />
-                      Semua data
-                    </label>
-                    <label class="toggle-line">
-                      <input type="radio" name="mode" value="range" />
-                      Rentang tanggal
-                    </label>
-                    <label class="toggle-line">
-                      <input type="radio" name="mode" value="month" />
-                      Periode bulan
-                    </label>
+            <div class="attendance-panel-body">
+              <div id="attendance-range">
+                <form class="site-form" id="attendance-range-form">
+                  <div class="attendance-range-row">
+                    <div class="range-fields">
+                      <div class="form-row">
+                        <label class="label" for="attendance-range-from">Dari</label>
+                        <input class="input" id="attendance-range-from" name="from" type="text" placeholder="DD-MM-YYYY" />
+                      </div>
+                      <div class="form-row">
+                        <label class="label" for="attendance-range-to">Sampai</label>
+                        <input class="input" id="attendance-range-to" name="to" type="text" placeholder="DD-MM-YYYY" />
+                      </div>
+                    </div>
+                    <button class="btn primary range-action" type="submit">Rekap</button>
+                  </div>
+                </form>
+                <div class="attendance-range-message" id="attendance-range-message">Masukkan rentang tanggal lalu tekan &ldquo;Rekap&rdquo; untuk melihat data.</div>
+                <div class="table-wrap">
+                  <table class="data-table" id="attendance-range-table" data-page-size="6">
+                    <thead>
+                      <tr>
+                        <th>Pegawai</th>
+                        <th>Tanggal</th>
+                        <th>Cek in</th>
+                        <th>Cek out</th>
+                        <th>Metode</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td colspan="5" class="empty-row">Rentang belum dipilih.</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div class="table-pagination" id="attendance-range-pagination" style="display:none;">
+                  <button class="btn ghost" type="button" data-page="prev" disabled>Prev</button>
+                  <span class="page-info" data-page-info>Page 0 of 0</span>
+                  <button class="btn ghost" type="button" data-page="next" disabled>Next</button>
+                </div>
+              </div>
+              <form class="site-form attendance-export" method="get" action="{{ url_for('client_attendance_csv') }}">
+                <div class="form-grid">
+                  <div class="form-row full">
+                    <label class="label">TARIK DATA-Mode :</label>
+                    <div class="toggle-line attendance-toggle">
+                      <label class="toggle-line">
+                        <input type="radio" name="mode" value="all" checked />
+                        Semua data
+                      </label>
+                      <label class="toggle-line">
+                        <input type="radio" name="mode" value="range" />
+                        Rentang tanggal
+                      </label>
+                      <label class="toggle-line">
+                        <input type="radio" name="mode" value="month" />
+                        Periode bulan
+                      </label>
+                    </div>
+                  </div>
+                  <div class="attendance-export-grid">
+                    <div class="form-row" data-attendance-field="range">
+                      <label class="label" for="attendance-from">Dari</label>
+                      <input class="input" id="attendance-from" name="from" type="text" placeholder="DD-MM-YYYY" />
+                    </div>
+                    <div class="form-row" data-attendance-field="range">
+                      <label class="label" for="attendance-to">Sampai</label>
+                      <input class="input" id="attendance-to" name="to" type="text" placeholder="DD-MM-YYYY" />
+                    </div>
+                    <div class="form-row export-actions">
+                      <button class="btn primary" type="submit">CSV</button>
+                    </div>
+                    <div class="form-row attendance-month-row" data-attendance-field="month">
+                      <div class="month-input">
+                        <label class="label" for="attendance-month">Bulan</label>
+                      <input class="input" id="attendance-month" name="month" type="text" placeholder="MM-YYYY" />
+                      </div>
+                    </div>
                   </div>
                 </div>
-                <div class="form-row" data-attendance-field="range">
-                  <label class="label" for="attendance-from">Dari</label>
-                  <input class="input" id="attendance-from" name="from" type="text" placeholder="dd/mm/yyyy" />
-                </div>
-                <div class="form-row" data-attendance-field="range">
-                  <label class="label" for="attendance-to">Sampai</label>
-                  <input class="input" id="attendance-to" name="to" type="text" placeholder="dd/mm/yyyy" />
-                </div>
-                <div class="form-row" data-attendance-field="month">
-                  <label class="label" for="attendance-month">Bulan</label>
-                  <input class="input" id="attendance-month" name="month" type="text" placeholder="yyyy-mm" />
-                </div>
-              </div>
-              <div class="form-actions">
-                <button class="btn primary" type="submit">Tarik Data CSV</button>
-              </div>
-            </form>
+              </form>
+            </div>
           </article>
 
           <article class="panel" id="patrol">

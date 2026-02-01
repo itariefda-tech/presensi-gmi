@@ -133,7 +133,7 @@
         {% endif %}
         {% for log in audit_logs %}
         <tr>
-          <td>{{ log.created_at }}</td>
+          <td>{{ log.created_at|display_datetime }}</td>
           <td>{{ log.entity_type }} #{{ log.entity_id or '-' }}</td>
           <td>{{ log.action }}</td>
           <td>{{ log.actor_email }}</td>
