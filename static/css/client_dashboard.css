@@ -645,6 +645,8 @@ html[data-theme="light"] .data-table .btn.danger.btn-icon{
   padding: 10px 12px;
   border-bottom: 1px solid var(--border);
   text-align: left;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .data-table th{
@@ -652,6 +654,33 @@ html[data-theme="light"] .data-table .btn.danger.btn-icon{
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.12em;
+}
+
+.data-table th.check-label{
+  white-space: normal;
+  line-height: 1.2;
+}
+
+.check-cell{
+  white-space: normal;
+  line-height: 1.3;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.table-card{
+  width: 100%;
+  min-width: 0;
+}
+
+.table-card .table-wrap{
+  min-width: 0;
+}
+
+@media (max-width: 768px){
+  .table-card{
+    width: 100%;
+  }
 }
 
 .empty-row,

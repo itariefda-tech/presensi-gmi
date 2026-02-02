@@ -781,15 +781,16 @@ def create_app() -> Flask:
             date_from=date_from,
             date_to=date_to,
         )
+        aggregated_rows = _aggregate_attendance_records(rows)
         sanitized: list[dict] = []
         max_rows = 250
-        for row in rows[:max_rows]:
+        for row in aggregated_rows[:max_rows]:
             sanitized.append(
                 {
                     "employee": row["employee"] or "-",
                     "date": _format_display_date(row["date"]),
-                    "time": row["time"] or "-",
-                    "action": (row["action"] or "").upper(),
+                    "check_in": row["check_in"] or "-",
+                    "check_out": row["check_out"] or "-",
                     "method": row["method"] or "-",
                 }
             )
@@ -8398,10 +8399,51 @@ def _attendance_live(
     finally:
         conn.close()
 
-    records = sorted(records, key=lambda row: row.get("created_at", ""), reverse=True)
-    records = records[:limit]
-    _perf_log("attendance_live", start, f"rows={len(records)} limit={limit}")
-    return records
+    aggregated_records = _aggregate_attendance_records(records)
+    aggregated_records = sorted(aggregated_records, key=lambda row: row.get("created_at", ""), reverse=True)
+    aggregated_records = aggregated_records[:limit]
+    _perf_log("attendance_live", start, f"rows={len(aggregated_records)} limit={limit}")
+    return aggregated_records
+
+
+def _aggregate_attendance_records(rows: list[dict]) -> list[dict]:
+    aggregated: list[dict] = []
+    seen: dict[str, dict] = {}
+    for row in rows:
+        email_key = (row.get("email") or "").strip().lower()
+        date_value = row.get("date") or "-"
+        key = f"{email_key}|{date_value}"
+        entry = seen.get(key)
+        if not entry:
+            entry = {
+                "employee": row.get("employee") or "-",
+                "email": row.get("email") or "-",
+                "date": row.get("date") or "-",
+                "check_in": "-",
+                "check_out": "-",
+                "method": row.get("method") or "-",
+                "source": row.get("source") or "-",
+                "created_at": row.get("created_at") or "",
+            }
+            aggregated.append(entry)
+            seen[key] = entry
+        action_lower = (row.get("action") or "").lower()
+        time_value = row.get("time") or "-"
+        if "out" in action_lower:
+            if time_value and time_value != "-":
+                entry["check_out"] = time_value
+        else:
+            if time_value and time_value != "-":
+                entry["check_in"] = time_value
+        if row.get("method"):
+            entry["method"] = row["method"]
+        created_at = row.get("created_at")
+        if created_at:
+            if not entry.get("created_at"):
+                entry["created_at"] = created_at
+            elif created_at > entry["created_at"]:
+                entry["created_at"] = created_at
+    return aggregated
 
 
 def _chunk_items(items: list[str], size: int) -> list[list[str]]:

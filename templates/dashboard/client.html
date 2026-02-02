@@ -594,7 +594,7 @@
         </section>
 
         <section class="swipe-pane" data-pane="3" aria-label="Attendance & Patroli">
-          <article class="panel" id="attendance">
+          <article class="panel table-card" id="attendance">
             <div class="panel-head">
               <div>
                 <h3>Attendance Harian</h3>
@@ -606,9 +606,8 @@
                 <thead>
                   <tr>
                     <th>Pegawai</th>
-                    <th>Tanggal</th>
-                    <th>Cek in</th>
-                    <th>Cek out</th>
+                    <th>Date</th>
+                    <th class="check-label">Check<br />in/out</th>
                     <th>Metode</th>
                   </tr>
                 </thead>
@@ -616,18 +615,17 @@
                   {% if attendance_records %}
                   {% for row in attendance_records %}
                   <tr>
-                    {% set action_lower = (row.action or '').lower() %}
-                    {% set is_checkout = action_lower and 'out' in action_lower %}
                     <td>{{ row.employee }}</td>
                     <td>{{ row.date|ddmmyyyy }}</td>
-                    <td>{{ "-" if is_checkout else row.time }}</td>
-                    <td>{{ row.time if is_checkout else "-" }}</td>
+                    <td class="check-cell">
+                      {{ row.check_in or "-" }} - {{ row.check_out or "-" }}
+                    </td>
                     <td>{{ row.method }}</td>
                   </tr>
                   {% endfor %}
                   {% else %}
                   <tr>
-                    <td colspan="5" class="empty-row">Belum ada data attendance.</td>
+                    <td colspan="4" class="empty-row">Belum ada data attendance.</td>
                   </tr>
                   {% endif %}
                 </tbody>
@@ -640,7 +638,7 @@
             </div>
           </article>
 
-          <article class="panel" id="attendance-report">
+          <article class="panel table-card" id="attendance-report">
             <div class="panel-head">
               <div>
                 <h3>Attendance Report & Rekap</h3>
@@ -674,15 +672,14 @@
                     <thead>
                       <tr>
                         <th>Pegawai</th>
-                        <th>Tanggal</th>
-                        <th>Cek in</th>
-                        <th>Cek out</th>
+                        <th>Date</th>
+                        <th class="check-label">Check<br />in/out</th>
                         <th>Metode</th>
                       </tr>
                     </thead>
                     <tbody>
                       <tr>
-                        <td colspan="5" class="empty-row">Rentang belum dipilih.</td>
+                        <td colspan="4" class="empty-row">Rentang belum dipilih.</td>
                       </tr>
                     </tbody>
                   </table>

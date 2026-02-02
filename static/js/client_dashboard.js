@@ -548,20 +548,20 @@
 
     const renderRow = (row) => {
       const tr = document.createElement("tr");
-      const actionLower = (row.action || "").toLowerCase();
-      const isCheckout = actionLower.includes("out");
-      const checkInValue = isCheckout ? "-" : row.time || "-";
-      const checkOutValue = isCheckout ? row.time || "-" : "-";
+      const checkInValue = row.check_in || "-";
+      const checkOutValue = row.check_out || "-";
       const cells = [
         row.employee || "-",
         row.date || "-",
-        checkInValue,
-        checkOutValue,
+        `${checkInValue} - ${checkOutValue}`,
         row.method || "-",
       ];
-      cells.forEach((value) => {
+      cells.forEach((value, idx) => {
         const td = document.createElement("td");
         td.textContent = value;
+        if (idx === 2) {
+          td.classList.add("check-cell");
+        }
         tr.appendChild(td);
       });
       return tr;
@@ -571,7 +571,7 @@
       tbody.innerHTML = "";
       if (!currentRows.length) {
         const emptyRow = document.createElement("tr");
-        emptyRow.innerHTML = "<td colspan='5' class='empty-row'>Tidak ada data pada rentang ini.</td>";
+        emptyRow.innerHTML = "<td colspan='4' class='empty-row'>Tidak ada data pada rentang ini.</td>";
         tbody.appendChild(emptyRow);
       } else {
         const start = (currentPage - 1) * pageSize;
