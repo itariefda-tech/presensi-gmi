@@ -42,8 +42,8 @@
     </div>
     <div class="top-actions">
       <div class="top-actions-controls">
-        <button class="nav-btn header-nav-btn settings-btn" type="button" data-tab="5" aria-label="Settings">
-          <span class="nav-icon" aria-hidden="true">
+        <button class="header-action-btn settings-btn" type="button" data-tab="5" aria-label="Settings">
+          <span class="header-action-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none">
               <path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z" stroke="currentColor" stroke-width="1.5"/>
               <path d="M19.4 15a7.9 7.9 0 0 0 .1-2l2-1.5-2-3.5-2.3.8a7.6 7.6 0 0 0-1.7-1l-.4-2.4h-4l-.4 2.4a7.6 7.6 0 0 0-1.7 1l-2.3-.8-2 3.5 2 1.5a7.9 7.9 0 0 0 .1 2l-2 1.5 2 3.5 2.3-.8a7.6 7.6 0 0 0 1.7 1l.4 2.4h4l.4-2.4a7.6 7.6 0 0 0 1.7-1l2.3.8 2-3.5-2-1.5Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
@@ -52,8 +52,8 @@
         </button>
         <form class="section-head-logout" method="post" action="{{ url_for('logout') }}">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-          <button class="nav-btn nav-logout header-nav-btn logout-btn" type="submit" aria-label="Logout">
-            <span class="nav-icon" aria-hidden="true">
+          <button class="header-action-btn logout-btn" type="submit" aria-label="Logout">
+            <span class="header-action-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none">
                 <path d="M15 7.5V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h7a2 2 0 0 0 2-2v-1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
                 <path d="M10 12h9m0 0-3-3m3 3-3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -359,13 +359,15 @@
                   <tr>
                     <th>Nama</th>
                     <th>Email / No HP</th>
-                    <th>Status</th>
                     <th>Aksi</th>
                   </tr>
                 </thead>
                 <tbody>
+                  {% set has_active_employees = false %}
                   {% if employees %}
                   {% for e in employees %}
+                  {% if e.is_active %}
+                  {% set has_active_employees = true %}
                   <tr>
                     <td>{{ e.name }}</td>
                     <td>
@@ -373,13 +375,6 @@
                         <span>{{ e.email }}</span>
                         <span>{{ e.no_hp }}</span>
                       </div>
-                    </td>
-                    <td>
-                      {% if e.assignment_pending %}
-                      <span class="status-pill pending">Pending</span>
-                      {% else %}
-                      {{ "Aktif" if e.is_active else "Nonaktif" }}
-                      {% endif %}
                     </td>
                     <td>
                       {% if can_manage_employees %}
@@ -401,10 +396,12 @@
                       {% endif %}
                     </td>
                   </tr>
+                  {% endif %}
                   {% endfor %}
-                  {% else %}
+                  {% endif %}
+                  {% if not has_active_employees %}
                   <tr>
-                    <td colspan="4" class="empty-row">Belum ada pegawai.</td>
+                    <td colspan="3" class="empty-row">Belum ada pegawai aktif.</td>
                   </tr>
                   {% endif %}
                 </tbody>
@@ -414,6 +411,77 @@
               <button class="btn ghost" type="button" data-page="prev">Prev</button>
               <span class="page-info" data-page-info>Page 1 of 1</span>
               <button class="btn ghost" type="button" data-page="next">Next</button>
+            </div>
+          </article>
+
+          <article class="panel panel-collapsible is-collapsed" id="employees-inactive">
+            <div class="panel-head panel-head-collapsible">
+              <div class="panel-sub">Berdasarkan assignment non aktif di site ini.</div>
+              <button class="mini-btn collapse-toggle" type="button" data-collapse-toggle="employees-inactive" aria-expanded="false" aria-controls="employees-inactive-body" aria-label="Toggle daftar pegawai non aktif">
+                <span class="icon-burger" aria-hidden="true"><span></span><span></span><span></span></span>
+                <span class="icon-minus" aria-hidden="true"></span>
+              </button>
+            </div>
+            <div class="panel-body-collapsible" id="employees-inactive-body">
+              <div class="table-wrap">
+                <table class="data-table" id="employee-inactive-table" data-page-size="6">
+                  <thead>
+                    <tr>
+                      <th>Nama</th>
+                      <th>Email / No HP</th>
+                      <th>Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% set has_inactive_employees = false %}
+                    {% if employees %}
+                    {% for e in employees %}
+                    {% if not e.is_active %}
+                    {% set has_inactive_employees = true %}
+                    <tr>
+                      <td>{{ e.name }}</td>
+                      <td>
+                        <div class="contact-stack">
+                          <span>{{ e.email }}</span>
+                          <span>{{ e.no_hp }}</span>
+                        </div>
+                      </td>
+                      <td>
+                        {% if can_manage_employees %}
+                        <form method="post" action="{{ url_for('client_employees_delete') }}" onsubmit="return confirm('Hapus pegawai ini beserta assignment-nya?');">
+                          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                          <input type="hidden" name="email" value="{{ e.email }}" />
+                          <button class="btn danger btn-icon" type="submit" aria-label="Hapus pegawai" data-tooltip="Hapus">
+                            <svg class="icon icon-bin" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                              <path d="M9 6V4h6v2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                              <path d="M5 6h14l-1 13H6z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                              <path d="M10 11v6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+                              <path d="M14 11v6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+                              <path d="M3 6h18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+                            </svg>
+                          </button>
+                        </form>
+                        {% else %}
+                        <span class="note">-</span>
+                        {% endif %}
+                      </td>
+                    </tr>
+                    {% endif %}
+                    {% endfor %}
+                    {% endif %}
+                    {% if not has_inactive_employees %}
+                    <tr>
+                      <td colspan="3" class="empty-row">Belum ada pegawai non aktif.</td>
+                    </tr>
+                    {% endif %}
+                  </tbody>
+                </table>
+              </div>
+              <div class="table-pagination" id="employee-inactive-pagination">
+                <button class="btn ghost" type="button" data-page="prev">Prev</button>
+                <span class="page-info" data-page-info>Page 1 of 1</span>
+                <button class="btn ghost" type="button" data-page="next">Next</button>
+              </div>
             </div>
           </article>
 
@@ -681,9 +749,9 @@
             <div class="panel-head">
               <div>
                 <h3>Report Patroli</h3>
-                <div class="panel-sub">Mock data sementara.</div>
+                <div class="panel-sub">Demo data sementara.</div>
               </div>
-              <span class="panel-badge muted">Mock</span>
+              <span class="panel-badge muted">Demo</span>
             </div>
             <div class="patrol-list">
               <div class="patrol-item">
@@ -722,7 +790,6 @@
                     <th>Email</th>
                     <th>Role</th>
                     <th>Status</th>
-                    {% if can_manage_users %}<th>Aksi</th>{% endif %}
                   </tr>
                 </thead>
                 <tbody>
@@ -731,25 +798,26 @@
                   <tr>
                     <td>{{ cu.name or "-" }}</td>
                     <td>{{ cu.email }}</td>
-                    <td>{{ cu.role|replace('_',' ')|title }}</td>
-                    <td>{{ "Aktif" if cu.is_active else "Nonaktif" }}</td>
-                    {% if can_manage_users %}
+                    <td>{{ cu.role|replace('client_', '')|replace('_',' ')|title }}</td>
                     <td>
-                      {% if cu.id != user.id %}
+                      {% if can_manage_users and cu.id != user.id %}
                       <form method="post" action="{{ url_for('client_users_toggle', user_id=cu.id) }}">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-                        <button class="btn ghost" type="submit">Toggle</button>
+                        <button class="status-pill toggle {% if cu.is_active %}ok{% else %}muted{% endif %}" type="submit" aria-label="Toggle status">
+                          {{ "Aktif" if cu.is_active else "Nonaktif" }}
+                        </button>
                       </form>
                       {% else %}
-                      <span class="note">Anda</span>
+                      <span class="status-pill {% if cu.is_active %}ok{% else %}muted{% endif %}">
+                        {{ "Aktif" if cu.is_active else "Nonaktif" }}
+                      </span>
                       {% endif %}
                     </td>
-                    {% endif %}
                   </tr>
                   {% endfor %}
                   {% else %}
                   <tr>
-                    <td colspan="{% if can_manage_users %}5{% else %}4{% endif %}" class="empty-row">Belum ada user client.</td>
+                    <td colspan="4" class="empty-row">Belum ada user client.</td>
                   </tr>
                   {% endif %}
                 </tbody>
@@ -770,9 +838,9 @@
                 <div class="form-row">
                   <label class="label" for="client-user-role">Role</label>
                   <select class="input" id="client-user-role" name="role" required>
-                    <option value="client_assistant">Client Assistant Admin</option>
-                    <option value="client_supervisor">Client Supervisor</option>
-                    <option value="client_operational">Client Operational</option>
+                    <option value="client_assistant">Assistant Admin</option>
+                    <option value="client_supervisor">Supervisor</option>
+                    <option value="client_operational">Operational</option>
                   </select>
                 </div>
                 <div class="form-row">
@@ -788,33 +856,39 @@
           </article>
 
           {% if can_change_password %}
-          <article class="panel" id="settings-password">
-            <div class="panel-head">
+          <article class="panel panel-collapsible is-collapsed" id="settings-password">
+            <div class="panel-head panel-head-collapsible">
               <div>
                 <h3>Ganti Password (Client Admin)</h3>
                 <div class="panel-sub">Perbarui password akun client admin.</div>
               </div>
+              <button class="mini-btn collapse-toggle" type="button" data-collapse-toggle="settings-password" aria-expanded="false" aria-controls="settings-password-body" aria-label="Toggle ganti password">
+                <span class="icon-burger" aria-hidden="true"><span></span><span></span><span></span></span>
+                <span class="icon-minus" aria-hidden="true"></span>
+              </button>
             </div>
-            <form id="changePasswordForm">
-              <div class="form-grid">
-                <div class="form-row">
-                  <label class="label" for="currentPassword">Password Saat Ini</label>
-                  <input class="input" id="currentPassword" name="current_password" type="password" required />
+            <div class="panel-body-collapsible" id="settings-password-body">
+              <form id="changePasswordForm">
+                <div class="form-grid">
+                  <div class="form-row">
+                    <label class="label" for="currentPassword">Password Saat Ini</label>
+                    <input class="input" id="currentPassword" name="current_password" type="password" required />
+                  </div>
+                  <div class="form-row">
+                    <label class="label" for="newPassword">Password Baru</label>
+                    <input class="input" id="newPassword" name="new_password" type="password" required />
+                  </div>
+                  <div class="form-row">
+                    <label class="label" for="newPassword2">Ulangi Password</label>
+                    <input class="input" id="newPassword2" name="new_password2" type="password" required />
+                  </div>
                 </div>
-                <div class="form-row">
-                  <label class="label" for="newPassword">Password Baru</label>
-                  <input class="input" id="newPassword" name="new_password" type="password" required />
+                <div class="form-actions">
+                  <button class="btn primary" type="submit">Perbarui Password</button>
                 </div>
-                <div class="form-row">
-                  <label class="label" for="newPassword2">Ulangi Password</label>
-                  <input class="input" id="newPassword2" name="new_password2" type="password" required />
-                </div>
-              </div>
-              <div class="form-actions">
-                <button class="btn primary" type="submit">Perbarui Password</button>
-              </div>
-              <div class="form-message" id="changePasswordMessage"></div>
-            </form>
+                <div class="form-message" id="changePasswordMessage"></div>
+              </form>
+            </div>
           </article>
           {% endif %}
         </section>

@@ -2,8 +2,10 @@
   const swipeTrack = document.getElementById("swipeTrack");
   const swipeViewport = document.querySelector(".swipe-viewport");
   const navButtons = Array.from(document.querySelectorAll(".nav-btn"));
+  const headerButtons = Array.from(document.querySelectorAll(".header-action-btn[data-tab]"));
   const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || "";
   let swipeIndex = 0;
+  const tabStorageKey = "client_active_tab";
 
   function scrollToTop(){
     const root = document.scrollingElement || document.documentElement;
@@ -26,6 +28,9 @@
       if (Number.isNaN(tab)) return;
       btn.classList.toggle("active", tab === swipeIndex);
     });
+    try {
+      localStorage.setItem(tabStorageKey, String(swipeIndex));
+    } catch (e) {}
     scrollToTop();
   }
 
@@ -33,6 +38,15 @@
     if (!btn.dataset.tab) return;
     btn.addEventListener("click", () => {
       go(parseInt(btn.dataset.tab, 10));
+    });
+  });
+
+  headerButtons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const tab = parseInt(btn.dataset.tab || "", 10);
+      if (!Number.isNaN(tab)) {
+        go(tab);
+      }
     });
   });
 
@@ -354,45 +368,50 @@
   }
 
   function initEmployeeTablePagination(){
-    const table = document.getElementById("employee-table");
-    const pager = document.getElementById("employee-pagination");
-    if (!table || !pager) return;
-    const pageSize = parseInt(table.dataset.pageSize || "6", 10);
-    const tbody = table.querySelector("tbody");
-    if (!tbody) return;
-    const allRows = Array.from(tbody.querySelectorAll("tr")).filter((row) => !row.classList.contains("empty-row"));
-    if (allRows.length <= pageSize) {
-      pager.style.display = "none";
-      return;
-    }
-    let page = 1;
-    const totalPages = Math.max(1, Math.ceil(allRows.length / pageSize));
-    const info = pager.querySelector("[data-page-info]");
-    const prevBtn = pager.querySelector("[data-page='prev']");
-    const nextBtn = pager.querySelector("[data-page='next']");
-    const render = () => {
-      const start = (page - 1) * pageSize;
-      const end = start + pageSize;
-      allRows.forEach((row, idx) => {
-        row.style.display = idx >= start && idx < end ? "" : "none";
+    const initPager = (tableId, pagerId) => {
+      const table = document.getElementById(tableId);
+      const pager = document.getElementById(pagerId);
+      if (!table || !pager) return;
+      const pageSize = parseInt(table.dataset.pageSize || "6", 10);
+      const tbody = table.querySelector("tbody");
+      if (!tbody) return;
+      const allRows = Array.from(tbody.querySelectorAll("tr")).filter((row) => !row.classList.contains("empty-row"));
+      if (allRows.length <= pageSize) {
+        pager.style.display = "none";
+        return;
+      }
+      let page = 1;
+      const totalPages = Math.max(1, Math.ceil(allRows.length / pageSize));
+      const info = pager.querySelector("[data-page-info]");
+      const prevBtn = pager.querySelector("[data-page='prev']");
+      const nextBtn = pager.querySelector("[data-page='next']");
+      const render = () => {
+        const start = (page - 1) * pageSize;
+        const end = start + pageSize;
+        allRows.forEach((row, idx) => {
+          row.style.display = idx >= start && idx < end ? "" : "none";
+        });
+        if (info) info.textContent = `Page ${page} of ${totalPages}`;
+        if (prevBtn) prevBtn.disabled = page <= 1;
+        if (nextBtn) nextBtn.disabled = page >= totalPages;
+      };
+      if (prevBtn) prevBtn.addEventListener("click", () => {
+        if (page > 1) {
+          page -= 1;
+          render();
+        }
       });
-      if (info) info.textContent = `Page ${page} of ${totalPages}`;
-      if (prevBtn) prevBtn.disabled = page <= 1;
-      if (nextBtn) nextBtn.disabled = page >= totalPages;
+      if (nextBtn) nextBtn.addEventListener("click", () => {
+        if (page < totalPages) {
+          page += 1;
+          render();
+        }
+      });
+      render();
     };
-    if (prevBtn) prevBtn.addEventListener("click", () => {
-      if (page > 1) {
-        page -= 1;
-        render();
-      }
-    });
-    if (nextBtn) nextBtn.addEventListener("click", () => {
-      if (page < totalPages) {
-        page += 1;
-        render();
-      }
-    });
-    render();
+
+    initPager("employee-table", "employee-pagination");
+    initPager("employee-inactive-table", "employee-inactive-pagination");
   }
 
   function initAttendanceTablePagination(){
@@ -642,6 +661,11 @@
     initAttendanceTablePagination();
     initAttendanceReportToggle();
     initAttendanceRangeReport();
-    go(0);
+    let initialTab = 0;
+    try {
+      const saved = parseInt(localStorage.getItem(tabStorageKey) || "0", 10);
+      if (!Number.isNaN(saved)) initialTab = saved;
+    } catch (e) {}
+    go(initialTab);
   });
 })();
