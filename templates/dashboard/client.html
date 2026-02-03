@@ -18,13 +18,17 @@
 <body>
   {% set raw_user_name = (user.name or user.email or "User") %}
   {% set user_first_name = raw_user_name.split(" ")[0] %}
+  {% set raw_site_name = (site.name or "Site") %}
+  {% set site_first_name = raw_site_name.split(" ")[0] %}
+  {% set raw_client_name = (client.name or "Client") %}
+  {% set client_first_name = raw_client_name.split(" ")[0] %}
   <header class="client-top">
     <div class="brand">
       <div class="brand-site-row">
-        <div class="brand-title">{{ site.name or "Site" }}</div>
+        <div class="brand-title">{{ site_first_name }}</div>
       </div>
       <div class="brand-client-row">
-        <div class="brand-pill">{{ client.name if client else "Client" }}</div>
+        <div class="brand-pill">{{ client_first_name }}</div>
         <div class="brand-meta">
           <span class="brand-date" data-raw-date="{{ today|ddmmyyyy }}">Date <span class="brand-date-value" id="headerDateValue"></span></span>
           <span class="brand-divider" aria-hidden="true">|</span>
@@ -123,9 +127,8 @@
             <div class="panel-head">
               <div>
                 <h3>{{ site.name or "-" }}</h3>
-                <div class="panel-sub">Ringkasan site aktif client.</div>
+                <div class="panel-sub">Informasi Site {{ client.name if client else "-" }}</div>
               </div>
-              <span class="panel-badge">Client: {{ client.name if client else "-" }}</span>
             </div>
             <div class="site-meta">
               <div>
@@ -146,9 +149,7 @@
               </div>
             </div>
             {% if can_manage_site %}
-            <div class="form-actions">
-              <button class="btn ghost" type="button" data-modal-open="siteModal">Edit Site</button>
-            </div>
+            <button class="btn ghost site-edit-btn" type="button" data-modal-open="siteModal">Edit Site</button>
             {% else %}
             <div class="panel-sub">Hanya Client Admin yang dapat mengubah data site.</div>
             {% endif %}
@@ -401,7 +402,7 @@
                   {% endif %}
                   {% if not has_active_employees %}
                   <tr>
-                    <td colspan="3" class="empty-row">Belum ada pegawai aktif.</td>
+                    <td colspan="3" class="empty-row is-hidden">Belum ada pegawai aktif.</td>
                   </tr>
                   {% endif %}
                 </tbody>
@@ -598,6 +599,7 @@
             <div class="panel-head">
               <div>
                 <h3>Attendance Harian</h3>
+                <div class="panel-sub attendance-date" data-raw-date="{{ today|ddmmyyyy }}">Date : <span class="attendance-date-value" id="attendanceDateValue"></span></div>
               </div>
               <span class="panel-badge muted">Live</span>
             </div>
@@ -606,7 +608,6 @@
                 <thead>
                   <tr>
                     <th>Pegawai</th>
-                    <th>Date</th>
                     <th class="check-label">Check<br />in/out</th>
                     <th>Metode</th>
                   </tr>
@@ -616,7 +617,6 @@
                   {% for row in attendance_records %}
                   <tr>
                     <td>{{ row.employee }}</td>
-                    <td>{{ row.date|ddmmyyyy }}</td>
                     <td class="check-cell">
                       {{ row.check_in or "-" }} - {{ row.check_out or "-" }}
                     </td>
@@ -625,7 +625,7 @@
                   {% endfor %}
                   {% else %}
                   <tr>
-                    <td colspan="4" class="empty-row">Belum ada data attendance.</td>
+                    <td colspan="3" class="empty-row">Belum ada data attendance.</td>
                   </tr>
                   {% endif %}
                 </tbody>
@@ -697,15 +697,15 @@
                     <div class="toggle-line attendance-toggle">
                       <label class="toggle-line">
                         <input type="radio" name="mode" value="all" checked />
-                        Semua data
+                        Semua
                       </label>
                       <label class="toggle-line">
                         <input type="radio" name="mode" value="range" />
-                        Rentang tanggal
+                        PER-TANGGAL
                       </label>
                       <label class="toggle-line">
                         <input type="radio" name="mode" value="month" />
-                        Periode bulan
+                        PER-BULAN
                       </label>
                     </div>
                   </div>

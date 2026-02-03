@@ -149,6 +149,24 @@
     dateValue.textContent = `${day} ${month}'${year}`;
   }
 
+  function initAttendanceDate(){
+    const dateWrapper = document.querySelector(".attendance-date");
+    const dateValue = document.getElementById("attendanceDateValue");
+    if (!dateWrapper || !dateValue) return;
+    const raw = (dateWrapper.dataset.rawDate || "").trim();
+    const parts = raw.split("-");
+    if (parts.length !== 3) {
+      dateValue.textContent = raw;
+      return;
+    }
+    const day = parts[0].padStart(2, "0");
+    const monthIndex = Number(parts[1]) - 1;
+    const months = ["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agu","Sep","Okt","Nov","Des"];
+    const month = months[monthIndex] || parts[1];
+    const year = parts[2];
+    dateValue.textContent = `${day} ${month} ${year}`;
+  }
+
   function initDatePickers(){
     const formatDateValue = (value, mode) => {
       if (!value) return "";
@@ -532,30 +550,45 @@
       messageEl.classList.toggle("is-error", type === "error");
     };
 
-    const prunePager = () => {
-      const totalPages = currentRows.length ? Math.ceil(currentRows.length / pageSize) : 0;
-      if (totalPages && currentPage > totalPages) {
-        currentPage = totalPages;
-      }
+      const prunePager = () => {
+        const totalPages = currentRows.length ? Math.ceil(currentRows.length / pageSize) : 0;
+        if (totalPages && currentPage > totalPages) {
+          currentPage = totalPages;
+        }
       const hasData = currentRows.length > 0;
       pager.style.display = hasData ? "flex" : "none";
       if (info) {
         info.textContent = hasData ? `Page ${currentPage} of ${totalPages}` : "Page 0 of 0";
       }
-      if (prevBtn) prevBtn.disabled = !hasData || currentPage <= 1;
-      if (nextBtn) nextBtn.disabled = !hasData || currentPage >= totalPages;
-    };
+        if (prevBtn) prevBtn.disabled = !hasData || currentPage <= 1;
+        if (nextBtn) nextBtn.disabled = !hasData || currentPage >= totalPages;
+      };
 
-    const renderRow = (row) => {
-      const tr = document.createElement("tr");
-      const checkInValue = row.check_in || "-";
-      const checkOutValue = row.check_out || "-";
-      const cells = [
-        row.employee || "-",
-        row.date || "-",
-        `${checkInValue} - ${checkOutValue}`,
-        row.method || "-",
-      ];
+      const formatRangeDate = (value) => {
+        if (!value) return "-";
+        const raw = String(value).trim();
+        if (!raw) return "-";
+        const isoMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (isoMatch) {
+          return `${isoMatch[3]}-${isoMatch[2]}`;
+        }
+        const slashMatch = raw.match(/^(\d{2})[\/-](\d{2})[\/-](\d{4})/);
+        if (slashMatch) {
+          return `${slashMatch[1]}-${slashMatch[2]}`;
+        }
+        return raw;
+      };
+
+      const renderRow = (row) => {
+        const tr = document.createElement("tr");
+        const checkInValue = row.check_in || "-";
+        const checkOutValue = row.check_out || "-";
+        const cells = [
+          row.employee || "-",
+          formatRangeDate(row.date),
+          `${checkInValue} - ${checkOutValue}`,
+          row.method || "-",
+        ];
       cells.forEach((value, idx) => {
         const td = document.createElement("td");
         td.textContent = value;
@@ -652,6 +685,7 @@
     initSiteLocationPicker();
     initHeaderClock();
     initHeaderDate();
+    initAttendanceDate();
     initDatePickers();
     initChangePassword();
     initEmployeeAssignmentForm();
