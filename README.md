@@ -287,3 +287,13 @@ Jika repo sudah ada:
 cd presensi-gmi
 git pull origin main
 ```
+
+
+jka npn run dev tidak bisa:
+
+$env:Path = "C:\Windows\System32;C:\Windows;C:\Windows\System32\Wbem;" + $env:Path
+npm run dev
+
+set permanent :
+setx PATH "C:\Windows\System32;C:\Windows;C:\Windows\System32\Wbem;%PATH%"
+
