@@ -678,6 +678,12 @@ html[data-theme="light"] .data-table .btn.danger.btn-icon{
   min-width: 0;
 }
 
+.absence-block{
+  margin-top: 12px;
+  display: grid;
+  gap: 8px;
+}
+
 @media (max-width: 768px){
   .table-card{
     width: 100%;
@@ -691,8 +697,44 @@ html[data-theme="light"] .data-table .btn.danger.btn-icon{
   padding: 18px 12px;
 }
 
-.empty-row.is-hidden{
+.is-hidden{
   display: none;
+}
+
+.attendance-toggle-row{
+  margin-top: 6px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.toggle-pill{
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.4);
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease, color 0.2s ease;
+}
+
+.toggle-pill input{
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.toggle-pill:has(input:checked){
+  color: var(--text);
+  border-color: rgba(34, 211, 238, 0.6);
+  background: rgba(34, 211, 238, 0.18);
 }
 
 .policy-grid{

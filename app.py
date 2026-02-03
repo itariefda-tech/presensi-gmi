@@ -516,6 +516,44 @@ def create_app() -> Flask:
             for row in employees
             if row.get("email")
         }
+        active_employees = [
+            row
+            for row in employees
+            if str(row.get("is_active", 1)).strip().lower() not in {"0", "false"}
+        ]
+        email_to_user_id = {
+            (row.get("email") or "").lower(): int(row["id"])
+            for row in employees
+            if row.get("email") and row.get("id")
+        }
+        checkins = _attendance_checkins_for_date(today, email_to_user_id)
+        checked_in_ids = {int(user_id) for user_id in checkins.keys() if user_id}
+        leave_status_map = _leave_status_by_email_for_date(today, employee_emails)
+        absent_employees = []
+        for row in active_employees:
+            user_id = row.get("id")
+            if user_id and int(user_id) in checked_in_ids:
+                continue
+            email = (row.get("email") or "").lower()
+            leave_info = leave_status_map.get(email)
+            if leave_info and leave_info.get("status") == "pending":
+                note = "Approval pending"
+            elif leave_info and leave_info.get("status") == "approved":
+                leave_type = leave_info.get("type")
+                if leave_type == "izin":
+                    note = "izin"
+                elif leave_type == "sakit":
+                    note = "sakit"
+                else:
+                    note = "tidak ada info"
+            else:
+                note = "tidak ada info"
+            absent_employees.append(
+                {
+                    "employee": row.get("name") or row.get("email") or "-",
+                    "note": note,
+                }
+            )
         present_today = _attendance_today_count_for_emails(today, employee_emails)
         site_summary = _site_operational_summary(today, site_id)
         leave_breakdown = _client_leave_breakdown(today, employee_emails)
@@ -531,6 +569,7 @@ def create_app() -> Flask:
             today=today,
             employees=employees,
             attendance_records=attendance_records,
+            absent_employees=absent_employees,
             policies=policies,
             client_users=client_users,
             total_employees=len(employees),
@@ -8511,6 +8550,47 @@ def _attendance_rows_for_emails(
         records = sorted(records, key=lambda row: row.get("created_at", ""), reverse=True)
         _perf_log("attendance_csv_rows", start, f"rows={len(records)}")
         return records
+    finally:
+        conn.close()
+
+
+def _leave_status_by_email_for_date(today: str, emails: set[str]) -> dict[str, dict]:
+    if not emails:
+        return {}
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "leave_requests"):
+            return {}
+        placeholders = ",".join("?" for _ in emails)
+        params = [*sorted({e.lower() for e in emails if e}), today, today]
+        cur = conn.execute(
+            f"""
+            SELECT lower(employee_email) AS email, lower(leave_type) AS leave_type, status, updated_at, created_at
+            FROM leave_requests
+            WHERE lower(employee_email) IN ({placeholders})
+              AND status != 'rejected'
+              AND date_from <= ?
+              AND date_to >= ?
+            ORDER BY updated_at DESC, created_at DESC
+            """,
+            params,
+        )
+        status_by_email: dict[str, dict] = {}
+        for row in cur.fetchall():
+            email = (row["email"] or "").lower()
+            if not email:
+                continue
+            status = (row["status"] or "").lower()
+            leave_type = (row["leave_type"] or "").lower()
+            current = status_by_email.get(email)
+            if current and current.get("status") == "pending":
+                continue
+            if status == "pending":
+                status_by_email[email] = {"status": "pending", "type": leave_type}
+                continue
+            if status == "approved" and not current:
+                status_by_email[email] = {"status": "approved", "type": leave_type}
+        return status_by_email
     finally:
         conn.close()
 

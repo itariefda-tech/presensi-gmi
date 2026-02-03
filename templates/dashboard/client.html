@@ -599,11 +599,21 @@
             <div class="panel-head">
               <div>
                 <h3>Attendance Harian</h3>
-                <div class="panel-sub attendance-date" data-raw-date="{{ today|ddmmyyyy }}">Date : <span class="attendance-date-value" id="attendanceDateValue"></span></div>
               </div>
               <span class="panel-badge muted">Live</span>
             </div>
-            <div class="table-wrap">
+            <div class="attendance-toggle-row" role="group" aria-label="Filter kehadiran harian">
+              <div class="panel-sub attendance-date" data-raw-date="{{ today|ddmmyyyy }}">Date : <span class="attendance-date-value" id="attendanceDateValue"></span></div>
+              <label class="toggle-pill">
+                <input type="radio" name="attendance_presence" value="present" checked />
+                Hadir
+              </label>
+              <label class="toggle-pill">
+                <input type="radio" name="attendance_presence" value="absent" />
+                Tidak hadir
+              </label>
+            </div>
+            <div class="table-wrap" id="attendance-present-table">
               <table class="data-table" id="attendance-table" data-page-size="6">
                 <thead>
                   <tr>
@@ -635,6 +645,33 @@
               <button class="btn ghost" type="button" data-page="prev">Prev</button>
               <span class="page-info" data-page-info>Page 1 of 1</span>
               <button class="btn ghost" type="button" data-page="next">Next</button>
+            </div>
+            <div class="absence-block is-hidden" id="attendance-absent-block">
+              <div class="panel-sub">Pegawai Tidak Hadir</div>
+              <div class="table-wrap">
+                <table class="data-table" id="attendance-absent-table">
+                  <thead>
+                    <tr>
+                      <th>Pegawai</th>
+                      <th>Keterangan</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% if absent_employees %}
+                    {% for row in absent_employees %}
+                    <tr>
+                      <td>{{ row.employee }}</td>
+                      <td>{{ row.note }}</td>
+                    </tr>
+                    {% endfor %}
+                    {% else %}
+                    <tr>
+                      <td colspan="2" class="empty-row">belum ada data ketidakhadiran</td>
+                    </tr>
+                    {% endif %}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </article>
 

@@ -216,6 +216,31 @@
     });
   }
 
+  function initAttendancePresenceToggle(){
+    const radios = Array.from(document.querySelectorAll("input[name='attendance_presence']"));
+    const presentTable = document.getElementById("attendance-present-table");
+    const presentPager = document.getElementById("attendance-pagination");
+    const absentBlock = document.getElementById("attendance-absent-block");
+    if (!radios.length || !presentTable || !absentBlock) return;
+    const setMode = (mode) => {
+      const showPresent = mode === "present";
+      presentTable.classList.toggle("is-hidden", !showPresent);
+      if (presentPager) {
+        presentPager.classList.toggle("is-hidden", !showPresent);
+      }
+      absentBlock.classList.toggle("is-hidden", showPresent);
+    };
+    radios.forEach((radio) => {
+      radio.addEventListener("change", () => {
+        if (radio.checked) {
+          setMode(radio.value);
+        }
+      });
+    });
+    const initial = document.querySelector("input[name='attendance_presence']:checked")?.value || "present";
+    setMode(initial);
+  }
+
   function initSiteLocationPicker(){
     const btn = document.getElementById("sitePickLocation");
     const latInput = document.getElementById("site-latitude");
@@ -687,6 +712,7 @@
     initHeaderDate();
     initAttendanceDate();
     initDatePickers();
+    initAttendancePresenceToggle();
     initChangePassword();
     initEmployeeAssignmentForm();
     initModals();
@@ -695,11 +721,9 @@
     initAttendanceTablePagination();
     initAttendanceReportToggle();
     initAttendanceRangeReport();
-    let initialTab = 0;
     try {
-      const saved = parseInt(localStorage.getItem(tabStorageKey) || "0", 10);
-      if (!Number.isNaN(saved)) initialTab = saved;
+      localStorage.removeItem(tabStorageKey);
     } catch (e) {}
-    go(initialTab);
+    go(0);
   });
 })();
