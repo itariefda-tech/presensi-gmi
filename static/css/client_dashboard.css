@@ -35,6 +35,12 @@ html[data-theme="light"]{
   --border: rgba(15, 23, 42, 0.1);
 }
 
+html[data-theme="light"] .toggle-pill{
+  color: #94a2c1;
+  border-color: rgba(148, 163, 184, 0.35);
+  background: rgba(205, 215, 233, 0.25);
+}
+
 *{
   box-sizing: border-box;
 }
@@ -679,7 +685,8 @@ html[data-theme="light"] .data-table .btn.danger.btn-icon{
 }
 
 .absence-block{
-  margin-top: 12px;
+  margin-top: 0;
+  padding-top: 0;
   display: grid;
   gap: 8px;
 }
@@ -702,10 +709,18 @@ html[data-theme="light"] .data-table .btn.danger.btn-icon{
 }
 
 .attendance-toggle-row{
-  margin-top: 6px;
+  margin-top: 0;
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.attendance-meta-column{
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
 }
 
 .toggle-pill{
@@ -1541,6 +1556,82 @@ html[data-theme="light"] .avatar-name::before{
 
 body.modal-open{
   overflow: hidden;
+}
+
+.employee-actions{
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.employee-actions .employee-menu{
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  display: none;
+  width: 220px;
+  min-width: 180px;
+  padding: 4px 0;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  z-index: 30;
+}
+
+.employee-actions.is-open .employee-menu{
+  display: block;
+}
+
+.employee-menu .menu-item{
+  width: 100%;
+  border: none;
+  background: none;
+  padding: 10px 16px;
+  text-align: left;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  border-radius: 12px;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.employee-menu .menu-item:hover{
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.employee-menu .menu-item.danger{
+  color: var(--danger);
+}
+
+.employee-menu .menu-item.danger:hover{
+  background: rgba(248, 113, 113, 0.1);
+}
+
+.profile-grid{
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.profile-row{
+  display: grid;
+  grid-template-columns: 35% 1fr;
+  gap: 4px 10px;
+}
+
+.profile-label{
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.profile-value{
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
 }
 
 @keyframes floatIn{

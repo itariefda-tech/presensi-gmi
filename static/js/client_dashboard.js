@@ -704,6 +704,114 @@
     });
   }
 
+  function initEmployeeActionMenus(){
+    const menus = Array.from(document.querySelectorAll(".employee-actions"));
+    if (!menus.length) return;
+    const profileModal = document.getElementById("employeeProfileModal");
+    const profileSubtitle = profileModal?.querySelector("#employeeProfileSubtitle");
+    const profileFields = profileModal ? Array.from(profileModal.querySelectorAll("[data-employee-profile]")) : [];
+    const editModal = document.getElementById("employeeEditModal");
+    const editSubtitle = editModal?.querySelector("#employeeEditSubtitle");
+    const editForm = document.getElementById("employeeEditForm");
+    const deleteForm = document.getElementById("employeeDeleteForm");
+    const deleteEmail = deleteForm?.querySelector("input[name='email']");
+    const editInputs = {
+      nik: editForm?.querySelector("#employeeEditNik"),
+      name: editForm?.querySelector("#employeeEditName"),
+      email: editForm?.querySelector("#employeeEditEmail"),
+      noHp: editForm?.querySelector("#employeeEditPhone"),
+      address: editForm?.querySelector("#employeeEditAddress"),
+      gender: editForm?.querySelector("#employeeEditGender"),
+      statusNikah: editForm?.querySelector("#employeeEditMarital"),
+      status: editForm?.querySelector("#employeeEditStatus"),
+      notes: editForm?.querySelector("#employeeEditNotes"),
+    };
+    const datasetKey = (key) => `employee${key.charAt(0).toUpperCase()}${key.slice(1)}`;
+    const datasetValue = (menu, key) => (menu?.dataset[datasetKey(key)] || "").trim();
+    const formatProfileValue = (key, value) => {
+      if (!value) return "-";
+      if (key === "status") {
+        return value === "1" ? "Aktif" : "Nonaktif";
+      }
+      return value;
+    };
+    const closeAllMenus = () => {
+      menus.forEach((menu) => {
+        menu.classList.remove("is-open");
+        const toggle = menu.querySelector(".employee-menu-toggle");
+        if (toggle) toggle.setAttribute("aria-expanded", "false");
+      });
+    };
+    const fillProfileModal = (menu) => {
+      if (!profileModal) return;
+      const name = datasetValue(menu, "name") || "-";
+      const email = datasetValue(menu, "email") || "-";
+      if (profileSubtitle) {
+        profileSubtitle.textContent = `${name} • ${email}`;
+      }
+      profileFields.forEach((field) => {
+        const key = field.dataset.employeeProfile || "";
+        const rawValue = key === "status" ? datasetValue(menu, "isActive") : datasetValue(menu, key);
+        field.textContent = formatProfileValue(key, rawValue);
+      });
+    };
+    const fillEditForm = (menu) => {
+      if (!editForm) return;
+      const employeeId = datasetValue(menu, "id");
+      const name = datasetValue(menu, "name") || "-";
+      const email = datasetValue(menu, "email") || "-";
+      editForm.action = `/client/employees/${employeeId}/update`;
+      editInputs.nik && (editInputs.nik.value = datasetValue(menu, "nik"));
+      editInputs.name && (editInputs.name.value = datasetValue(menu, "name"));
+      editInputs.email && (editInputs.email.value = datasetValue(menu, "email"));
+      editInputs.noHp && (editInputs.noHp.value = datasetValue(menu, "noHp"));
+      editInputs.address && (editInputs.address.value = datasetValue(menu, "address"));
+      editInputs.gender && (editInputs.gender.value = datasetValue(menu, "gender") || "");
+      editInputs.statusNikah && (editInputs.statusNikah.value = datasetValue(menu, "statusNikah") || "");
+      editInputs.notes && (editInputs.notes.value = datasetValue(menu, "notes"));
+      if (editInputs.status) {
+        const statusValue = datasetValue(menu, "isActive");
+        editInputs.status.value = statusValue === "0" ? "0" : "1";
+      }
+      if (deleteEmail) {
+        deleteEmail.value = datasetValue(menu, "email");
+      }
+      if (editSubtitle) {
+        editSubtitle.textContent = `${name} • ${email}`;
+      }
+    };
+    menus.forEach((menu) => {
+      const toggle = menu.querySelector(".employee-menu-toggle");
+      const panel = menu.querySelector(".employee-menu");
+      toggle?.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const isOpen = menu.classList.contains("is-open");
+        closeAllMenus();
+        menu.classList.toggle("is-open", !isOpen);
+        if (toggle) toggle.setAttribute("aria-expanded", (!isOpen).toString());
+      });
+      menu.addEventListener("click", (event) => event.stopPropagation());
+      panel?.addEventListener("click", (event) => event.stopPropagation());
+      menu.querySelectorAll("[data-employee-action]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const action = button.dataset.employeeAction;
+          if (action === "profile") {
+            fillProfileModal(menu);
+          } else if (action === "edit") {
+            fillEditForm(menu);
+          }
+          closeAllMenus();
+        });
+      });
+    });
+    document.addEventListener("click", closeAllMenus);
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        closeAllMenus();
+      }
+    });
+  }
+
   document.addEventListener("DOMContentLoaded", () => {
     initSwipe();
     initGps();
@@ -715,6 +823,7 @@
     initAttendancePresenceToggle();
     initChangePassword();
     initEmployeeAssignmentForm();
+    initEmployeeActionMenus();
     initModals();
     initCollapsiblePanels();
     initEmployeeTablePagination();

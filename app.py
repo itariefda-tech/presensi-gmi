@@ -690,6 +690,44 @@ def create_app() -> Flask:
         flash(message)
         return redirect(url_for("dashboard_client", _anchor="employees"))
 
+    @app.route("/client/employees/<int:employee_id>/update", methods=["POST"])
+    def client_employees_update(employee_id: int):
+        user = _current_user()
+        _require_client_admin(user)
+        _client_id, site_id, _site, _client = _client_site_context(user)
+        employee = _employee_by_id(employee_id)
+        if not employee or int(employee.get("site_id") or 0) != site_id:
+            flash("Pegawai tidak ditemukan.")
+            return redirect(url_for("dashboard_client", _anchor="employees"))
+        payload, error = _parse_employee_form(request.form or {})
+        if error:
+            flash(error)
+            return redirect(url_for("dashboard_client", _anchor="employees"))
+        conflict = _employee_conflict(
+            payload["email"],
+            payload["nik"],
+            payload["no_hp"],
+            exclude_id=int(employee.get("id") or 0),
+        )
+        if conflict:
+            flash(conflict)
+            return redirect(url_for("dashboard_client", _anchor="employees"))
+        is_active = 1 if (request.form.get("is_active") or "0") == "1" else 0
+        _update_employee(
+            employee_id=int(employee.get("id") or employee_id),
+            nik=payload["nik"],
+            name=payload["name"],
+            email=payload["email"],
+            no_hp=payload["no_hp"],
+            address=payload["address"],
+            gender=payload["gender"],
+            status_nikah=payload["status_nikah"],
+            notes=payload["notes"],
+            is_active=is_active,
+        )
+        flash("Data pegawai berhasil diperbarui.")
+        return redirect(url_for("dashboard_client", _anchor="employees"))
+
     @app.route("/client/employees/delete", methods=["POST"])
     def client_employees_delete():
         user = _current_user()

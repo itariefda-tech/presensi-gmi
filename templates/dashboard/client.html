@@ -16,6 +16,33 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/client_dashboard.css') }}" />
 </head>
 <body>
+  {% macro employee_action_menu(employee, csrf_token) %}
+  {% set notes = (employee.notes or "")|replace('\n', ' ') %}
+  <div class="employee-actions"
+    data-employee-id="{{ employee.id }}"
+    data-employee-name="{{ (employee.name or '')|e }}"
+    data-employee-email="{{ (employee.email or '')|e }}"
+    data-employee-nik="{{ (employee.nik or '')|e }}"
+    data-employee-no-hp="{{ (employee.no_hp or '')|e }}"
+    data-employee-address="{{ (employee.address or '')|e }}"
+    data-employee-gender="{{ (employee.gender or '')|e }}"
+    data-employee-status-nikah="{{ (employee.status_nikah or '')|e }}"
+    data-employee-notes="{{ notes|e }}"
+    data-employee-is-active="{{ 1 if employee.is_active|default(1)|int else 0 }}"
+  >
+    <button class="mini-btn employee-menu-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-label="Buka menu aksi pegawai">
+      <span class="icon-burger" aria-hidden="true"><span></span><span></span><span></span></span>
+    </button>
+    <div class="employee-menu" role="menu" aria-label="Menu aksi pegawai">
+      <button class="menu-item" type="button" role="menuitem" data-employee-action="profile" data-modal-open="employeeProfileModal">
+        Profil
+      </button>
+      <button class="menu-item" type="button" role="menuitem" data-employee-action="edit" data-modal-open="employeeEditModal">
+        Edit
+      </button>
+    </div>
+  </div>
+  {% endmacro %}
   {% set raw_user_name = (user.name or user.email or "User") %}
   {% set user_first_name = raw_user_name.split(" ")[0] %}
   {% set raw_site_name = (site.name or "Site") %}
@@ -379,19 +406,7 @@
                     </td>
                     <td>
                       {% if can_manage_employees %}
-                      <form method="post" action="{{ url_for('client_employees_delete') }}" onsubmit="return confirm('Hapus pegawai ini beserta assignment-nya?');">
-                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-                        <input type="hidden" name="email" value="{{ e.email }}" />
-                        <button class="btn danger btn-icon" type="submit" aria-label="Hapus pegawai" data-tooltip="Hapus">
-                          <svg class="icon icon-bin" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                            <path d="M9 6V4h6v2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
-                            <path d="M5 6h14l-1 13H6z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
-                            <path d="M10 11v6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-                            <path d="M14 11v6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-                            <path d="M3 6h18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-                          </svg>
-                        </button>
-                      </form>
+                      {{ employee_action_menu(e, csrf_token) }}
                       {% else %}
                       <span class="note">-</span>
                       {% endif %}
@@ -449,19 +464,7 @@
                       </td>
                       <td>
                         {% if can_manage_employees %}
-                        <form method="post" action="{{ url_for('client_employees_delete') }}" onsubmit="return confirm('Hapus pegawai ini beserta assignment-nya?');">
-                          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-                          <input type="hidden" name="email" value="{{ e.email }}" />
-                          <button class="btn danger btn-icon" type="submit" aria-label="Hapus pegawai" data-tooltip="Hapus">
-                            <svg class="icon icon-bin" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                              <path d="M9 6V4h6v2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
-                              <path d="M5 6h14l-1 13H6z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
-                              <path d="M10 11v6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-                              <path d="M14 11v6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-                              <path d="M3 6h18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-                            </svg>
-                          </button>
-                        </form>
+                        {{ employee_action_menu(e, csrf_token) }}
                         {% else %}
                         <span class="note">-</span>
                         {% endif %}
@@ -1028,6 +1031,133 @@
             <button class="btn ghost" type="button" data-modal-close="siteModal">Batal</button>
             <button class="btn primary" type="submit">Simpan Perubahan</button>
           </div>
+      </form>
+    </div>
+  </div>
+  </div>
+  <div class="modal" id="employeeProfileModal" aria-hidden="true">
+    <div class="modal-backdrop" data-modal-close="employeeProfileModal"></div>
+    <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="employeeProfileModalLabel">
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <h3 id="employeeProfileModalLabel">Profil Pegawai</h3>
+            <div class="panel-sub" id="employeeProfileSubtitle">-</div>
+          </div>
+          <button class="mini-btn" type="button" data-modal-close="employeeProfileModal" aria-label="Tutup">×</button>
+        </div>
+        <div class="profile-grid">
+          <div class="profile-row">
+            <div class="profile-label">NIK</div>
+            <div class="profile-value" data-employee-profile="nik">-</div>
+          </div>
+          <div class="profile-row">
+            <div class="profile-label">Nama</div>
+            <div class="profile-value" data-employee-profile="name">-</div>
+          </div>
+          <div class="profile-row">
+            <div class="profile-label">Email</div>
+            <div class="profile-value" data-employee-profile="email">-</div>
+          </div>
+          <div class="profile-row">
+            <div class="profile-label">No HP</div>
+            <div class="profile-value" data-employee-profile="noHp">-</div>
+          </div>
+          <div class="profile-row">
+            <div class="profile-label">Alamat</div>
+            <div class="profile-value" data-employee-profile="address">-</div>
+          </div>
+          <div class="profile-row">
+            <div class="profile-label">Jenis Kelamin</div>
+            <div class="profile-value" data-employee-profile="gender">-</div>
+          </div>
+          <div class="profile-row">
+            <div class="profile-label">Status Nikah</div>
+            <div class="profile-value" data-employee-profile="statusNikah">-</div>
+          </div>
+          <div class="profile-row">
+            <div class="profile-label">Catatan</div>
+            <div class="profile-value" data-employee-profile="notes">-</div>
+          </div>
+          <div class="profile-row">
+            <div class="profile-label">Status</div>
+            <div class="profile-value" data-employee-profile="status">-</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="modal" id="employeeEditModal" aria-hidden="true">
+    <div class="modal-backdrop" data-modal-close="employeeEditModal"></div>
+    <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="employeeEditModalLabel">
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <h3 id="employeeEditModalLabel">Edit Pegawai</h3>
+            <div class="panel-sub" id="employeeEditSubtitle">Perbarui data pegawai</div>
+          </div>
+          <button class="mini-btn" type="button" data-modal-close="employeeEditModal" aria-label="Tutup">×</button>
+        </div>
+        <form class="site-form" id="employeeEditForm" method="post">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <div class="form-grid">
+            <div class="form-row">
+              <label class="label" for="employeeEditNik">NIK</label>
+              <input class="input" id="employeeEditNik" name="nik" type="text" required />
+            </div>
+            <div class="form-row">
+              <label class="label" for="employeeEditName">Nama</label>
+              <input class="input" id="employeeEditName" name="name" type="text" required />
+            </div>
+            <div class="form-row">
+              <label class="label" for="employeeEditEmail">Email</label>
+              <input class="input" id="employeeEditEmail" name="email" type="email" required />
+            </div>
+            <div class="form-row">
+              <label class="label" for="employeeEditPhone">No HP</label>
+              <input class="input" id="employeeEditPhone" name="no_hp" type="text" required />
+            </div>
+            <div class="form-row">
+              <label class="label" for="employeeEditAddress">Alamat</label>
+              <input class="input" id="employeeEditAddress" name="address" type="text" />
+            </div>
+            <div class="form-row">
+              <label class="label" for="employeeEditGender">Jenis Kelamin</label>
+              <select class="input" id="employeeEditGender" name="gender" required>
+                <option value="">Pilih</option>
+                <option value="Laki-laki">Laki-laki</option>
+                <option value="Perempuan">Perempuan</option>
+              </select>
+            </div>
+            <div class="form-row">
+              <label class="label" for="employeeEditMarital">Status Nikah</label>
+              <select class="input" id="employeeEditMarital" name="status_nikah" required>
+                <option value="">Pilih</option>
+                <option value="Belum menikah">Belum menikah</option>
+                <option value="Menikah">Menikah</option>
+                <option value="Cerai">Cerai</option>
+              </select>
+            </div>
+            <div class="form-row">
+              <label class="label" for="employeeEditStatus">Status Akun</label>
+              <select class="input" id="employeeEditStatus" name="is_active" required>
+                <option value="1">Aktif</option>
+                <option value="0">Nonaktif</option>
+              </select>
+            </div>
+            <div class="form-row full">
+              <label class="label" for="employeeEditNotes">Catatan</label>
+              <textarea class="input" id="employeeEditNotes" name="notes" rows="2"></textarea>
+            </div>
+          </div>
+          <div class="form-actions">
+            <button class="btn danger" type="submit" form="employeeDeleteForm">Hapus assignment+data pegawai</button>
+            <button class="btn primary" type="submit">Simpan</button>
+          </div>
+        </form>
+        <form id="employeeDeleteForm" class="site-form employee-delete-form" method="post" action="{{ url_for('client_employees_delete') }}" onsubmit="return confirm('Hapus pegawai ini beserta assignment-nya?');" aria-hidden="true">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <input type="hidden" name="email" value="" />
         </form>
       </div>
     </div>
