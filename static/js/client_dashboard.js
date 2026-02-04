@@ -18,7 +18,7 @@
   }
 
   function go(index){
-    const max = 5;
+    const max = 6;
     swipeIndex = Math.max(0, Math.min(max, index));
     if (swipeTrack) {
       swipeTrack.style.transform = `translateX(-${swipeIndex * 100}%)`;
@@ -604,6 +604,14 @@
         return raw;
       };
 
+      const mapMethodLabel = (value) => {
+        const normalized = (value || "").toString().trim().toLowerCase();
+        if (normalized === "gps_selfie" || normalized === "gps+selfie") return "GPSLF";
+        if (normalized === "gps") return "GPS";
+        if (normalized === "qr") return "QR";
+        return value || "-";
+      };
+
       const renderRow = (row) => {
         const tr = document.createElement("tr");
         const checkInValue = row.check_in || "-";
@@ -612,7 +620,7 @@
           row.employee || "-",
           formatRangeDate(row.date),
           `${checkInValue} - ${checkOutValue}`,
-          row.method || "-",
+          mapMethodLabel(row.method),
         ];
       cells.forEach((value, idx) => {
         const td = document.createElement("td");
@@ -728,6 +736,8 @@
     };
     const datasetKey = (key) => `employee${key.charAt(0).toUpperCase()}${key.slice(1)}`;
     const datasetValue = (menu, key) => (menu?.dataset[datasetKey(key)] || "").trim();
+    const panelOrigins = new Map();
+    const menuPanels = new Map();
     const formatProfileValue = (key, value) => {
       if (!value) return "-";
       if (key === "status") {
@@ -735,12 +745,82 @@
       }
       return value;
     };
+    const getPanelForMenu = (menu) => {
+      if (!menu) return null;
+      const cached = menuPanels.get(menu);
+      if (cached) return cached;
+      const found = menu.querySelector(".employee-menu");
+      if (found) {
+        menuPanels.set(menu, found);
+        return found;
+      }
+      return null;
+    };
+    const restorePanel = (menu) => {
+      const panel = getPanelForMenu(menu);
+      if (!panel) return;
+      const origin = panelOrigins.get(panel);
+      if (origin && panel.parentElement !== origin) {
+        origin.appendChild(panel);
+      }
+      panel.classList.remove("is-open", "is-floating");
+      panel.style.position = "";
+      panel.style.top = "";
+      panel.style.left = "";
+      panel.style.right = "";
+      panel.style.bottom = "";
+      panel.style.minWidth = "";
+    };
     const closeAllMenus = () => {
       menus.forEach((menu) => {
         menu.classList.remove("is-open");
         const toggle = menu.querySelector(".employee-menu-toggle");
         if (toggle) toggle.setAttribute("aria-expanded", "false");
+        restorePanel(menu);
       });
+    };
+    const positionFloatingPanel = (panel, anchorRect) => {
+      if (!panel || !anchorRect) return;
+      panel.style.position = "fixed";
+      panel.style.top = "0px";
+      panel.style.left = "0px";
+      panel.style.right = "auto";
+      panel.style.bottom = "auto";
+      panel.style.minWidth = `${Math.max(180, anchorRect.width)}px`;
+      const panelWidth = panel.offsetWidth || 220;
+      const panelHeight = panel.offsetHeight || 120;
+      const margin = 8;
+      let left = anchorRect.right - panelWidth;
+      if (left < margin) left = margin;
+      if (left + panelWidth > window.innerWidth - margin) {
+        left = Math.max(margin, window.innerWidth - panelWidth - margin);
+      }
+      let top = anchorRect.bottom + margin;
+      if (top + panelHeight > window.innerHeight - margin) {
+        top = anchorRect.top - panelHeight - margin;
+      }
+      if (top < margin) top = margin;
+      panel.style.left = `${Math.round(left)}px`;
+      panel.style.top = `${Math.round(top)}px`;
+    };
+    const openFloatingMenu = (menu) => {
+      const toggle = menu.querySelector(".employee-menu-toggle");
+      const panel = getPanelForMenu(menu);
+      if (!toggle || !panel) return;
+      const isOpen = panel.classList.contains("is-open");
+      closeAllMenus();
+      if (isOpen) return;
+      if (!panelOrigins.has(panel)) {
+        panelOrigins.set(panel, menu);
+      }
+      menu.classList.add("is-open");
+      toggle.setAttribute("aria-expanded", "true");
+      panel.classList.add("is-open", "is-floating");
+      if (panel.parentElement !== document.body) {
+        document.body.appendChild(panel);
+      }
+      const anchorRect = toggle.getBoundingClientRect();
+      positionFloatingPanel(panel, anchorRect);
     };
     const fillProfileModal = (menu) => {
       if (!profileModal) return;
@@ -782,13 +862,10 @@
     };
     menus.forEach((menu) => {
       const toggle = menu.querySelector(".employee-menu-toggle");
-      const panel = menu.querySelector(".employee-menu");
+      const panel = getPanelForMenu(menu);
       toggle?.addEventListener("click", (event) => {
         event.stopPropagation();
-        const isOpen = menu.classList.contains("is-open");
-        closeAllMenus();
-        menu.classList.toggle("is-open", !isOpen);
-        if (toggle) toggle.setAttribute("aria-expanded", (!isOpen).toString());
+        openFloatingMenu(menu);
       });
       menu.addEventListener("click", (event) => event.stopPropagation());
       panel?.addEventListener("click", (event) => event.stopPropagation());
@@ -810,6 +887,8 @@
         closeAllMenus();
       }
     });
+    window.addEventListener("resize", closeAllMenus);
+    document.addEventListener("scroll", closeAllMenus, true);
   }
 
   document.addEventListener("DOMContentLoaded", () => {

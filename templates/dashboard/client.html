@@ -73,7 +73,7 @@
     </div>
     <div class="top-actions">
       <div class="top-actions-controls">
-        <button class="header-action-btn settings-btn" type="button" data-tab="5" aria-label="Settings">
+        <button class="header-action-btn settings-btn" type="button" data-tab="6" aria-label="Settings">
           <span class="header-action-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none">
               <path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z" stroke="currentColor" stroke-width="1.5"/>
@@ -385,8 +385,8 @@
               <table class="data-table" id="employee-table" data-page-size="6">
                 <thead>
                   <tr>
-                    <th>Nama</th>
-                    <th>Email / No HP</th>
+                    <th>Nama/Email</th>
+                    <th>No HP/Alamat</th>
                     <th>Aksi</th>
                   </tr>
                 </thead>
@@ -397,11 +397,16 @@
                   {% if e.is_active %}
                   {% set has_active_employees = true %}
                   <tr>
-                    <td>{{ e.name }}</td>
                     <td>
                       <div class="contact-stack">
+                        <span>{{ e.name }}</span>
                         <span>{{ e.email }}</span>
-                        <span>{{ e.no_hp }}</span>
+                      </div>
+                    </td>
+                    <td>
+                      <div class="contact-stack">
+                        <span>{{ (e.no_hp or "")[:15] }}</span>
+                        <span>{{ (e.address or "")[:15] }}</span>
                       </div>
                     </td>
                     <td>
@@ -443,8 +448,8 @@
                 <table class="data-table" id="employee-inactive-table" data-page-size="6">
                   <thead>
                     <tr>
-                      <th>Nama</th>
-                      <th>Email / No HP</th>
+                      <th>Nama/Email</th>
+                      <th>No HP/Alamat</th>
                       <th>Aksi</th>
                     </tr>
                   </thead>
@@ -455,11 +460,16 @@
                     {% if not e.is_active %}
                     {% set has_inactive_employees = true %}
                     <tr>
-                      <td>{{ e.name }}</td>
                       <td>
                         <div class="contact-stack">
+                          <span>{{ e.name }}</span>
                           <span>{{ e.email }}</span>
-                          <span>{{ e.no_hp }}</span>
+                        </div>
+                      </td>
+                      <td>
+                        <div class="contact-stack">
+                          <span>{{ (e.no_hp or "")[:15] }}</span>
+                          <span>{{ (e.address or "")[:15] }}</span>
                         </div>
                       </td>
                       <td>
@@ -522,7 +532,7 @@
                     <label class="label" for="employee-phone">No HP</label>
                     <input class="input" id="employee-phone" name="no_hp" type="text" required />
                   </div>
-                  <div class="form-row full">
+                  <div class="form-row full attendance-export-divider">
                     <label class="label" for="employee-address">Alamat</label>
                     <input class="input" id="employee-address" name="address" type="text" required />
                   </div>
@@ -602,19 +612,19 @@
             <div class="panel-head">
               <div>
                 <h3>Attendance Harian</h3>
+                <div class="attendance-toggle-row" role="group" aria-label="Filter kehadiran harian">
+                  <div class="panel-sub attendance-date" data-raw-date="{{ today|ddmmyyyy }}">Date : <span class="attendance-date-value" id="attendanceDateValue"></span></div>
+                  <label class="toggle-pill">
+                    <input type="radio" name="attendance_presence" value="present" checked />
+                    Hadir
+                  </label>
+                  <label class="toggle-pill">
+                    <input type="radio" name="attendance_presence" value="absent" />
+                    Tidak hadir
+                  </label>
+                </div>
               </div>
               <span class="panel-badge muted">Live</span>
-            </div>
-            <div class="attendance-toggle-row" role="group" aria-label="Filter kehadiran harian">
-              <div class="panel-sub attendance-date" data-raw-date="{{ today|ddmmyyyy }}">Date : <span class="attendance-date-value" id="attendanceDateValue"></span></div>
-              <label class="toggle-pill">
-                <input type="radio" name="attendance_presence" value="present" checked />
-                Hadir
-              </label>
-              <label class="toggle-pill">
-                <input type="radio" name="attendance_presence" value="absent" />
-                Tidak hadir
-              </label>
             </div>
             <div class="table-wrap" id="attendance-present-table">
               <table class="data-table" id="attendance-table" data-page-size="6">
@@ -622,7 +632,7 @@
                   <tr>
                     <th>Pegawai</th>
                     <th class="check-label">Check<br />in/out</th>
-                    <th>Metode</th>
+                    <th>Aksi</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -633,7 +643,17 @@
                     <td class="check-cell">
                       {{ row.check_in or "-" }} - {{ row.check_out or "-" }}
                     </td>
-                    <td>{{ row.method }}</td>
+                    <td>
+                      {% if row.method in ["gps_selfie", "gps+selfie"] %}
+                        GPSLF
+                      {% elif row.method == "gps" %}
+                        GPS
+                      {% elif row.method == "qr" %}
+                        QR
+                      {% else %}
+                        {{ row.method }}
+                      {% endif %}
+                    </td>
                   </tr>
                   {% endfor %}
                   {% else %}
@@ -650,7 +670,6 @@
               <button class="btn ghost" type="button" data-page="next">Next</button>
             </div>
             <div class="absence-block is-hidden" id="attendance-absent-block">
-              <div class="panel-sub">Pegawai Tidak Hadir</div>
               <div class="table-wrap">
                 <table class="data-table" id="attendance-absent-table">
                   <thead>
@@ -714,7 +733,7 @@
                         <th>Pegawai</th>
                         <th>Date</th>
                         <th class="check-label">Check<br />in/out</th>
-                        <th>Metode</th>
+                        <th>Aksi</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -810,7 +829,148 @@
           </article>
         </section>
 
-        <section class="swipe-pane" data-pane="5" aria-label="Settings">
+        <section class="swipe-pane" data-pane="5" aria-label="Payroll">
+          <article class="panel payroll-hero" id="payroll">
+            <div class="panel-head">
+              <div>
+                <h3>Payroll</h3>
+                <div class="panel-sub">Rekap gaji, tunjangan, dan potongan per periode.</div>
+              </div>
+              <div class="payroll-period">
+                <span class="status-pill muted">Periode</span>
+                <div class="payroll-period-chip">Jan 2026</div>
+              </div>
+            </div>
+            <div class="payroll-kpi-grid">
+              <div class="payroll-kpi">
+                <div class="label">Total Payroll</div>
+                <div class="value">Rp 128.450.000</div>
+                <div class="meta">24 pegawai • 1 site</div>
+              </div>
+              <div class="payroll-kpi">
+                <div class="label">Tunjangan</div>
+                <div class="value">Rp 18.200.000</div>
+                <div class="meta">Transport + makan</div>
+              </div>
+              <div class="payroll-kpi">
+                <div class="label">Potongan</div>
+                <div class="value">Rp 6.750.000</div>
+                <div class="meta">Alpha + keterlambatan</div>
+              </div>
+              <div class="payroll-kpi highlight">
+                <div class="label">Pending Approval</div>
+                <div class="value">5 slip</div>
+                <div class="meta">Butuh persetujuan</div>
+              </div>
+            </div>
+          </article>
+
+          <article class="panel table-card payroll-table">
+            <div class="panel-head">
+              <div>
+                <h3>Slip Gaji Terbaru</h3>
+                <div class="panel-sub">Ringkas payroll per pegawai.</div>
+              </div>
+              <div class="panel-actions">
+                <button class="btn ghost" type="button">Export</button>
+                <button class="btn primary" type="button">Generate</button>
+              </div>
+            </div>
+            <div class="table-wrap employee-table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Pegawai</th>
+                    <th>Periode</th>
+                    <th>Gaji Bersih</th>
+                    <th>Status</th>
+                    <th>Aksi</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>
+                      <div class="contact-stack">
+                        <span>Baim Wonka</span>
+                        <span class="muted">baim@gmail.com</span>
+                      </div>
+                    </td>
+                    <td>01 - 31 Jan 2026</td>
+                    <td>Rp 5.450.000</td>
+                    <td><span class="status-pill ok">Approved</span></td>
+                    <td><button class="mini-btn" type="button">Detail</button></td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <div class="contact-stack">
+                        <span>Sita Dwi</span>
+                        <span class="muted">sita@site.co</span>
+                      </div>
+                    </td>
+                    <td>01 - 31 Jan 2026</td>
+                    <td>Rp 4.980.000</td>
+                    <td><span class="status-pill warning">Pending</span></td>
+                    <td><button class="mini-btn" type="button">Review</button></td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <div class="contact-stack">
+                        <span>Rama Putra</span>
+                        <span class="muted">rama@site.co</span>
+                      </div>
+                    </td>
+                    <td>01 - 31 Jan 2026</td>
+                    <td>Rp 5.120.000</td>
+                    <td><span class="status-pill muted">Draft</span></td>
+                    <td><button class="mini-btn" type="button">Edit</button></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </article>
+
+          <article class="panel payroll-insights">
+            <div class="panel-head">
+              <div>
+                <h3>Komponen Payroll</h3>
+                <div class="panel-sub">Distribusi komponen bulan ini.</div>
+              </div>
+              <span class="panel-badge muted">Preview</span>
+            </div>
+            <div class="payroll-insight-grid">
+              <div class="payroll-stack">
+                <div class="stack-row">
+                  <span>Gaji Pokok</span>
+                  <span>72%</span>
+                </div>
+                <div class="meter"><span style="width:72%"></span></div>
+                <div class="stack-row">
+                  <span>Lembur</span>
+                  <span>12%</span>
+                </div>
+                <div class="meter"><span style="width:12%"></span></div>
+                <div class="stack-row">
+                  <span>Tunjangan</span>
+                  <span>10%</span>
+                </div>
+                <div class="meter"><span style="width:10%"></span></div>
+                <div class="stack-row">
+                  <span>Potongan</span>
+                  <span>6%</span>
+                </div>
+                <div class="meter warn"><span style="width:6%"></span></div>
+              </div>
+              <div class="payroll-note-card">
+                <div class="note-title">Catatan Payroll</div>
+                <p>Sinkronisasi absensi terakhir: 03 Feb 2026, 21:30.</p>
+                <p>5 pegawai menunggu approval supervisor.</p>
+                <button class="btn ghost" type="button">Lihat Detail</button>
+              </div>
+            </div>
+          </article>
+        </section>
+
+        <section class="swipe-pane" data-pane="6" aria-label="Settings">
           <article class="panel" id="settings">
             <div class="panel-head">
               <div>
@@ -819,7 +979,7 @@
               </div>
               <span class="panel-badge">Roles</span>
             </div>
-            <div class="table-wrap">
+              <div class="table-wrap employee-table-wrap">
               <table class="data-table">
                 <thead>
                   <tr>
@@ -971,6 +1131,15 @@
         <svg viewBox="0 0 24 24" fill="none">
           <path d="M12 4l5 2.25v5.75c0 3.5-2.3 6.9-5 8-2.7-1.1-5-4.5-5-8V6.25L12 4z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
           <path d="M9 12l2 2 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+      </span>
+    </button>
+    <button class="nav-btn" data-tab="5" type="button" aria-label="Payroll">
+      <span class="nav-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none">
+          <path d="M6 7h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.5"/>
+          <path d="M8 11h4m-4 4h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          <circle cx="16.5" cy="11.5" r="2" stroke="currentColor" stroke-width="1.3"/>
         </svg>
       </span>
     </button>

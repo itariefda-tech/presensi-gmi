@@ -165,6 +165,139 @@ html[data-theme="light"] body{
   align-content: start;
 }
 
+.payroll-hero{
+  background:
+    radial-gradient(280px 140px at 15% 10%, rgba(34, 211, 238, 0.18), transparent 60%),
+    linear-gradient(160deg, rgba(15, 23, 42, 0.25), transparent 60%),
+    var(--panel);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.payroll-period{
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.payroll-period-chip{
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(34, 211, 238, 0.16);
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+}
+
+.payroll-kpi-grid{
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: var(--card-gap);
+  margin-top: 12px;
+}
+
+.payroll-kpi{
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  display: grid;
+  gap: 6px;
+}
+
+.payroll-kpi .label{
+  font-size: 12px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.payroll-kpi .value{
+  font-family: "Space Grotesk", "Segoe UI", system-ui, sans-serif;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.payroll-kpi .meta{
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.payroll-kpi.highlight{
+  background: rgba(251, 191, 36, 0.12);
+  border-color: rgba(251, 191, 36, 0.35);
+  color: var(--text);
+}
+
+.payroll-table .panel-actions{
+  display: flex;
+  gap: 8px;
+}
+
+.payroll-insights{
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: var(--panel);
+}
+
+.payroll-insight-grid{
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--card-gap);
+}
+
+.payroll-stack{
+  display: grid;
+  gap: 10px;
+}
+
+.stack-row{
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.meter{
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.2);
+  overflow: hidden;
+}
+
+.meter span{
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+}
+
+.meter.warn span{
+  background: linear-gradient(90deg, var(--warning), var(--danger));
+}
+
+.payroll-note-card{
+  padding: 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(15, 23, 42, 0.35);
+  display: grid;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.payroll-note-card .note-title{
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.attendance-export-divider{
+  border-top: 2px solid #ff2d2d;
+  padding-top: 14px;
+  margin-top: 12px;
+}
+
 .section-head h2{
   margin: 0;
   font-family: "Space Grotesk", "Segoe UI", system-ui, sans-serif;
@@ -626,6 +759,10 @@ html[data-theme="light"] .data-table .btn.danger.btn-icon{
   border-radius: 12px;
   border: 1px solid var(--border);
   box-shadow: none;
+}
+
+.employee-table-wrap{
+  overflow-y: visible;
 }
 
 .table-pagination{
@@ -1564,7 +1701,7 @@ body.modal-open{
   align-items: center;
 }
 
-.employee-actions .employee-menu{
+.employee-menu{
   position: absolute;
   top: calc(100% + 8px);
   right: 0;
@@ -1581,6 +1718,15 @@ body.modal-open{
 
 .employee-actions.is-open .employee-menu{
   display: block;
+}
+
+.employee-menu.is-open{
+  display: block;
+}
+
+.employee-menu.is-floating{
+  position: fixed;
+  z-index: 999;
 }
 
 .employee-menu .menu-item{
