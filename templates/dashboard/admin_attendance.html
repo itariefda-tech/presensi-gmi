@@ -4,6 +4,121 @@
 {% set subtitle = "Monitoring presensi GPS + selfie" %}
 
 {% block body %}
+<section class="card-grid" style="margin-bottom:16px;">
+  <article class="card">
+    <h4>Total Record</h4>
+    <div class="value">{{ records|length }}</div>
+  </article>
+  <article class="card">
+    <h4>Hadir Hari Ini</h4>
+    <div class="value">--</div>
+  </article>
+  <article class="card">
+    <h4>Terlambat</h4>
+    <div class="value">--</div>
+  </article>
+  <article class="card">
+    <h4>Belum Checkout</h4>
+    <div class="value">--</div>
+  </article>
+  <article class="card">
+    <h4>Manual Pending</h4>
+    <div class="value">--</div>
+  </article>
+  <article class="card">
+    <h4>Absen/Tidak Hadir</h4>
+    <div class="value">--</div>
+  </article>
+</section>
+
+<div class="card" style="margin-bottom:16px;">
+  <div class="card-header-actions" style="justify-content:space-between;">
+    <div>
+      <div style="font-weight:700;">Filter & Rekap</div>
+      <div class="muted" style="font-size:12px;">Gunakan filter untuk laporan cepat tanpa export.</div>
+    </div>
+    <div class="card-header-actions">
+      <button class="btn secondary" type="button">Reset</button>
+      <button class="btn primary" type="button">Terapkan</button>
+    </div>
+  </div>
+  <form class="form-grid" style="margin-top:10px;">
+    <div class="form-row">
+      <label class="label" for="att-search">Cari (nama/email)</label>
+      <input class="input" id="att-search" type="text" placeholder="Nama atau email" />
+    </div>
+    <div class="form-row">
+      <label class="label" for="att-site">Site</label>
+      <select class="input" id="att-site">
+        <option value="">Semua Site</option>
+        <option>Site A</option>
+        <option>Site B</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <label class="label" for="att-date-from">Dari</label>
+      <input class="input" id="att-date-from" type="text" placeholder="DD-MM-YYYY" />
+    </div>
+    <div class="form-row">
+      <label class="label" for="att-date-to">Sampai</label>
+      <input class="input" id="att-date-to" type="text" placeholder="DD-MM-YYYY" />
+    </div>
+    <div class="form-row">
+      <label class="label" for="att-action">Aksi</label>
+      <select class="input" id="att-action">
+        <option value="">Semua</option>
+        <option>checkin</option>
+        <option>checkout</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <label class="label" for="att-method">Metode</label>
+      <select class="input" id="att-method">
+        <option value="">Semua</option>
+        <option>gps</option>
+        <option>gps_selfie</option>
+        <option>qr</option>
+        <option>manual</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <label class="label" for="att-status">Status</label>
+      <select class="input" id="att-status">
+        <option value="">Semua</option>
+        <option>On Time</option>
+        <option>Terlambat</option>
+        <option>Belum Checkout</option>
+        <option>Manual Pending</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <label class="label" for="att-source">Sumber</label>
+      <select class="input" id="att-source">
+        <option value="">Semua</option>
+        <option>sqlite</option>
+        <option>manual_request</option>
+      </select>
+    </div>
+  </form>
+</div>
+
+<div class="card" style="margin-bottom:16px;">
+  <div class="card-header-actions" style="justify-content:space-between;">
+    <div>
+      <div style="font-weight:700;">Aksi Cepat</div>
+      <div class="muted" style="font-size:12px;">Export, audit, dan ringkasan cepat.</div>
+    </div>
+    <div class="card-header-actions">
+      <button class="btn secondary" type="button">Export CSV</button>
+      <button class="btn secondary" type="button">Export PDF</button>
+      <button class="btn secondary" type="button">Audit Terlambat</button>
+    </div>
+  </div>
+  <div class="muted" style="font-size:12px;margin-top:8px;">
+    Contoh fasilitas tambahan: rekonsiliasi shift, validasi selfie, dan cek radius lokasi.
+  </div>
+</div>
+
 <div class="card">
   <div class="muted" style="margin-bottom:10px;">Sumber: sqlite = data persisted, manual = hasil approval manual.</div>
   <div class="table-wrap">

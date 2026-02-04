@@ -1708,20 +1708,34 @@ html[data-theme="light"] .badge[data-leave-type="izin"]{
   table-layout: fixed;
   border-spacing: 0;
   margin: 0;
+  box-sizing: border-box;
+}
+
+#daily-report-body{
+  overflow-x: hidden;
+  width: 100%;
+  padding: 8px 10px;
+  box-sizing: border-box;
 }
 
 #daily-report-body table.table.compact th,
 #daily-report-body table.table.compact td{
-  white-space: nowrap;
+  white-space: normal;
+  word-break: break-word;
   overflow: hidden;
   text-overflow: ellipsis;
   padding: 6px 6px;
   font-size: 11px;
+  box-sizing: border-box;
+}
+
+.card-body-collapsible{
+  overflow: hidden;
 }
 
 #daily-report-body table.table.compact th:nth-of-type(1),
 #daily-report-body table.table.compact td:nth-of-type(1){
-  width: 34%;
+  width: 33%;
 }
 
 #daily-report-body table.table.compact th:nth-of-type(2),
@@ -1731,7 +1745,17 @@ html[data-theme="light"] .badge[data-leave-type="izin"]{
 
 #daily-report-body table.table.compact th:nth-of-type(3),
 #daily-report-body table.table.compact td:nth-of-type(3){
-  width: 33%;
+  width: 34%;
+}
+
+#daily-report-body .badge{
+  display: block;
+  max-width: 100%;
+  padding: 2px 6px;
+  text-align: center;
+  white-space: normal;
+  width: fit-content;
+  margin: 0 auto;
 }
 
 .floating-nav{
