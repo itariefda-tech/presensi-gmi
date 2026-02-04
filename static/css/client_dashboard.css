@@ -176,7 +176,7 @@ html[data-theme="light"] body{
 .payroll-period{
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 5px;
 }
 
 .payroll-period-chip{
@@ -292,11 +292,6 @@ html[data-theme="light"] body{
   color: var(--text);
 }
 
-.attendance-export-divider{
-  border-top: 2px solid #ff2d2d;
-  padding-top: 14px;
-  margin-top: 12px;
-}
 
 .section-head h2{
   margin: 0;
@@ -1155,14 +1150,22 @@ html[data-theme="light"] .data-table .btn.danger.btn-icon{
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  flex-wrap: wrap;
+  gap: 5px;
+  flex-wrap: nowrap;
   padding: 12px 14px;
   border-radius: 20px;
   background: #a7c7ff;
   border: 1px solid rgba(90, 135, 210, 0.65);
   backdrop-filter: blur(12px);
   z-index: 20;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.floating-nav::-webkit-scrollbar{
+  display: none;
 }
 
 html[data-theme="light"] .floating-nav{
@@ -1755,9 +1758,53 @@ body.modal-open{
   background: rgba(248, 113, 113, 0.1);
 }
 
+.payroll-table .contact-stack{
+  align-items: flex-start;
+}
+
+.payroll-table .mini-btn{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  padding: 4px 14px;
+  min-width: 88px;
+  width: 88px;
+  height: 28px;
+  border-radius: 8px;
+}
+
+.payroll-table .status-pill{
+  padding: 2px 6px;
+  min-width: 88px;
+  width: 88px;
+  height: 22px;
+  justify-content: center;
+  white-space: nowrap;
+}
+
+.payroll-table .data-table{
+  table-layout: fixed;
+}
+
+.payroll-table .data-table th:nth-child(1),
+.payroll-table .data-table td:nth-child(1){
+  width: calc(46% - 5px);
+}
+
+.payroll-table .data-table th:nth-child(2),
+.payroll-table .data-table td:nth-child(2){
+  width: 32%;
+}
+
+.payroll-table .data-table th:nth-child(3),
+.payroll-table .data-table td:nth-child(3){
+  width: calc(22% + 5px);
+}
+
 .profile-grid{
   display: grid;
-  gap: 10px;
+  gap: 8px;
   margin-top: 12px;
 }
 

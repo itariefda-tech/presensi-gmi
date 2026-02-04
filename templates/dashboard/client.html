@@ -532,7 +532,7 @@
                     <label class="label" for="employee-phone">No HP</label>
                     <input class="input" id="employee-phone" name="no_hp" type="text" required />
                   </div>
-                  <div class="form-row full attendance-export-divider">
+                  <div class="form-row full">
                     <label class="label" for="employee-address">Alamat</label>
                     <input class="input" id="employee-address" name="address" type="text" required />
                   </div>
@@ -880,11 +880,9 @@
               <table class="data-table">
                 <thead>
                   <tr>
-                    <th>Pegawai</th>
-                    <th>Periode</th>
-                    <th>Gaji Bersih</th>
-                    <th>Status</th>
-                    <th>Aksi</th>
+                    <th>Pegawai/ Email</th>
+                    <th>Periode/ Gajibersih</th>
+                    <th>Status/ Aksi</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -895,10 +893,18 @@
                         <span class="muted">baim@gmail.com</span>
                       </div>
                     </td>
-                    <td>01 - 31 Jan 2026</td>
-                    <td>Rp 5.450.000</td>
-                    <td><span class="status-pill ok">Approved</span></td>
-                    <td><button class="mini-btn" type="button">Detail</button></td>
+                    <td>
+                      <div class="contact-stack">
+                        <span>01 - 31 Jan 2026</span>
+                        <span class="muted">Rp 5.450.000</span>
+                      </div>
+                    </td>
+                    <td>
+                      <div class="contact-stack">
+                        <span class="status-pill ok">Approved</span>
+                        <button class="mini-btn" type="button">Detail</button>
+                      </div>
+                    </td>
                   </tr>
                   <tr>
                     <td>
@@ -907,10 +913,18 @@
                         <span class="muted">sita@site.co</span>
                       </div>
                     </td>
-                    <td>01 - 31 Jan 2026</td>
-                    <td>Rp 4.980.000</td>
-                    <td><span class="status-pill warning">Pending</span></td>
-                    <td><button class="mini-btn" type="button">Review</button></td>
+                    <td>
+                      <div class="contact-stack">
+                        <span>01 - 31 Jan 2026</span>
+                        <span class="muted">Rp 4.980.000</span>
+                      </div>
+                    </td>
+                    <td>
+                      <div class="contact-stack">
+                        <span class="status-pill warning">Pending</span>
+                        <button class="mini-btn" type="button">Review</button>
+                      </div>
+                    </td>
                   </tr>
                   <tr>
                     <td>
@@ -919,10 +933,18 @@
                         <span class="muted">rama@site.co</span>
                       </div>
                     </td>
-                    <td>01 - 31 Jan 2026</td>
-                    <td>Rp 5.120.000</td>
-                    <td><span class="status-pill muted">Draft</span></td>
-                    <td><button class="mini-btn" type="button">Edit</button></td>
+                    <td>
+                      <div class="contact-stack">
+                        <span>01 - 31 Jan 2026</span>
+                        <span class="muted">Rp 5.120.000</span>
+                      </div>
+                    </td>
+                    <td>
+                      <div class="contact-stack">
+                        <span class="status-pill muted">Draft</span>
+                        <button class="mini-btn" type="button">Edit</button>
+                      </div>
+                    </td>
                   </tr>
                 </tbody>
               </table>
