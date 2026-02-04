@@ -847,7 +847,7 @@ html[data-theme="light"] .data-table .btn.danger.btn-icon{
 }
 
 .attendance-toggle-row{
-  margin-top: 0;
+  margin-top: 5px;
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
@@ -1784,17 +1784,17 @@ body.modal-open{
   align-items: center;
   justify-content: center;
   white-space: nowrap;
-  padding: 4px 14px;
-  min-width: 88px;
-  width: 88px;
-  height: 28px;
+  padding: 3px 8px;
+  min-width: 60px;
+  width: 60px;
+  height: 26px;
   border-radius: 8px;
 }
 
 .payroll-table .status-pill{
   padding: 2px 6px;
-  min-width: 88px;
-  width: 88px;
+  min-width: 60px;
+  width: 60px;
   height: 22px;
   justify-content: center;
   white-space: nowrap;
@@ -1806,12 +1806,12 @@ body.modal-open{
 
 .payroll-table .data-table th:nth-child(1),
 .payroll-table .data-table td:nth-child(1){
-  width: 23ch;
+  width: 18ch;
 }
 
 .payroll-table .data-table th:nth-child(2),
 .payroll-table .data-table td:nth-child(2){
-  width: 15ch;
+  width: 14ch;
 }
 
 .payroll-table .data-table th:nth-child(3),
