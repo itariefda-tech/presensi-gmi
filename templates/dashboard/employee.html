@@ -349,20 +349,18 @@
               </button>
             </div>
             <div class="card-body-collapsible" id="daily-report-body">
-              <table class="table compact">
-                <thead>
-                  <tr>
-                    <th>Tanggal</th>
-                    <th>Status</th>
-                    <th>Metode</th>
-                  </tr>
-                </thead>
-                <tbody id="dailyReportRows">
-                  <tr>
-                    <td colspan="3" class="muted">Memuat data...</td>
-                  </tr>
-                </tbody>
-              </table>
+              <div class="daily-report-table">
+                <div class="daily-report-row header">
+                  <div>Tanggal</div>
+                  <div>Status</div>
+                  <div>Metode</div>
+                </div>
+                <div class="daily-report-body" id="dailyReportRows">
+                  <div class="daily-report-row empty">
+                    <div class="muted">Memuat data...</div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
           <div class="card mobile-card">

@@ -1244,9 +1244,8 @@ def create_app() -> Flask:
             if not _within_site_radius(lat_f, lng_f, site):
                 return jsonify(ok=False, message="Lokasi di luar radius site."), 400
         
-        # Validate selfie for GPS+Selfie method
-        if method == "gps_selfie":
-            # If require_selfie policy is set, enforce selfie for gps_selfie method
+        # Validate selfie for GPS+Selfie method (policy-based)
+        if method == "gps_selfie" and int(policy.get("require_selfie", 1) or 0) == 1:
             if not selfie_file or not selfie_file.filename:
                 print(f"[CHECKIN] Missing selfie for gps_selfie")
                 return jsonify(ok=False, message="Selfie wajib untuk presensi."), 400
@@ -1362,9 +1361,8 @@ def create_app() -> Flask:
             if not _within_site_radius(lat_f, lng_f, site):
                 return jsonify(ok=False, message="Lokasi di luar radius site."), 400
         
-        # Validate selfie for GPS+Selfie method
-        if method == "gps_selfie":
-            # If require_selfie policy is set, enforce selfie for gps_selfie method
+        # Validate selfie for GPS+Selfie method (policy-based)
+        if method == "gps_selfie" and int(policy.get("require_selfie", 1) or 0) == 1:
             if not selfie_file or not selfie_file.filename:
                 return jsonify(ok=False, message="Selfie wajib untuk presensi."), 400
         

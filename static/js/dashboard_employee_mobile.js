@@ -164,36 +164,41 @@ function updatePresenceReadiness(){
   const currentMethod = attMethod?.value || "gps_selfie";
   console.log("[READINESS] Current method:", currentMethod);
   
-  // Determine readiness based on selected method
-  let ready = false;
+  // Determine readiness for check-in vs check-out
+  let checkinReady = false;
+  let checkoutReady = false;
   
   if (currentMethod === "gps") {
     // GPS only: needs location only, selfie NOT required
-    ready = isOnline && locationActive && hasLocation;
+    checkinReady = isOnline && locationActive && hasLocation;
+    checkoutReady = checkinReady;
   } else if (currentMethod === "gps_selfie") {
-    // GPS + Selfie: needs location AND selfie
+    // GPS + Selfie: check-in needs selfie, check-out does not
     const hasSelfie = selfieFile?.files?.length > 0 && selfiePreview?.style?.display !== "none";
-    ready = isOnline && locationActive && hasLocation && hasSelfie;
-    console.log("[READINESS] GPS+Selfie check:", {isOnline, locationActive, hasLocation, hasSelfie, ready});
+    checkinReady = isOnline && locationActive && hasLocation && hasSelfie;
+    checkoutReady = isOnline && locationActive && hasLocation;
+    console.log("[READINESS] GPS+Selfie check:", {isOnline, locationActive, hasLocation, hasSelfie, checkinReady, checkoutReady});
   } else if (currentMethod === "qr") {
     // QR mode: needs QR data, location not required
     const hasQr = qrData?.value && qrData.value.trim() !== "";
-    ready = isOnline && hasQr;
+    checkinReady = isOnline && hasQr;
+    checkoutReady = checkinReady;
   }
   
-  console.log("[READINESS] Setting status to:", ready ? "Siap Absen" : "Belum siap Absen");
-  presenceStatusTitle.textContent = ready ? "Siap Absen" : "Belum siap Absen";
-  presenceStatusTitle.classList.toggle("is-ready", ready);
-  presenceStatusTitle.setAttribute("aria-label", ready ? "Siap Absen" : "Belum siap Absen");
+  const statusReady = hasCheckedIn ? checkoutReady : checkinReady;
+  console.log("[READINESS] Setting status to:", statusReady ? "Siap Absen" : "Belum siap Absen");
+  presenceStatusTitle.textContent = statusReady ? "Siap Absen" : "Belum siap Absen";
+  presenceStatusTitle.classList.toggle("is-ready", statusReady);
+  presenceStatusTitle.setAttribute("aria-label", statusReady ? "Siap Absen" : "Belum siap Absen");
   if (btnLocation) {
     btnLocation.classList.toggle("is-warning", !hasLocation);
   }
   if (btnCheckin) {
-    btnCheckin.disabled = !ready;
-    btnCheckin.setAttribute("aria-disabled", ready ? "false" : "true");
+    btnCheckin.disabled = !checkinReady;
+    btnCheckin.setAttribute("aria-disabled", checkinReady ? "false" : "true");
   }
   if (btnCheckout) {
-    const canCheckout = ready && hasCheckedIn;
+    const canCheckout = checkoutReady && hasCheckedIn;
     btnCheckout.disabled = !canCheckout;
     btnCheckout.setAttribute("aria-disabled", canCheckout ? "false" : "true");
   }
@@ -457,22 +462,24 @@ function renderDailyReport(records){
   if (!dailyReportRows) return;
   dailyReportRows.innerHTML = "";
   if (!records.length){
-    const tr = document.createElement("tr");
-    tr.innerHTML = `<td colspan="3" class="muted">Belum ada</td>`;
-    dailyReportRows.appendChild(tr);
+    const rowEl = document.createElement("div");
+    rowEl.className = "daily-report-row empty";
+    rowEl.innerHTML = `<div class="muted">Belum ada</div>`;
+    dailyReportRows.appendChild(rowEl);
     return;
   }
   records.forEach((row) => {
-    const tr = document.createElement("tr");
+    const rowEl = document.createElement("div");
+    rowEl.className = "daily-report-row";
     const statusLabel = row.action === "checkout" ? "Pulang" : "Hadir";
     const methodBadge = createMethodBadge(row.method);
     const timeText = row.time ? row.time.slice(0,5) : "-";
-    tr.innerHTML = `
-      <td>${formatDateDisplay(row.date)}<div class="muted">${timeText}</div></td>
-      <td>${statusLabel}</td>
-      <td>${methodBadge}</td>
+    rowEl.innerHTML = `
+      <div>${formatDateDisplay(row.date)}<div class="muted">${timeText}</div></div>
+      <div>${statusLabel}</div>
+      <div>${methodBadge}</div>
     `;
-    dailyReportRows.appendChild(tr);
+    dailyReportRows.appendChild(rowEl);
   });
 }
 
@@ -481,13 +488,13 @@ async function loadDailyReport(){
   try {
     const today = await safeFetch("/api/attendance/today");
     if (!today.ok) {
-      dailyReportRows.innerHTML = '<tr><td colspan="3" class="muted">Gagal memuat laporan harian.</td></tr>';
+      dailyReportRows.innerHTML = '<div class="daily-report-row empty"><div class="muted">Gagal memuat laporan harian.</div></div>';
       return;
     }
     const records = today.data?.data || [];
     renderDailyReport(records);
   } catch (err) {
-    dailyReportRows.innerHTML = '<tr><td colspan="3" class="muted">Gagal memuat laporan harian.</td></tr>';
+    dailyReportRows.innerHTML = '<div class="daily-report-row empty"><div class="muted">Gagal memuat laporan harian.</div></div>';
     console.error(err);
   }
 }
