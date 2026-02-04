@@ -1,11 +1,26 @@
-// IMPORTANT: Make sure to install the correct version of the Capacitor Geolocation plugin first
-// Run this command in your terminal in the `android-capacitor` directory:
-// npm install @capacitor/geolocation@^5.0.0
-//
-// After installation, sync the project with Android:
-// npx cap sync android
-
-import { Geolocation } from "@capacitor/geolocation";
+// Geolocation shim: use Capacitor plugin when available, fallback to browser API.
+const Geolocation = (() => {
+  const capacitorGeo = window.Capacitor?.Plugins?.Geolocation;
+  if (capacitorGeo) return capacitorGeo;
+  const hasBrowserGeo = "geolocation" in navigator;
+  return {
+    async requestPermissions() {
+      return { location: hasBrowserGeo ? "granted" : "denied" };
+    },
+    async checkPermissions() {
+      return { location: hasBrowserGeo ? "granted" : "denied" };
+    },
+    async getCurrentPosition(options) {
+      return new Promise((resolve, reject) => {
+        if (!hasBrowserGeo) {
+          reject(new Error("Geolocation not supported"));
+          return;
+        }
+        navigator.geolocation.getCurrentPosition(resolve, reject, options);
+      });
+    },
+  };
+})();
 
 const themeToggle = document.querySelector("[data-theme-toggle]");
 const clockHH = document.getElementById("clockHH");

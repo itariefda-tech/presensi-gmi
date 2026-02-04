@@ -1806,7 +1806,7 @@ body.modal-open{
 
 .payroll-table .data-table th:nth-child(1),
 .payroll-table .data-table td:nth-child(1){
-  width: 25ch;
+  width: 23ch;
 }
 
 .payroll-table .data-table th:nth-child(2),
