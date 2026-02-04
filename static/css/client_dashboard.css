@@ -196,6 +196,12 @@ html[data-theme="light"] body{
   margin-top: 12px;
 }
 
+@media (max-width: 640px){
+  .payroll-kpi-grid{
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 .payroll-kpi{
   padding: 14px 16px;
   border-radius: 14px;
@@ -845,7 +851,18 @@ html[data-theme="light"] .data-table .btn.danger.btn-icon{
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
-  justify-content: flex-end;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.attendance-toggle-left{
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.attendance-toggle-row .attendance-date{
+  margin-left: auto;
 }
 
 .attendance-meta-column{
@@ -1789,12 +1806,12 @@ body.modal-open{
 
 .payroll-table .data-table th:nth-child(1),
 .payroll-table .data-table td:nth-child(1){
-  width: calc(46% - 5px);
+  width: 25ch;
 }
 
 .payroll-table .data-table th:nth-child(2),
 .payroll-table .data-table td:nth-child(2){
-  width: 32%;
+  width: 15ch;
 }
 
 .payroll-table .data-table th:nth-child(3),

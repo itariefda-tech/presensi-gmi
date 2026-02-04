@@ -613,15 +613,17 @@
               <div>
                 <h3>Attendance Harian</h3>
                 <div class="attendance-toggle-row" role="group" aria-label="Filter kehadiran harian">
+                  <div class="attendance-toggle-left">
+                    <label class="toggle-pill">
+                      <input type="radio" name="attendance_presence" value="present" checked />
+                      Hadir
+                    </label>
+                    <label class="toggle-pill">
+                      <input type="radio" name="attendance_presence" value="absent" />
+                      Tidak hadir
+                    </label>
+                  </div>
                   <div class="panel-sub attendance-date" data-raw-date="{{ today|ddmmyyyy }}">Date : <span class="attendance-date-value" id="attendanceDateValue"></span></div>
-                  <label class="toggle-pill">
-                    <input type="radio" name="attendance_presence" value="present" checked />
-                    Hadir
-                  </label>
-                  <label class="toggle-pill">
-                    <input type="radio" name="attendance_presence" value="absent" />
-                    Tidak hadir
-                  </label>
                 </div>
               </div>
               <span class="panel-badge muted">Live</span>
@@ -843,18 +845,18 @@
             </div>
             <div class="payroll-kpi-grid">
               <div class="payroll-kpi">
-                <div class="label">Total Payroll</div>
-                <div class="value">Rp 128.450.000</div>
+                <div class="label">TOTALPayroll Rp.</div>
+                <div class="value">128.450.000</div>
                 <div class="meta">24 pegawai • 1 site</div>
               </div>
               <div class="payroll-kpi">
-                <div class="label">Tunjangan</div>
-                <div class="value">Rp 18.200.000</div>
+                <div class="label">TUNJANGAN Rp.</div>
+                <div class="value">18.200.000</div>
                 <div class="meta">Transport + makan</div>
               </div>
               <div class="payroll-kpi">
-                <div class="label">Potongan</div>
-                <div class="value">Rp 6.750.000</div>
+                <div class="label">POTONGAN Rp.</div>
+                <div class="value">6.750.000</div>
                 <div class="meta">Alpha + keterlambatan</div>
               </div>
               <div class="payroll-kpi highlight">
@@ -895,8 +897,8 @@
                     </td>
                     <td>
                       <div class="contact-stack">
-                        <span>01 - 31 Jan 2026</span>
-                        <span class="muted">Rp 5.450.000</span>
+                        <span>Jan 2026</span>
+                        <span class="muted">5.450.000</span>
                       </div>
                     </td>
                     <td>
@@ -915,8 +917,8 @@
                     </td>
                     <td>
                       <div class="contact-stack">
-                        <span>01 - 31 Jan 2026</span>
-                        <span class="muted">Rp 4.980.000</span>
+                        <span>Jan 2026</span>
+                        <span class="muted">4.980.000</span>
                       </div>
                     </td>
                     <td>
@@ -935,8 +937,8 @@
                     </td>
                     <td>
                       <div class="contact-stack">
-                        <span>01 - 31 Jan 2026</span>
-                        <span class="muted">Rp 5.120.000</span>
+                        <span>Jan 2026</span>
+                        <span class="muted">5.120.000</span>
                       </div>
                     </td>
                     <td>
