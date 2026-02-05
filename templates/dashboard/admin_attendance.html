@@ -63,63 +63,90 @@
   </article>
 </section>
 
-<div class="card">
-  <div class="muted" style="margin-bottom:10px;">Sumber: sqlite = data persisted, manual = hasil approval manual.</div>
-  <div class="table-wrap">
-    <table id="attendance-table" class="table" aria-label="Data attendance">
+<section class="card attendance-report-card" id="attendance-report-card">
+  <div class="card-header-actions" style="justify-content:space-between;">
+    <div>
+      <h4>Attendance Report</h4>
+      <div class="muted small attendance-report-subtitle">Tabel report per rentang tanggal.</div>
+    </div>
+  </div>
+  <form id="attendanceReportFilters" class="attendance-report-filters" method="get" action="{{ url_for('admin.attendance') }}">
+    <input type="hidden" name="site_id" value="{{ selected_site.id }}" />
+    <div class="filter-col filter-name">
+      <label for="attendanceReportSearch">Nama/e-mail</label>
+      <input id="attendanceReportSearch" name="search" type="text" class="input" placeholder="Semua" value="{{ filter_search }}" autocomplete="off" />
+    </div>
+    <div class="filter-col filter-method">
+      <label for="attendanceReportMethod">Metode</label>
+      <select id="attendanceReportMethod" name="method" class="input">
+        <option value="" {% if not filter_method %}selected{% endif %}>Semua</option>
+        <option value="gps" {% if filter_method == 'gps' %}selected{% endif %}>GPS</option>
+        <option value="gps_selfie" {% if filter_method == 'gps_selfie' %}selected{% endif %}>GPSelf</option>
+        <option value="qr" {% if filter_method == 'qr' %}selected{% endif %}>QR</option>
+        <option value="manual" {% if filter_method == 'manual' %}selected{% endif %}>Manual</option>
+      </select>
+    </div>
+    <div class="filter-col filter-range">
+      <label for="attendanceReportRangeFrom">Range</label>
+      <div class="attendance-range-inputs">
+        <div class="range-input">
+          <input id="attendanceReportRangeFrom" name="from" value="{{ filter_range_from }}" type="text" class="input" placeholder="DD/MM/YYYY" data-date-mode="date" autocomplete="off" />
+        </div>
+        <div class="range-input">
+          <input id="attendanceReportRangeTo" name="to" value="{{ filter_range_to }}" type="text" class="input" placeholder="DD/MM/YYYY" data-date-mode="date" autocomplete="off" />
+        </div>
+      </div>
+    </div>
+    <div class="filter-col filter-actions">
+      <div class="filter-actions">
+        <button class="btn secondary" type="button" id="attendanceReportReset" data-reset-url="{{ url_for('admin.attendance') }}{% if selected_site %}?site_id={{ selected_site.id }}{% endif %}">Reset</button>
+        <button class="btn primary" type="submit">Apply</button>
+      </div>
+    </div>
+  </form>
+  <div class="attendance-report-helper" id="attendanceReportHelper">{{ helper_text }}</div>
+  <div class="muted small attendance-report-note">Sumber: sqlite = data persisted, manual = hasil approval manual.</div>
+  <div class="table-wrap attendance-report-table-wrap">
+    <table class="table attendance-report-table" id="attendanceReportTable">
       <thead>
         <tr>
           <th>Pegawai</th>
           <th>Email</th>
           <th>Tanggal</th>
-          <th>Waktu</th>
-          <th>Aksi</th>
-          <th>Metode/Sumber</th>
-          <th>Dibuat</th>
+          <th>Check-in</th>
+          <th>Check-out</th>
+          <th>Metode</th>
+          <th>Sumber</th>
+          <th>Dicatat</th>
         </tr>
       </thead>
-      <tbody>
+      <tbody id="attendanceReportBody">
+        {% if records %}
         {% for r in records %}
-        <tr
-          data-search="{{ (r.employee|default('') ~ ' ' ~ r.email|default(''))|lower }}"
-        >
+        <tr>
           <td>{{ r.employee }}</td>
           <td>{{ r.email }}</td>
           <td>{{ r.date|ddmmyyyy }}</td>
-          <td>{{ r.time }}</td>
-          <td><span class="badge">{{ r.action }}</span></td>
-          <td>{{ r.method }}{% if r.source and r.source != "-" %} ({{ r.source }}){% endif %}</td>
+          <td>{{ r.check_in or '-' }}</td>
+          <td>{{ r.check_out or '-' }}</td>
+          <td>{{ r.method }}</td>
+          <td>{{ r.source }}</td>
           <td>{{ r.created_at|display_datetime }}</td>
         </tr>
         {% endfor %}
+        {% else %}
+        <tr>
+          <td colspan="8" class="muted">Rentang belum dipilih atau tidak ada data.</td>
+        </tr>
+        {% endif %}
       </tbody>
     </table>
   </div>
-</div>
+  <div class="attendance-report-export">
+    <button class="btn secondary" type="button" id="attendanceReportCsvButton" data-csv-url="{{ url_for('admin.attendance_csv') }}">CSV</button>
+    <div class="attendance-report-csv-note">Tekan tombol CSV untuk menarik data CSV.</div>
+  </div>
+</section>
+    </div>
 {% endif %}
 {% endblock %}
-  const formatDisplayDate = (value) => {
-    if (!value) return "";
-    const date = new Date(value);
-    if (Number.isNaN(date)) return value;
-    const day = String(date.getDate()).padStart(2, "0");
-    const month = String(date.getMonth() + 1).padStart(2, "0");
-    const year = date.getFullYear();
-    return `${day}-${month}-${year}`;
-  };
-
-  const activatePicker = (input) => {
-    if (!input) return;
-    input.type = "date";
-    if (typeof input.showPicker === "function") {
-      input.showPicker();
-    }
-    const handleBlur = () => {
-      input.type = "text";
-      if (input.value) {
-        input.value = formatDisplayDate(input.value);
-      }
-      input.removeEventListener("blur", handleBlur);
-    };
-    input.addEventListener("blur", handleBlur);
-  };

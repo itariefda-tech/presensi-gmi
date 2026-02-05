@@ -361,6 +361,98 @@ a:hover{ text-decoration:underline; }
 .admin-attendance-panel .card{
   margin-bottom:0;
 }
+.attendance-report-card{
+  background: var(--surface);
+  padding:20px;
+  border-radius:16px;
+  box-shadow:0 18px 24px -16px rgba(15,23,42,.35);
+}
+.attendance-report-subtitle{
+  letter-spacing:.02em;
+}
+.attendance-report-filters{
+  display:grid;
+  grid-template-columns:40% 25% 30% auto;
+  gap:12px;
+  align-items:center;
+}
+.attendance-report-filters .filter-col{
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+  align-items:flex-end;
+}
+.attendance-report-filters .filter-range{
+  align-items:flex-start;
+}
+.attendance-report-filters label{
+  font-size:12px;
+  letter-spacing:.04em;
+}
+.attendance-report-filters .attendance-range-inputs{
+  display:flex;
+  gap:5px;
+  width:100%;
+}
+.attendance-report-filters .range-input{
+  flex:1;
+}
+.attendance-report-filters .input{
+  width:100%;
+  min-height:38px;
+  border-radius:12px;
+}
+.attendance-report-filters .filter-actions{
+  width:100%;
+}
+.filter-actions{
+  display:flex;
+  justify-content:flex-end;
+  gap:8px;
+}
+.attendance-report-helper{
+  font-size:13px;
+  color:var(--muted);
+  margin-top:4px;
+}
+.attendance-report-table-wrap{
+  margin-top:8px;
+}
+.attendance-report-table thead th{
+  font-size:12px;
+  letter-spacing:.02em;
+}
+.attendance-report-export{
+  display:flex;
+  justify-content:flex-end;
+  align-items:center;
+  gap:12px;
+}
+.attendance-report-csv-note{
+  font-size:11px;
+  color:var(--muted);
+}
+.attendance-report-table td,
+.attendance-report-table th{
+  padding:10px 12px;
+}
+.attendance-report-table tbody tr td:last-child{
+  white-space:nowrap;
+}
+@media (max-width: 1024px){
+  .attendance-report-filters{
+    grid-template-columns:1fr;
+  }
+  .attendance-report-filters .filter-col{
+    align-items:flex-start;
+  }
+  .filter-actions{
+    justify-content:flex-start;
+  }
+  .attendance-report-export{
+    justify-content:flex-start;
+  }
+}
 .site-toggle-grid{
   display:grid;
   gap:10px;

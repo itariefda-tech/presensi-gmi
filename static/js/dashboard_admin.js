@@ -125,3 +125,70 @@ async function loadApprovals(){
 if (leaveRows) {
   loadApprovals();
 }
+
+function initAttendanceReportFilters(){
+  const form = document.getElementById("attendanceReportFilters");
+  if (!form) return;
+  const formatDateValue = (value) => {
+    if (!value) return "";
+    const parts = value.split("-");
+    if (parts.length >= 3) {
+      const [year, month, day] = parts;
+      return `${day.padStart(2, "0")}/${month.padStart(2, "0")}/${year}`;
+    }
+    return value;
+  };
+  const toIsoDate = (value) => {
+    if (!value) return "";
+    const match = value.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    if (match) {
+      return `${match[3]}-${match[2]}-${match[1]}`;
+    }
+    return value;
+  };
+  const activateDateInput = (input) => {
+    if (input.dataset.isDateActive) return;
+    const isoValue = toIsoDate(input.value);
+    if (isoValue) {
+      input.value = isoValue;
+    }
+    input.type = "date";
+    input.dataset.isDateActive = "1";
+    if (typeof input.showPicker === "function") {
+      input.showPicker();
+    }
+    const handleBlur = () => {
+      input.type = "text";
+      const formatted = formatDateValue(input.value);
+      if (formatted) {
+        input.value = formatted;
+      }
+      input.removeEventListener("blur", handleBlur);
+      delete input.dataset.isDateActive;
+    };
+    input.addEventListener("blur", handleBlur);
+  };
+  form.querySelectorAll("input[data-date-mode]").forEach((input) => {
+    input.addEventListener("focus", () => activateDateInput(input));
+  });
+  const resetButton = document.getElementById("attendanceReportReset");
+  if (resetButton) {
+    resetButton.addEventListener("click", () => {
+      const url = resetButton.dataset.resetUrl;
+      if (url) {
+        window.location.href = url;
+      }
+    });
+  }
+  const csvButton = document.getElementById("attendanceReportCsvButton");
+  if (csvButton) {
+    csvButton.addEventListener("click", () => {
+      const csvUrl = csvButton.dataset.csvUrl;
+      if (!csvUrl) return;
+      const params = new URLSearchParams(new FormData(form));
+      window.open(`${csvUrl}?${params.toString()}`, "_blank");
+    });
+  }
+}
+
+initAttendanceReportFilters();

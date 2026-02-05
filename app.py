@@ -20,7 +20,7 @@ from typing import Dict
 
 import qrcode
 
-from flask import Flask, jsonify, render_template, request, session, Blueprint, abort, redirect, url_for, flash, g
+from flask import Flask, jsonify, render_template, request, session, Blueprint, abort, redirect, url_for, flash, g, Response
 from werkzeug.utils import secure_filename
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -7816,7 +7816,14 @@ def admin_bp() -> Blueprint:
                 if int(a.get("client_id") or 0) == client_scope
             }
             client_scope_emails = scoped_emails
+        filter_search = (request.args.get("search") or "").strip()
+        filter_method = (request.args.get("method") or "").strip().lower()
+        filter_range_from = (request.args.get("from") or "").strip()
+        filter_range_to = (request.args.get("to") or "").strip()
+        normalized_from = _normalize_date_input(filter_range_from)
+        normalized_to = _normalize_date_input(filter_range_to)
         records: list[dict] = []
+        helper_text = "Isi rentang tanggal lalu apply untuk tampilkan data."
         if selected_site:
             selected_site_id = int(selected_site.get("id") or 0)
             allowed_emails = {
@@ -7826,13 +7833,119 @@ def admin_bp() -> Blueprint:
             }
             if client_scope_emails is not None:
                 allowed_emails = allowed_emails & client_scope_emails
-            records = _attendance_live(limit=limit, allowed_emails=allowed_emails)
+            records = _attendance_live(
+                limit=limit,
+                allowed_emails=allowed_emails,
+                employee_email=filter_search or None,
+                date_from=normalized_from,
+                date_to=normalized_to,
+            )
+            if filter_method:
+                records = [
+                    r for r in records if (r.get("method") or "").lower() == filter_method
+                ]
+            if normalized_from and normalized_to:
+                if records:
+                    helper_text = (
+                        f"{len(records)} record ditampilkan dari {filter_range_from} s/d {filter_range_to}."
+                    )
+                else:
+                    helper_text = (
+                        f"Tidak ada record untuk rentang {filter_range_from} s/d {filter_range_to}."
+                    )
         return render_template(
             "dashboard/admin_attendance.html",
             user=user,
             records=records,
             sites=sites,
             selected_site=selected_site,
+            helper_text=helper_text,
+            filter_search=filter_search,
+            filter_method=filter_method,
+            filter_range_from=filter_range_from,
+            filter_range_to=filter_range_to,
+        )
+
+    @bp.route("/attendance/csv", methods=["GET"])
+    def attendance_csv():
+        user = _current_user()
+        sites = _list_sites()
+        site_id_raw = (request.args.get("site_id") or "").strip()
+        selected_site = None
+        if site_id_raw.isdigit():
+            target = int(site_id_raw)
+            selected_site = next(
+                (s for s in sites if int(s.get("id") or 0) == target),
+                None,
+            )
+        if not selected_site:
+            flash("Site tidak ditemukan.")
+            return redirect(url_for("admin.attendance"))
+        client_scope = _client_admin_client_id(user)
+        client_scope_emails = None
+        if client_scope:
+            today = _today_key()
+            scoped_emails = {
+                (a.get("employee_email") or "").lower()
+                for a in _list_active_assignments(today)
+                if int(a.get("client_id") or 0) == client_scope
+            }
+            client_scope_emails = scoped_emails
+        allowed_emails = {
+            (emp.get("email") or "").strip().lower()
+            for emp in _list_employees_by_site(int(selected_site.get("id") or 0))
+            if emp.get("email")
+        }
+        if client_scope_emails is not None:
+            allowed_emails &= client_scope_emails
+        search = (request.args.get("search") or "").strip().lower()
+        method = (request.args.get("method") or "").strip().lower()
+        normalized_from = _normalize_date_input(request.args.get("from"))
+        normalized_to = _normalize_date_input(request.args.get("to"))
+        rows = _attendance_rows_for_emails(
+            allowed_emails,
+            date_from=normalized_from,
+            date_to=normalized_to,
+        )
+        if search:
+            rows = [
+                row
+                for row in rows
+                if search in (row.get("employee") or "").lower()
+                or search in (row.get("email") or "").lower()
+            ]
+        if method:
+            rows = [
+                row
+                for row in rows
+                if (row.get("method") or "").lower() == method
+            ]
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
+        writer.writerow(
+            ["Pegawai", "Email", "Tanggal", "Waktu", "Aksi", "Metode", "Sumber", "Dicatat"]
+        )
+        for row in rows:
+            writer.writerow(
+                [
+                    row["employee"],
+                    row["email"],
+                    row["date"],
+                    row["time"],
+                    row["action"],
+                    row["method"],
+                    row["source"],
+                    row["created_at"],
+                ]
+            )
+        csv_data = buffer.getvalue()
+        filename = f"attendance-site-{selected_site.get('id') or 'site'}.csv"
+        return Response(
+            csv_data,
+            mimetype="text/csv",
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}",
+            },
         )
 
     @bp.route("/manual_attendance", methods=["GET"])

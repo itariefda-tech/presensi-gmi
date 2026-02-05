@@ -701,10 +701,8 @@
           <article class="panel table-card" id="attendance-report">
             <div class="panel-head">
               <div>
-                <h3>Attendance Report</h3>
-                <div class="panel-sub">
-                  Tabel ini memuat report per rentang tanggal. Tekan tombol “Rekap” untuk menarik data agregasi CSV dan audit.
-                </div>
+                <h3>Report Attendance</h3>
+                <div class="panel-sub">Tabel report per rentang tanggal.</div>
               </div>
             </div>
             <div class="attendance-panel-body">
@@ -725,10 +723,10 @@
                         </div>
                       </div>
                     </div>
-                    <button class="btn primary range-action" type="submit">Rekap</button>
+                    <button class="btn primary range-action" type="submit">Apply</button>
                   </div>
                 </form>
-                <div class="attendance-range-message" id="attendance-range-message">Masukkan rentang tanggal lalu tekan &ldquo;Rekap&rdquo; untuk melihat data.</div>
+                <div class="attendance-range-message" id="attendance-range-message">Isi rentang tanggal lalu apply untuk tampilkan data.</div>
                 <div class="table-wrap">
                   <table class="data-table" id="attendance-range-table" data-page-size="6">
                     <thead>
@@ -751,6 +749,11 @@
                   <span class="page-info" data-page-info>Page 0 of 0</span>
                   <button class="btn ghost" type="button" data-page="next" disabled>Next</button>
                 </div>
+                <div class="muted small" style="margin-top:8px; font-size:11px;">Tekan tombol CSV untuk menarik data CSV.</div>
+              </div>
+              <div class="attendance-export-head">
+                <h4>Attendance Rekap</h4>
+                <div class="panel-sub">REKAP - Tarik Data dan Audit, pilih sesuai kebutuhan :</div>
               </div>
               <form class="site-form attendance-export" method="get" action="{{ url_for('client_attendance_csv') }}">
                 <div class="form-grid">

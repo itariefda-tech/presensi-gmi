@@ -1129,6 +1129,22 @@ html[data-theme="light"] .data-table .btn.danger.btn-icon{
   justify-items: start;
 }
 
+#attendance-report .attendance-export-head{
+  display:flex;
+  align-items:flex-end;
+  justify-content:space-between;
+  gap:6px;
+  margin-top: 16px;
+}
+#attendance-report .attendance-export-head h4{
+  margin:0;
+  font-size:16px;
+  font-weight:600;
+}
+#attendance-report .attendance-export-head .panel-sub{
+  margin:0;
+}
+
 #attendance-report .label{
   text-align: left;
 }
