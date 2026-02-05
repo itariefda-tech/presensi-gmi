@@ -4,7 +4,39 @@
 {% set subtitle = "Monitoring presensi GPS + selfie" %}
 
 {% block body %}
-<section class="card-grid" style="margin-bottom:16px;">
+<section class="card site-selection-card">
+  <div class="card-header-actions" style="justify-content:space-between;">
+    <div>
+      <h4>Attendance per Site</h4>
+    </div>
+  </div>
+  <div class="site-toggle-grid">
+    {% for site in sites %}
+    {% set is_active = selected_site and selected_site.id == site.id %}
+    <a class="site-toggle{% if is_active %} is-active{% endif %}" href="{{ url_for('admin.attendance', site_id=site.id) }}">
+      <span class="site-name">{{ site.name or ("Site #" ~ site.id) }}</span>
+      <span class="site-meta">{{ site.client_name or "Tanpa client" }}</span>
+      <span class="site-state">
+        {{ site.work_mode or "Work mode belum diatur" }}
+        {% if site.is_active|default(0) == 0 %}<span class="site-state__inactive">Nonaktif</span>{% endif %}
+      </span>
+    </a>
+    {% endfor %}
+  </div>
+</section>
+
+{% if not selected_site %}
+<div class="card site-placeholder">
+  <p class="muted" style="margin:0; font-size:14px;">
+    Silakan pilih site pada pilihan di atas untuk melihat ringkasan attendance per site. Toggle menampilkan semua site aktif dan siap dipantau.
+  </p>
+</div>
+{% else %}
+<div class="muted small" style="margin-bottom:8px;">
+  Site aktif: <strong>{{ selected_site.name }}</strong> · {{ selected_site.client_name or "Client umum" }}
+</div>
+<div class="admin-attendance-panel">
+<section class="card-grid admin-attendance-kpi">
   <article class="card">
     <h4>Total Record</h4>
     <div class="value">{{ records|length }}</div>
@@ -31,12 +63,12 @@
   </article>
 </section>
 
-<div class="card" style="margin-bottom:16px;">
-  <div class="card-header-actions" style="justify-content:space-between;">
-    <div>
-      <div style="font-weight:700;">Filter & Rekap</div>
-      <div class="muted" style="font-size:12px;">Gunakan filter untuk laporan cepat tanpa export.</div>
-    </div>
+  <div class="card" id="card-report">
+    <div class="card-header-actions" style="justify-content:space-between;">
+      <div>
+      <div style="font-weight:700;">Report Attendance</div>
+      <div class="muted" style="font-size:12px;">Pilih filter untuk menentukan output tabel report yang ingin ditarik dari data site.</div>
+      </div>
     <div class="card-header-actions">
       <button class="btn secondary" type="button">Reset</button>
       <button class="btn primary" type="button">Terapkan</button>
@@ -102,10 +134,10 @@
   </form>
 </div>
 
-<div class="card" style="margin-bottom:16px;">
+<div class="card" id="card-rekap">
   <div class="card-header-actions" style="justify-content:space-between;">
     <div>
-      <div style="font-weight:700;">Aksi Cepat</div>
+      <div style="font-weight:700;">REKAP - Tarik Data dan Audit</div>
       <div class="muted" style="font-size:12px;">Export, audit, dan ringkasan cepat.</div>
     </div>
     <div class="card-header-actions">
@@ -150,4 +182,6 @@
     </table>
   </div>
 </div>
+    </div>
+{% endif %}
 {% endblock %}

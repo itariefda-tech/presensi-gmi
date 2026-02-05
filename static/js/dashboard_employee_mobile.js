@@ -154,11 +154,12 @@ function updatePresenceReadiness(){
     return;
   }
   
-  // If already checked in successfully, don't update the status
-  if (presenceStatusTitle.classList.contains("is-done")) {
-    console.log("[READINESS] Skipped: Status already is-done");
+  const isStatusDone = presenceStatusTitle.classList.contains("is-done");
+  if (isStatusDone && !hasCheckedIn) {
+    console.log("[READINESS] Skipped: Status already is-done (final state)");
     return;
   }
+  const shouldRefreshStatusLabel = !isStatusDone;
   
   // Get current selected method
   const currentMethod = attMethod?.value || "gps_selfie";
@@ -186,10 +187,12 @@ function updatePresenceReadiness(){
   }
   
   const statusReady = hasCheckedIn ? checkoutReady : checkinReady;
-  console.log("[READINESS] Setting status to:", statusReady ? "Siap Absen" : "Belum siap Absen");
-  presenceStatusTitle.textContent = statusReady ? "Siap Absen" : "Belum siap Absen";
-  presenceStatusTitle.classList.toggle("is-ready", statusReady);
-  presenceStatusTitle.setAttribute("aria-label", statusReady ? "Siap Absen" : "Belum siap Absen");
+  if (shouldRefreshStatusLabel) {
+    console.log("[READINESS] Setting status to:", statusReady ? "Siap Absen" : "Belum siap Absen");
+    presenceStatusTitle.textContent = statusReady ? "Siap Absen" : "Belum siap Absen";
+    presenceStatusTitle.classList.toggle("is-ready", statusReady);
+    presenceStatusTitle.setAttribute("aria-label", statusReady ? "Siap Absen" : "Belum siap Absen");
+  }
   if (btnLocation) {
     btnLocation.classList.toggle("is-warning", !hasLocation);
   }

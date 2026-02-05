@@ -7797,7 +7797,17 @@ def admin_bp() -> Blueprint:
     def attendance():
         user = _current_user()
         limit = ADMIN_LIST_LIMIT or 200
+        sites = _list_sites()
+        site_id_raw = (request.args.get("site_id") or "").strip()
+        selected_site = None
+        if site_id_raw.isdigit():
+            target_id = int(site_id_raw)
+            selected_site = next(
+                (s for s in sites if int(s.get("id") or 0) == target_id),
+                None,
+            )
         client_scope = _client_admin_client_id(user)
+        client_scope_emails = None
         if client_scope:
             today = _today_key()
             scoped_emails = {
@@ -7805,13 +7815,24 @@ def admin_bp() -> Blueprint:
                 for a in _list_active_assignments(today)
                 if int(a.get("client_id") or 0) == client_scope
             }
-            records = _attendance_live(limit=limit, allowed_emails=scoped_emails)
-        else:
-            records = _attendance_live(limit=limit)
+            client_scope_emails = scoped_emails
+        records: list[dict] = []
+        if selected_site:
+            selected_site_id = int(selected_site.get("id") or 0)
+            allowed_emails = {
+                (emp.get("email") or "").strip().lower()
+                for emp in _list_employees_by_site(selected_site_id)
+                if emp.get("email")
+            }
+            if client_scope_emails is not None:
+                allowed_emails = allowed_emails & client_scope_emails
+            records = _attendance_live(limit=limit, allowed_emails=allowed_emails)
         return render_template(
             "dashboard/admin_attendance.html",
             user=user,
             records=records,
+            sites=sites,
+            selected_site=selected_site,
         )
 
     @bp.route("/manual_attendance", methods=["GET"])
