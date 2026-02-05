@@ -492,7 +492,6 @@ def create_app() -> Flask:
         assignment = _get_active_assignment(user.id) if user else None
         site = _get_site_by_id(assignment.get("site_id") if assignment else None)
         client = _get_client_by_id(site["client_id"]) if site and site["client_id"] else None
-        shift = _get_shift_by_id(assignment.get("shift_id") if assignment else None)
         return render_template(
             "dashboard/employee.html",
             user=user,
@@ -501,7 +500,6 @@ def create_app() -> Flask:
             active_assignment=assignment,
             active_site=site,
             active_client=client,
-            active_shift=shift,
         )
 
     @app.route("/dashboard/client", methods=["GET"])
@@ -598,6 +596,10 @@ def create_app() -> Flask:
         longitude_raw = (request.form.get("longitude") or "").strip()
         radius_raw = (request.form.get("radius_meters") or "").strip()
         notes = (request.form.get("notes") or "").strip()
+        shift_mode, shift_data, shift_error = _parse_site_shift_form(request.form)
+        if shift_error:
+            flash(shift_error)
+            return redirect(url_for("dashboard_client", _anchor="site"))
         if not name:
             flash("Nama site wajib diisi.")
             return redirect(url_for("dashboard_client", _anchor="site"))
@@ -621,6 +623,8 @@ def create_app() -> Flask:
             notes=notes,
             timezone=timezone or None,
             work_mode=work_mode or None,
+            shift_mode=shift_mode,
+            shift_data=shift_data,
         )
         flash("Site berhasil diperbarui.")
         return redirect(url_for("dashboard_client", _anchor="site"))
@@ -642,12 +646,6 @@ def create_app() -> Flask:
         if assignment_error:
             flash(assignment_error)
             return redirect(url_for("dashboard_client", _anchor="employees"))
-        shift_id = assignment_payload["shift_id"]
-        if shift_id:
-            shift_row = _get_shift_by_id(shift_id)
-            if not shift_row or int(shift_row.get("is_active") or 0) != 1:
-                flash("Shift tidak ditemukan atau nonaktif.")
-                return redirect(url_for("dashboard_client", _anchor="employees"))
         if int(_row_get(_site, "is_active") or 0) != 1:
             flash("Site penempatan sedang nonaktif.")
             return redirect(url_for("dashboard_client", _anchor="employees"))
@@ -673,7 +671,7 @@ def create_app() -> Flask:
                         actor=user,
                         employee_user_id=employee_user_id,
                         site_id=site_id,
-                        shift_id=shift_id,
+                        shift_id=None,
                         job_title=assignment_payload["job_title"],
                         start_date=assignment_payload["start_date"],
                         end_date=assignment_payload["end_date"],
@@ -1730,7 +1728,6 @@ ROLE_PERMISSION_KEYS = [
     "manage_clients_add",
     "manage_clients_actions",
     "manage_sites",
-    "manage_shifts",
     "manage_employees_view",
     "manage_employees_add",
     "manage_employees_actions",
@@ -1747,7 +1744,6 @@ ROLE_PERMISSION_LABELS = {
     "manage_clients_add": "Clients: Tambah",
     "manage_clients_actions": "Clients: Aksi (Edit/Hapus)",
     "manage_sites": "Sites",
-    "manage_shifts": "Shifts",
     "manage_employees_view": "Employees: Lihat",
     "manage_employees_add": "Employees: Tambah",
     "manage_employees_actions": "Employees: Aksi (Edit/Hapus)",
@@ -1925,7 +1921,7 @@ def _client_site_context(user: User | None) -> tuple[int, int, dict, dict]:
         abort(403)
     client_row = _get_client_by_id(client_id)
     client = dict(client_row) if client_row else {"id": client_id, "name": "Client"}
-    return client_id, site_id, dict(site_row), client
+    return client_id, site_id, _normalize_site_shift_config(dict(site_row)), client
 
 
 def _require_hr_or_client_admin(user: User | None) -> None:
@@ -2028,10 +2024,6 @@ def _permission_for_admin_endpoint(endpoint: str | None) -> str | None:
         "admin.settings_sites_create": "manage_sites",
         "admin.settings_sites_update": "manage_sites",
         "admin.settings_sites_toggle": "manage_sites",
-        "admin.shifts": "manage_shifts",
-        "admin.settings_shifts_create": "manage_shifts",
-        "admin.settings_shifts_update": "manage_shifts",
-        "admin.settings_shifts_toggle": "manage_shifts",
         "admin.employees": "manage_employees_view",
         "admin.employees_create": "manage_employees_add",
         "admin.employees_update": "manage_employees_actions",
@@ -3140,31 +3132,12 @@ def _resolve_attendance_policy(
             return DEFAULT_ATTENDANCE_POLICY.copy()
         today = _today_key()
         if site_id:
-            if shift_id:
-                cur = conn.execute(
-                    """
-                    SELECT *
-                    FROM attendance_policies
-                    WHERE scope_type = 'SITE'
-                      AND site_id = ?
-                      AND shift_id = ?
-                      AND effective_from <= ?
-                      AND (effective_to IS NULL OR effective_to = '' OR effective_to >= ?)
-                    ORDER BY effective_from DESC
-                    LIMIT 1
-                    """,
-                    (site_id, shift_id, today, today),
-                )
-                row = cur.fetchone()
-                if row:
-                    return _policy_with_defaults(row)
             cur = conn.execute(
                 """
                 SELECT *
                 FROM attendance_policies
                 WHERE scope_type = 'SITE'
                   AND site_id = ?
-                  AND (shift_id IS NULL OR shift_id = '')
                   AND effective_from <= ?
                   AND (effective_to IS NULL OR effective_to = '' OR effective_to >= ?)
                 ORDER BY effective_from DESC
@@ -3176,31 +3149,12 @@ def _resolve_attendance_policy(
             if row:
                 return _policy_with_defaults(row)
         if client_id:
-            if shift_id:
-                cur = conn.execute(
-                    """
-                    SELECT *
-                    FROM attendance_policies
-                    WHERE scope_type = 'CLIENT'
-                      AND client_id = ?
-                      AND shift_id = ?
-                      AND effective_from <= ?
-                      AND (effective_to IS NULL OR effective_to = '' OR effective_to >= ?)
-                    ORDER BY effective_from DESC
-                    LIMIT 1
-                    """,
-                    (client_id, shift_id, today, today),
-                )
-                row = cur.fetchone()
-                if row:
-                    return _policy_with_defaults(row)
             cur = conn.execute(
                 """
                 SELECT *
                 FROM attendance_policies
                 WHERE scope_type = 'CLIENT'
                   AND client_id = ?
-                  AND (shift_id IS NULL OR shift_id = '')
                   AND effective_from <= ?
                   AND (effective_to IS NULL OR effective_to = '' OR effective_to >= ?)
                 ORDER BY effective_from DESC
@@ -3647,24 +3601,78 @@ def _parse_assignment_payload(form: dict) -> tuple[dict | None, str | None]:
         normalized_end = _normalize_date_input(end_date_raw)
         if not normalized_end:
             return None, "Tanggal selesai assignment wajib format DD-MM-YYYY (contoh 01-02-2026) atau 1 Feb 2026."
-    use_shift = (form.get("use_shift") or "").strip() == "1"
-    shift_id = None
-    shift_id_raw = (form.get("shift_id") or "").strip()
-    if use_shift and shift_id_raw:
-        if not shift_id_raw.isdigit():
-            return None, "Shift tidak valid."
-        shift_id = int(shift_id_raw)
     job_title = (form.get("job_title") or "").strip() or None
     status = (form.get("status") or "ACTIVE").strip().upper()
     if status not in {"ACTIVE", "ENDED"}:
         status = "ACTIVE"
     return {
-        "shift_id": shift_id,
         "job_title": job_title,
         "start_date": normalized_start,
         "end_date": normalized_end,
         "status": status,
     }, None
+
+
+def _parse_site_shift_form(form: dict) -> tuple[str, list[dict] | None, str | None]:
+    mode_raw = (form.get("shift_mode") or "").strip().lower()
+    if mode_raw != "custom":
+        return "2", None, None
+    getlist = getattr(form, "getlist", None)
+    if callable(getlist):
+        names = getlist("shift_name")
+        starts = getlist("shift_start")
+        ends = getlist("shift_end")
+    else:
+        names = form.get("shift_name") or []
+        starts = form.get("shift_start") or []
+        ends = form.get("shift_end") or []
+    shifts: list[dict] = []
+    max_len = max(len(names), len(starts), len(ends))
+    for idx in range(max_len):
+        name = (names[idx] if idx < len(names) else "") or ""
+        start = (starts[idx] if idx < len(starts) else "") or ""
+        end = (ends[idx] if idx < len(ends) else "") or ""
+        name = str(name).strip()
+        start = str(start).strip()
+        end = str(end).strip()
+        if not (name or start or end):
+            continue
+        if not name or not start or not end:
+            return "", None, "Nama shift dan waktu wajib diisi."
+        shifts.append({"name": name, "start_time": start, "end_time": end})
+    if not shifts:
+        return "", None, "Minimal 1 shift custom harus diisi."
+    if len(shifts) > 4:
+        return "", None, "Maksimal 4 shift custom."
+    return "custom", shifts, None
+
+
+def _normalize_site_shift_config(site: dict) -> dict:
+    mode_raw = (site.get("shift_mode") or "").strip().lower()
+    mode = "custom" if mode_raw == "custom" else "2"
+    shift_list: list[dict] = []
+    if mode == "custom":
+        raw = site.get("shift_data") or ""
+        try:
+            parsed = json.loads(raw) if raw else []
+        except json.JSONDecodeError:
+            parsed = []
+        if isinstance(parsed, list):
+            for item in parsed:
+                if not isinstance(item, dict):
+                    continue
+                name = (item.get("name") or "").strip()
+                start = (item.get("start_time") or "").strip()
+                end = (item.get("end_time") or "").strip()
+                if not (name or start or end):
+                    continue
+                shift_list.append(
+                    {"name": name, "start_time": start, "end_time": end}
+                )
+        shift_list = shift_list[:4]
+    site["shift_mode"] = mode
+    site["shift_list"] = shift_list
+    return site
 
 
 def _set_employee_active_with_conn(conn: sqlite3.Connection, email: str, is_active: int) -> None:
@@ -4091,6 +4099,8 @@ def _list_sites() -> list[dict]:
                 s.notes,
                 s.pic_name,
                 s.pic_email,
+                s.shift_mode,
+                s.shift_data,
                 s.is_active,
                 s.created_at,
                 CASE
@@ -4102,7 +4112,8 @@ def _list_sites() -> list[dict]:
             ORDER BY s.created_at DESC
             """
         )
-        return [dict(row) for row in cur.fetchall()]
+        rows = [dict(row) for row in cur.fetchall()]
+        return [_normalize_site_shift_config(row) for row in rows]
     finally:
         conn.close()
 
@@ -4125,6 +4136,8 @@ def _list_sites_by_client(client_id: int) -> list[dict]:
                 s.notes,
                 s.pic_name,
                 s.pic_email,
+                s.shift_mode,
+                s.shift_data,
                 s.is_active,
                 s.created_at
             FROM sites s
@@ -4134,7 +4147,8 @@ def _list_sites_by_client(client_id: int) -> list[dict]:
             """,
             (client_id,),
         )
-        return [dict(row) for row in cur.fetchall()]
+        rows = [dict(row) for row in cur.fetchall()]
+        return [_normalize_site_shift_config(row) for row in rows]
     finally:
         conn.close()
 
@@ -4300,8 +4314,6 @@ def _list_assignments_by_client(client_id: int) -> list[dict]:
                 a.site_id,
                 s.name AS site_name,
                 COALESCE(c.name, s.client_name) AS client_name,
-                a.shift_id,
-                sh.name AS shift_name,
                 a.job_title,
                 a.start_date,
                 a.end_date,
@@ -4312,7 +4324,6 @@ def _list_assignments_by_client(client_id: int) -> list[dict]:
             JOIN users u ON u.id = a.employee_user_id
             JOIN sites s ON s.id = a.site_id
             LEFT JOIN clients c ON c.id = s.client_id
-            LEFT JOIN shifts sh ON sh.id = a.shift_id
             WHERE s.client_id = ?
             ORDER BY a.created_at DESC
             """,
@@ -4346,8 +4357,6 @@ def _list_assignments(
                 a.site_id,
                 s.name AS site_name,
                 COALESCE(c.name, s.client_name) AS client_name,
-                a.shift_id,
-                sh.name AS shift_name,
                 a.job_title,
                 a.start_date,
                 a.end_date,
@@ -4358,7 +4367,6 @@ def _list_assignments(
             JOIN users u ON u.id = a.employee_user_id
             JOIN sites s ON s.id = a.site_id
             LEFT JOIN clients c ON c.id = s.client_id
-            LEFT JOIN shifts sh ON sh.id = a.shift_id
         """
         clauses = []
         params: list = []
@@ -4396,13 +4404,11 @@ def _list_policies_by_client(client_id: int) -> list[dict]:
                 p.*,
                 c.name AS direct_client_name,
                 s.name AS site_name,
-                COALESCE(c.name, cs.name, s.client_name) AS client_name,
-                sh.name AS shift_name
+                COALESCE(c.name, cs.name, s.client_name) AS client_name
             FROM attendance_policies p
             LEFT JOIN clients c ON c.id = p.client_id
             LEFT JOIN sites s ON s.id = p.site_id
             LEFT JOIN clients cs ON cs.id = s.client_id
-            LEFT JOIN shifts sh ON sh.id = p.shift_id
             WHERE p.client_id = ? OR s.client_id = ?
             ORDER BY p.created_at DESC
             """,
@@ -4424,13 +4430,11 @@ def _list_policies() -> list[dict]:
                 p.*,
                 c.name AS direct_client_name,
                 s.name AS site_name,
-                COALESCE(c.name, cs.name, s.client_name) AS client_name,
-                sh.name AS shift_name
+                COALESCE(c.name, cs.name, s.client_name) AS client_name
             FROM attendance_policies p
             LEFT JOIN clients c ON c.id = p.client_id
             LEFT JOIN sites s ON s.id = p.site_id
             LEFT JOIN clients cs ON cs.id = s.client_id
-            LEFT JOIN shifts sh ON sh.id = p.shift_id
             ORDER BY p.created_at DESC
             """
         )
@@ -4755,19 +4759,23 @@ def _create_site(
     notes: str | None,
     timezone: str | None,
     work_mode: str | None,
+    shift_mode: str | None = None,
+    shift_data: list[dict] | None = None,
     pic_name: str | None = None,
     pic_email: str | None = None,
 ) -> int:
     client_name = _client_name_by_id(client_id) or ""
     conn = _db_connect()
     try:
+        shift_mode_value = shift_mode or "2"
+        shift_data_value = json.dumps(shift_data or [], ensure_ascii=True) if shift_mode_value == "custom" else None
         cur = conn.execute(
             """
             INSERT INTO sites (
                 client_id, client_name, name, timezone, work_mode, latitude,
-                longitude, radius_meters, notes, pic_name, pic_email, is_active, created_at
+                longitude, radius_meters, notes, pic_name, pic_email, shift_mode, shift_data, is_active, created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 client_id,
@@ -4781,6 +4789,8 @@ def _create_site(
                 notes or None,
                 pic_name,
                 pic_email,
+                shift_mode_value,
+                shift_data_value,
                 1,
                 _now_ts(),
             ),
@@ -4801,17 +4811,22 @@ def _update_site(
     notes: str | None,
     timezone: str | None,
     work_mode: str | None,
+    shift_mode: str | None = None,
+    shift_data: list[dict] | None = None,
     pic_name: str | None = None,
     pic_email: str | None = None,
 ) -> None:
     client_name = _client_name_by_id(client_id) or ""
     conn = _db_connect()
     try:
+        shift_mode_value = shift_mode or "2"
+        shift_data_value = json.dumps(shift_data or [], ensure_ascii=True) if shift_mode_value == "custom" else None
         conn.execute(
             """
             UPDATE sites
             SET client_id = ?, client_name = ?, name = ?, timezone = ?, work_mode = ?,
-                latitude = ?, longitude = ?, radius_meters = ?, notes = ?, pic_name = ?, pic_email = ?, updated_at = ?
+                latitude = ?, longitude = ?, radius_meters = ?, notes = ?, pic_name = ?, pic_email = ?,
+                shift_mode = ?, shift_data = ?, updated_at = ?
             WHERE id = ?
             """,
             (
@@ -4826,6 +4841,8 @@ def _update_site(
                 notes or None,
                 pic_name,
                 pic_email,
+                shift_mode_value,
+                shift_data_value,
                 _now_ts(),
                 site_id,
             ),
@@ -5258,6 +5275,8 @@ def _init_db() -> None:
                 notes TEXT,
                 pic_name TEXT,
                 pic_email TEXT,
+                shift_mode TEXT,
+                shift_data TEXT,
                 is_active INTEGER DEFAULT 1,
                 created_at TEXT,
                 updated_at TEXT,
@@ -5491,6 +5510,8 @@ def _init_db() -> None:
             _ensure_column(conn, "sites", "radius_meters", "radius_meters INTEGER")
             _ensure_column(conn, "sites", "pic_name", "pic_name TEXT")
             _ensure_column(conn, "sites", "pic_email", "pic_email TEXT")
+            _ensure_column(conn, "sites", "shift_mode", "shift_mode TEXT")
+            _ensure_column(conn, "sites", "shift_data", "shift_data TEXT")
             _ensure_column(conn, "sites", "updated_at", "updated_at TEXT")
         if _table_exists(conn, "clients"):
             _ensure_column(conn, "clients", "is_active", "is_active INTEGER DEFAULT 1")
@@ -7020,7 +7041,6 @@ def admin_bp() -> Blueprint:
             user=user,
             employees=_list_employee_users(),
             sites=_list_sites_by_client(client_scope) if client_scope else _list_sites(),
-            shifts=_list_shifts(),
             assignments=assignments,
         )
 
@@ -7034,17 +7054,7 @@ def admin_bp() -> Blueprint:
             user=user,
             clients=_clients() if not client_scope else [dict(client_row)] if client_row else [],
             sites=_list_sites_by_client(client_scope) if client_scope else _list_sites(),
-            shifts=_list_shifts(),
             policies=_list_policies_by_client(client_scope) if client_scope else _list_policies(),
-        )
-
-    @bp.route("/shifts", methods=["GET"])
-    def shifts():
-        user = _current_user()
-        return render_template(
-            "dashboard/admin_shifts.html",
-            user=user,
-            shifts=_list_shifts(),
         )
 
     @bp.route("/clients/create", methods=["POST"])
@@ -7192,7 +7202,6 @@ def admin_bp() -> Blueprint:
         _require_hr_or_client_admin(user)
         employee_id_raw = (request.form.get("employee_user_id") or "").strip()
         site_id_raw = (request.form.get("site_id") or "").strip()
-        shift_id_raw = (request.form.get("shift_id") or "").strip()
         job_title = (request.form.get("job_title") or "").strip()
         start_date = (request.form.get("start_date") or "").strip()
         end_date = (request.form.get("end_date") or "").strip()
@@ -7212,16 +7221,6 @@ def admin_bp() -> Blueprint:
             return redirect(url_for("admin.assignments", _anchor="add-assignment"))
         if user and user.role == "client_admin":
             _require_client_admin_site(user, site_id)
-        shift_id = None
-        if shift_id_raw:
-            if not shift_id_raw.isdigit():
-                flash("Shift tidak valid.")
-                return redirect(url_for("admin.assignments", _anchor="add-assignment"))
-            shift_id = int(shift_id_raw)
-            shift_row = _get_shift_by_id(shift_id)
-            if not shift_row or int(shift_row["is_active"] or 0) != 1:
-                flash("Shift tidak ditemukan atau nonaktif.")
-                return redirect(url_for("admin.assignments", _anchor="add-assignment"))
         if status not in {"ACTIVE", "ENDED"}:
             status = "ACTIVE"
 
@@ -7238,7 +7237,7 @@ def admin_bp() -> Blueprint:
             actor=user,
             employee_user_id=employee_id,
             site_id=site_id,
-            shift_id=shift_id,
+            shift_id=None,
             job_title=job_title or None,
             start_date=normalized_start,
             end_date=normalized_end,
@@ -7255,7 +7254,6 @@ def admin_bp() -> Blueprint:
         _require_hr_or_client_admin(user)
         employee_id_raw = (request.form.get("employee_user_id") or "").strip()
         site_id_raw = (request.form.get("site_id") or "").strip()
-        shift_id_raw = (request.form.get("shift_id") or "").strip()
         job_title = (request.form.get("job_title") or "").strip()
         start_date = (request.form.get("start_date") or "").strip()
         end_date = (request.form.get("end_date") or "").strip()
@@ -7275,16 +7273,6 @@ def admin_bp() -> Blueprint:
             return redirect(url_for("admin.assignments"))
         if user and user.role == "client_admin":
             _require_client_admin_site(user, site_id)
-        shift_id = None
-        if shift_id_raw:
-            if not shift_id_raw.isdigit():
-                flash("Shift tidak valid.")
-                return redirect(url_for("admin.assignments"))
-            shift_id = int(shift_id_raw)
-            shift_row = _get_shift_by_id(shift_id)
-            if not shift_row or int(shift_row["is_active"] or 0) != 1:
-                flash("Shift tidak ditemukan atau nonaktif.")
-                return redirect(url_for("admin.assignments"))
         if status not in {"ACTIVE", "ENDED"}:
             status = "ACTIVE"
 
@@ -7308,8 +7296,6 @@ def admin_bp() -> Blueprint:
             current_status = (current.get("status") or "").upper()
             current_employee_id = int(current.get("employee_user_id") or 0)
             current_site_id = int(current.get("site_id") or 0)
-            current_shift_id = current.get("shift_id")
-            current_shift_id = int(current_shift_id) if current_shift_id not in (None, "") else None
             current_start_date_raw = (current.get("start_date") or "").strip()
             current_start_date = _normalize_date_input(current_start_date_raw) or current_start_date_raw
             needs_new = current_status != "ACTIVE"
@@ -7317,7 +7303,6 @@ def admin_bp() -> Blueprint:
                 if (
                     current_employee_id != employee_id
                     or current_site_id != site_id
-                    or current_shift_id != shift_id
                     or current_start_date != normalized_start
                 ):
                     needs_new = True
@@ -7339,7 +7324,7 @@ def admin_bp() -> Blueprint:
                     actor=user,
                     employee_user_id=employee_id,
                     site_id=site_id,
-                    shift_id=shift_id,
+                    shift_id=None,
                     job_title=job_title or None,
                     start_date=normalized_start,
                     end_date=normalized_end,
@@ -7355,7 +7340,7 @@ def admin_bp() -> Blueprint:
             assignment_id=assignment_id,
             employee_user_id=employee_id,
             site_id=site_id,
-            shift_id=shift_id,
+            shift_id=None,
             job_title=job_title or None,
             start_date=normalized_start,
             end_date=normalized_end,
@@ -7372,7 +7357,7 @@ def admin_bp() -> Blueprint:
                 "after": {
                     "employee_user_id": employee_id,
                     "site_id": site_id,
-                    "shift_id": shift_id,
+                    "shift_id": None,
                     "job_title": job_title or None,
                     "start_date": normalized_start,
                     "end_date": normalized_end,
@@ -7434,7 +7419,6 @@ def admin_bp() -> Blueprint:
         scope_type = (request.form.get("scope_type") or "CLIENT").strip().upper()
         client_id_raw = (request.form.get("client_id") or "").strip()
         site_id_raw = (request.form.get("site_id") or "").strip()
-        shift_id_raw = (request.form.get("shift_id") or "").strip()
         effective_from = (request.form.get("effective_from") or "").strip()
         effective_to = (request.form.get("effective_to") or "").strip()
         work_duration_raw = (request.form.get("work_duration_minutes") or "").strip()
@@ -7465,17 +7449,6 @@ def admin_bp() -> Blueprint:
             else:
                 _require_client_admin_site(user, site_id)
 
-        shift_id = None
-        if shift_id_raw:
-            if not shift_id_raw.isdigit():
-                flash("Shift tidak valid.")
-                return redirect(url_for("admin.policies", _anchor="add-policy"))
-            shift_id = int(shift_id_raw)
-            shift_row = _get_shift_by_id(shift_id)
-            if not shift_row or int(shift_row["is_active"] or 0) != 1:
-                flash("Shift tidak ditemukan atau nonaktif.")
-                return redirect(url_for("admin.policies", _anchor="add-policy"))
-
         work_duration = int(work_duration_raw) if work_duration_raw.isdigit() else None
         grace_minutes = int(grace_raw) if grace_raw.isdigit() else None
         late_minutes = None
@@ -7484,7 +7457,7 @@ def admin_bp() -> Blueprint:
             scope_type=scope_type,
             client_id=client_id,
             site_id=site_id,
-            shift_id=shift_id,
+            shift_id=None,
             effective_from=effective_from,
             effective_to=effective_to or None,
             work_duration_minutes=work_duration,
@@ -7506,7 +7479,7 @@ def admin_bp() -> Blueprint:
                 "scope_type": scope_type,
                 "client_id": client_id,
                 "site_id": site_id,
-                "shift_id": shift_id,
+                "shift_id": None,
                 "effective_from": effective_from,
                 "effective_to": effective_to or None,
                 "work_duration_minutes": work_duration,
@@ -7530,7 +7503,6 @@ def admin_bp() -> Blueprint:
         scope_type = (request.form.get("scope_type") or "CLIENT").strip().upper()
         client_id_raw = (request.form.get("client_id") or "").strip()
         site_id_raw = (request.form.get("site_id") or "").strip()
-        shift_id_raw = (request.form.get("shift_id") or "").strip()
         effective_from = (request.form.get("effective_from") or "").strip()
         effective_to = (request.form.get("effective_to") or "").strip()
         work_duration_raw = (request.form.get("work_duration_minutes") or "").strip()
@@ -7567,17 +7539,6 @@ def admin_bp() -> Blueprint:
             else:
                 _require_client_admin_site(user, site_id)
 
-        shift_id = None
-        if shift_id_raw:
-            if not shift_id_raw.isdigit():
-                flash("Shift tidak valid.")
-                return redirect(url_for("admin.policies"))
-            shift_id = int(shift_id_raw)
-            shift_row = _get_shift_by_id(shift_id)
-            if not shift_row or int(shift_row["is_active"] or 0) != 1:
-                flash("Shift tidak ditemukan atau nonaktif.")
-                return redirect(url_for("admin.policies"))
-
         work_duration = int(work_duration_raw) if work_duration_raw.isdigit() else None
         grace_minutes = int(grace_raw) if grace_raw.isdigit() else None
         late_minutes = None if not before else before.get("late_threshold_minutes")
@@ -7587,7 +7548,7 @@ def admin_bp() -> Blueprint:
             scope_type=scope_type,
             client_id=client_id,
             site_id=site_id,
-            shift_id=shift_id,
+            shift_id=None,
             effective_from=effective_from,
             effective_to=effective_to or None,
             work_duration_minutes=work_duration,
@@ -7611,7 +7572,7 @@ def admin_bp() -> Blueprint:
                     "scope_type": scope_type,
                     "client_id": client_id,
                     "site_id": site_id,
-                    "shift_id": shift_id,
+                    "shift_id": None,
                     "effective_from": effective_from,
                     "effective_to": effective_to or None,
                     "work_duration_minutes": work_duration,
@@ -7824,6 +7785,20 @@ def admin_bp() -> Blueprint:
         normalized_to = _normalize_date_input(filter_range_to)
         records: list[dict] = []
         helper_text = "Isi rentang tanggal lalu apply untuk tampilkan data."
+        if normalized_from and normalized_to and normalized_from > normalized_to:
+            helper_text = "Rentang tanggal tidak valid. Tanggal awal harus sebelum tanggal akhir."
+            return render_template(
+                "dashboard/admin_attendance.html",
+                user=user,
+                records=records,
+                sites=sites,
+                selected_site=selected_site,
+                helper_text=helper_text,
+                filter_search=filter_search,
+                filter_method=filter_method,
+                filter_range_from=filter_range_from,
+                filter_range_to=filter_range_to,
+            )
         if selected_site and normalized_from and normalized_to:
             selected_site_id = int(selected_site.get("id") or 0)
             allowed_emails = {
@@ -7902,6 +7877,16 @@ def admin_bp() -> Blueprint:
         method = (request.args.get("method") or "").strip().lower()
         normalized_from = _normalize_date_input(request.args.get("from"))
         normalized_to = _normalize_date_input(request.args.get("to"))
+        if not (normalized_from and normalized_to):
+            flash("Rentang tanggal wajib diisi untuk tarik CSV.")
+            return redirect(
+                url_for("admin.attendance", site_id=selected_site.get("id") or "")
+            )
+        if normalized_from > normalized_to:
+            flash("Rentang tanggal tidak valid. Tanggal awal harus sebelum tanggal akhir.")
+            return redirect(
+                url_for("admin.attendance", site_id=selected_site.get("id") or "")
+            )
         rows = _attendance_rows_for_emails(
             allowed_emails,
             date_from=normalized_from,
@@ -8281,6 +8266,10 @@ def admin_bp() -> Blueprint:
         notes = (request.form.get("notes") or "").strip()
         pic_name = (request.form.get("pic_name") or "").strip()
         pic_email = (request.form.get("pic_email") or "").strip().lower()
+        shift_mode, shift_data, shift_error = _parse_site_shift_form(request.form)
+        if shift_error:
+            flash(shift_error)
+            return redirect(url_for("admin.sites", _anchor="add-site"))
         if not client_id_raw:
             flash("Client wajib dipilih.")
             return redirect(url_for("admin.sites"))
@@ -8332,6 +8321,8 @@ def admin_bp() -> Blueprint:
             notes=notes,
             timezone=timezone or None,
             work_mode=work_mode or None,
+            shift_mode=shift_mode,
+            shift_data=shift_data,
             pic_name=pic_name or None,
             pic_email=pic_email,
         )
@@ -8361,6 +8352,10 @@ def admin_bp() -> Blueprint:
         notes = (request.form.get("notes") or "").strip()
         pic_name = (request.form.get("pic_name") or "").strip()
         pic_email = (request.form.get("pic_email") or "").strip().lower()
+        shift_mode, shift_data, shift_error = _parse_site_shift_form(request.form)
+        if shift_error:
+            flash(shift_error)
+            return redirect(url_for("admin.sites"))
         if not client_id_raw:
             flash("Client wajib dipilih.")
             return redirect(url_for("admin.sites"))
@@ -8417,6 +8412,8 @@ def admin_bp() -> Blueprint:
             notes=notes,
             timezone=timezone or None,
             work_mode=work_mode or None,
+            shift_mode=shift_mode,
+            shift_data=shift_data,
             pic_name=pic_name or None,
             pic_email=pic_email,
         )
@@ -8459,64 +8456,6 @@ def admin_bp() -> Blueprint:
         except sqlite3.IntegrityError:
             flash("Site tidak dapat dihapus karena masih memiliki data terkait.")
         return redirect(url_for("admin.sites"))
-
-    @bp.route("/settings/shifts/create", methods=["POST"])
-    def settings_shifts_create():
-        user = _current_user()
-        _require_hr_superadmin(user)
-        name = (request.form.get("name") or "").strip()
-        start_time = (request.form.get("start_time") or "").strip()
-        end_time = (request.form.get("end_time") or "").strip()
-        grace_minutes = int(request.form.get("grace_minutes") or 0)
-        if not name:
-            flash("Nama shift wajib diisi.")
-            return redirect(url_for("admin.shifts"))
-        _create_shift(name=name, start_time=start_time, end_time=end_time, grace_minutes=grace_minutes)
-        flash("Shift berhasil ditambahkan.")
-        return redirect(url_for("admin.shifts"))
-
-    @bp.route("/settings/shifts/<int:shift_id>/update", methods=["POST"])
-    def settings_shifts_update(shift_id: int):
-        user = _current_user()
-        _require_hr_superadmin(user)
-        name = (request.form.get("name") or "").strip()
-        start_time = (request.form.get("start_time") or "").strip()
-        end_time = (request.form.get("end_time") or "").strip()
-        grace_minutes = int(request.form.get("grace_minutes") or 0)
-        if not name:
-            flash("Nama shift wajib diisi.")
-            return redirect(url_for("admin.shifts"))
-        _update_shift(shift_id=shift_id, name=name, start_time=start_time, end_time=end_time, grace_minutes=grace_minutes)
-        flash("Shift berhasil diperbarui.")
-        return redirect(url_for("admin.shifts"))
-
-    @bp.route("/settings/shifts/<int:shift_id>/toggle", methods=["POST"])
-    def settings_shifts_toggle(shift_id: int):
-        user = _current_user()
-        _require_hr_superadmin(user)
-        current = next((s for s in _list_shifts() if int(s["id"]) == shift_id), None)
-        if not current:
-            flash("Shift tidak ditemukan.")
-            return redirect(url_for("admin.shifts"))
-        is_active = 0 if int(current["is_active"] or 0) == 1 else 1
-        _toggle_shift(shift_id, is_active)
-        flash("Status shift diperbarui.")
-        return redirect(url_for("admin.shifts"))
-
-    @bp.route("/settings/shifts/<int:shift_id>/delete", methods=["POST"])
-    def settings_shifts_delete(shift_id: int):
-        user = _current_user()
-        _require_hr_superadmin(user)
-        current = next((s for s in _list_shifts() if int(s["id"]) == shift_id), None)
-        if not current:
-            flash("Shift tidak ditemukan.")
-            return redirect(url_for("admin.shifts"))
-        try:
-            _delete_shift(shift_id)
-            flash("Shift berhasil dihapus.")
-        except sqlite3.IntegrityError:
-            flash("Shift tidak dapat dihapus karena masih digunakan oleh data lain.")
-        return redirect(url_for("admin.shifts"))
 
     return bp
 

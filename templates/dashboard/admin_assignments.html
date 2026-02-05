@@ -39,14 +39,6 @@
       </select>
     </div>
     <div class="form-row">
-      <label class="label" for="assignment-shift">Shift :</label>
-      <select class="input" id="assignment-shift" name="shift_id">
-        {% for sh in shifts %}
-        <option value="{{ sh.id }}">{{ sh.name }}</option>
-        {% endfor %}
-      </select>
-    </div>
-    <div class="form-row">
       <label class="label" for="assignment-job-title">Jabatan :</label>
       <input class="input" id="assignment-job-title" type="text" name="job_title" placeholder="Opsional" />
     </div>
@@ -81,7 +73,6 @@
         <th>Pegawai</th>
         <th>Client</th>
         <th>Site</th>
-        <th>Shift</th>
         <th>Periode</th>
         <th>Status</th>
         <th>Aksi</th>
@@ -89,14 +80,13 @@
     </thead>
     <tbody>
       {% if not assignments %}
-      <tr><td colspan="7" class="muted">Belum ada assignment.</td></tr>
+      <tr><td colspan="6" class="muted">Belum ada assignment.</td></tr>
       {% endif %}
       {% for a in assignments %}
       <tr>
         <td>{{ a.employee_name or a.employee_email }}</td>
         <td>{{ a.client_name or '-' }}</td>
         <td>{{ a.site_name or '-' }}</td>
-        <td>{{ a.shift_name or '-' }}</td>
         <td>{{ a.start_date|ddmmyyyy }}{% if a.end_date %} - {{ a.end_date|ddmmyyyy }}{% endif %}</td>
         <td>{{ a.status }}</td>
         <td>
@@ -145,14 +135,6 @@
           <select class="input" id="assignment-site-{{ a.id }}" name="site_id" required>
             {% for s in sites %}
             <option value="{{ s.id }}" {% if a.site_id == s.id %}selected{% endif %}>{{ s.client_name or '-' }} - {{ s.name }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div class="form-row">
-          <label class="label" for="assignment-shift-{{ a.id }}">Shift</label>
-          <select class="input" id="assignment-shift-{{ a.id }}" name="shift_id">
-            {% for sh in shifts %}
-            <option value="{{ sh.id }}" {% if a.shift_id == sh.id %}selected{% endif %}>{{ sh.name }}</option>
             {% endfor %}
           </select>
         </div>

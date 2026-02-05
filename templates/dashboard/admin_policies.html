@@ -109,7 +109,6 @@
         <th>Scope</th>
         <th>Client</th>
         <th>Site</th>
-        <th>Shift</th>
         <th>Periode</th>
         <th>Aturan</th>
         <th>Aksi</th>
@@ -117,14 +116,13 @@
     </thead>
     <tbody>
       {% if not policies %}
-      <tr><td colspan="7" class="muted">Belum ada policy.</td></tr>
+      <tr><td colspan="6" class="muted">Belum ada policy.</td></tr>
       {% endif %}
       {% for p in policies %}
       <tr>
         <td>{{ p.scope_type }}</td>
         <td>{{ p.client_name or '-' }}</td>
         <td>{{ p.site_name or '-' }}</td>
-        <td>{{ p.shift_name or '-' }}</td>
         <td>{{ p.effective_from|ddmmyyyy }}{% if p.effective_to %} - {{ p.effective_to|ddmmyyyy }}{% endif %}</td>
         <td>
           GPS: {{ 'Ya' if p.allow_gps else 'Tidak' }},

@@ -121,20 +121,13 @@
                   </div>
                 </article>
                 <article class="kpi-card" data-card="site">
-                  <div class="kpi-card__label">SITE &amp; SHIFT</div>
+                  <div class="kpi-card__label">SITE</div>
                   <div class="kpi-card__value" id="kpiSiteName">{{ active_site.name if active_site else "Belum ada site" }}</div>
                   <div class="kpi-card__meta">
                     {% if active_client and active_client.name %}
                       {{ active_client.name }}
                     {% else %}
                       Client belum ditetapkan
-                    {% endif %}
-                    {% if active_shift and active_shift.name %}
-                      <br />
-                      {{ active_shift.name }}
-                      {% if active_shift.start_time and active_shift.end_time %}
-                        ({{ active_shift.start_time }} &ndash; {{ active_shift.end_time }})
-                      {% endif %}
                     {% endif %}
                   </div>
                 </article>

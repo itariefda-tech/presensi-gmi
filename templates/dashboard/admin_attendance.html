@@ -109,6 +109,7 @@
     </div>
   </form>
   <div class="attendance-report-helper" id="attendanceReportHelper">{{ helper_text }}</div>
+  <div class="alert error" id="attendanceReportAlert" style="display:none;"></div>
   <div class="muted small attendance-report-note">Sumber: sqlite = data persisted, manual = hasil approval manual.</div>
   <div class="table-wrap attendance-report-table-wrap">
     <table class="table attendance-report-table" id="attendanceReportTable">
@@ -146,7 +147,7 @@
     </table>
   </div>
   <div class="attendance-report-export">
-    <div class="attendance-report-csv-note">Tekan tombol CSV untuk menarik data CSV.</div>
+    <div class="attendance-report-csv-note" id="attendanceReportCsvNote">Tekan tombol CSV untuk menarik data CSV.</div>
     <button class="btn secondary" type="button" id="attendanceReportCsvButton" data-csv-url="{{ url_for('admin.attendance_csv') }}">Tarik data CSV</button>
   </div>
 </section>

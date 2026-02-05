@@ -557,23 +557,6 @@
                     <label class="label" for="employee-notes">Catatan</label>
                     <textarea class="input" id="employee-notes" name="notes" rows="2"></textarea>
                   </div>
-                  <div class="form-row full">
-                    <label class="label" for="assignment-shift">Shift</label>
-                    {% if shifts %}
-                    <label class="toggle-line">
-                      <input type="checkbox" id="assignment-shift-toggle" name="use_shift" value="1" checked />
-                      Gunakan shift
-                    </label>
-                    <select class="input" id="assignment-shift" name="shift_id">
-                      <option value="" selected>Pilih shift</option>
-                      {% for sh in shifts %}
-                      <option value="{{ sh.id }}">{{ sh.name }}</option>
-                      {% endfor %}
-                    </select>
-                    {% else %}
-                    <div class="panel-sub">Belum ada shift aktif.</div>
-                    {% endif %}
-                  </div>
                   <div class="form-row">
                     <label class="label" for="assignment-job-title">Jabatan</label>
                     <input class="input" id="assignment-job-title" name="job_title" type="text" placeholder="Opsional" />
@@ -1184,7 +1167,7 @@
           </div>
           <button class="mini-btn" type="button" data-modal-close="siteModal" aria-label="Tutup">✕</button>
         </div>
-        <form class="site-form" method="post" action="{{ url_for('client_site_update') }}">
+        <form class="site-form" method="post" action="{{ url_for('client_site_update') }}" data-site-shift-form data-shift-max="4">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
           <div class="form-grid">
             <div class="form-row">
@@ -1205,15 +1188,45 @@
               </select>
             </div>
             <div class="form-row">
-              <label class="label" for="site-latitude">Latitude</label>
-              <input class="input" id="site-latitude" name="latitude" type="text" value="{{ site.latitude or '' }}" required />
+              <label class="label" for="site-shift-mode">Jumlah Shift</label>
+              <select class="input" id="site-shift-mode" name="shift_mode" data-shift-mode>
+                <option value="2" {% if site.shift_mode != 'custom' %}selected{% endif %}>2 shift (default)</option>
+                <option value="custom" {% if site.shift_mode == 'custom' %}selected{% endif %}>Custom</option>
+              </select>
+            </div>
+            <div class="form-row full shift-custom-wrap" data-shift-custom {% if site.shift_mode != 'custom' %}hidden{% endif %}>
+              <div class="shift-custom-head">
+                <div class="label">Custom Shift</div>
+              </div>
+              <div class="shift-custom-list" data-shift-list>
+                {% if site.shift_mode == 'custom' and site.shift_list %}
+                  {% for sh in site.shift_list %}
+                  <div class="shift-row" data-shift-row>
+                    <input class="input" name="shift_name" type="text" placeholder="Nama shift" value="{{ sh.name }}" />
+                    <input class="input" name="shift_start" type="time" placeholder="Dari" value="{{ sh.start_time }}" />
+                    <input class="input" name="shift_end" type="time" placeholder="Sampai" value="{{ sh.end_time }}" />
+                    <button class="btn secondary shift-add" type="button" data-shift-add aria-label="Tambah shift">+</button>
+                    <button class="btn secondary shift-remove" type="button" data-shift-remove aria-label="Hapus shift">-</button>
+                  </div>
+                  {% endfor %}
+                {% else %}
+                  <div class="shift-row" data-shift-row>
+                    <input class="input" name="shift_name" type="text" placeholder="Nama shift" />
+                    <input class="input" name="shift_start" type="time" placeholder="Dari" />
+                    <input class="input" name="shift_end" type="time" placeholder="Sampai" />
+                    <button class="btn secondary shift-add" type="button" data-shift-add aria-label="Tambah shift">+</button>
+                    <button class="btn secondary shift-remove" type="button" data-shift-remove aria-label="Hapus shift">-</button>
+                  </div>
+                {% endif %}
+              </div>
             </div>
             <div class="form-row">
-              <label class="label" for="site-longitude">Longitude</label>
-              <input class="input" id="site-longitude" name="longitude" type="text" value="{{ site.longitude or '' }}" required />
+              <label class="label" for="site-latitude">Latitude-Longitude</label>
+              <div class="form-inline">
+                <input class="input" id="site-latitude" name="latitude" type="text" value="{{ site.latitude or '' }}" required />
+                <input class="input" id="site-longitude" name="longitude" type="text" value="{{ site.longitude or '' }}" required />
+                <button class="btn ghost" type="button" id="sitePickLocation">Ambil Lokasi sini</button>
             </div>
-            <div class="form-row full">
-              <button class="btn ghost" type="button" id="sitePickLocation">Ambil lokasi sini</button>
             </div>
             <div class="form-row">
               <label class="label" for="site-radius">Radius (meter)</label>
@@ -1363,5 +1376,72 @@
   <script src="{{ url_for('static', filename='js/dashboard_theme.js') }}"></script>
   <script src="{{ url_for('static', filename='js/profile_photo.js') }}"></script>
   <script src="{{ url_for('static', filename='js/client_dashboard.js') }}"></script>
+  <script>
+    (function(){
+      const forms = document.querySelectorAll("[data-site-shift-form]");
+      forms.forEach((form) => {
+        const modeSelect = form.querySelector("[data-shift-mode]");
+        const customWrap = form.querySelector("[data-shift-custom]");
+        const list = form.querySelector("[data-shift-list]");
+        if (!modeSelect || !customWrap || !list) return;
+        const max = Number(form.dataset.shiftMax || 4) || 4;
+        const updateAddState = () => {
+          const count = list.querySelectorAll("[data-shift-row]").length;
+          const disabled = modeSelect.value !== "custom" || count >= max;
+          list.querySelectorAll("[data-shift-add]").forEach((btn) => {
+            btn.disabled = disabled;
+          });
+        };
+        const ensureRow = () => {
+          if (list.querySelectorAll("[data-shift-row]").length === 0) {
+            addShiftRow();
+          }
+        };
+        const addShiftRow = (values = {}) => {
+          const row = document.createElement("div");
+          row.className = "shift-row";
+          row.dataset.shiftRow = "1";
+          row.innerHTML = `
+            <input class="input" name="shift_name" type="text" placeholder="Nama shift" value="${values.name || ""}" />
+            <input class="input" name="shift_start" type="time" placeholder="Dari" value="${values.start_time || ""}" />
+            <input class="input" name="shift_end" type="time" placeholder="Sampai" value="${values.end_time || ""}" />
+            <button class="btn secondary shift-add" type="button" data-shift-add aria-label="Tambah shift">+</button>
+            <button class="btn secondary shift-remove" type="button" data-shift-remove aria-label="Hapus shift">-</button>
+          `;
+          list.appendChild(row);
+          bindRemove(row.querySelector("[data-shift-remove]"));
+          updateAddState();
+        };
+        const bindRemove = (btn) => {
+          if (!btn) return;
+          btn.addEventListener("click", () => {
+            const row = btn.closest("[data-shift-row]");
+            if (row) row.remove();
+            ensureRow();
+            updateAddState();
+          });
+        };
+        list.querySelectorAll("[data-shift-remove]").forEach(bindRemove);
+        list.addEventListener("click", (e) => {
+          const addButton = e.target.closest("[data-shift-add]");
+          if (!addButton) return;
+          if (list.querySelectorAll("[data-shift-row]").length >= max) return;
+          addShiftRow();
+        });
+        const updateVisibility = () => {
+          const mode = modeSelect.value;
+          const showCustom = mode === "custom";
+          customWrap.hidden = !showCustom;
+          customWrap.style.display = showCustom ? "" : "none";
+          if (showCustom) {
+            ensureRow();
+          }
+          updateAddState();
+        };
+        modeSelect.addEventListener("change", updateVisibility);
+        updateVisibility();
+      });
+    })();
+  </script>
 </body>
 </html>

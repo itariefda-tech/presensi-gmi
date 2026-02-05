@@ -180,9 +180,110 @@ function initAttendanceReportFilters(){
       }
     });
   }
+  form.addEventListener("submit", (event) => {
+    const fromValue = (fromInput?.value || "").trim();
+    const toValue = (toInput?.value || "").trim();
+    if (!fromValue || !toValue) {
+      event.preventDefault();
+      showCsvAlert("Filter rentang tanggal wajib diisi sebelum Apply.");
+      updateCsvButtonState();
+      return;
+    }
+    const fromParsed = parseDateValue(fromValue);
+    const toParsed = parseDateValue(toValue);
+    if (!fromParsed || !toParsed) {
+      event.preventDefault();
+      showCsvAlert("Format tanggal tidak valid. Gunakan DD/MM/YYYY.");
+      updateCsvButtonState();
+      return;
+    }
+    if (fromParsed.iso > toParsed.iso) {
+      event.preventDefault();
+      showCsvAlert("Rentang tanggal tidak valid. Tanggal awal harus sebelum tanggal akhir.");
+      updateCsvButtonState();
+      return;
+    }
+    clearCsvAlert();
+  });
   const csvButton = document.getElementById("attendanceReportCsvButton");
+  const csvNote = document.getElementById("attendanceReportCsvNote");
+  const csvAlert = document.getElementById("attendanceReportAlert");
+  const fromInput = form.querySelector("input[name='from']");
+  const toInput = form.querySelector("input[name='to']");
+  const parseDateValue = (value) => {
+    if (!value) return null;
+    const iso = toIsoDate(value);
+    if (!iso) return null;
+    const date = new Date(`${iso}T00:00:00`);
+    if (Number.isNaN(date.getTime())) return null;
+    return { iso, date };
+  };
+  const showCsvAlert = (message) => {
+    if (!csvAlert) return;
+    csvAlert.textContent = message;
+    csvAlert.style.display = "block";
+  };
+  const clearCsvAlert = () => {
+    if (!csvAlert) return;
+    csvAlert.textContent = "";
+    csvAlert.style.display = "none";
+  };
+  const updateCsvButtonState = () => {
+    if (!csvButton) return;
+    const fromValue = (fromInput?.value || "").trim();
+    const toValue = (toInput?.value || "").trim();
+    const hasRange = Boolean(fromValue && toValue);
+    const fromParsed = parseDateValue(fromValue);
+    const toParsed = parseDateValue(toValue);
+    const hasValidRange = Boolean(
+      hasRange &&
+      fromParsed &&
+      toParsed &&
+      fromParsed.iso <= toParsed.iso
+    );
+    if (csvNote) {
+      if (!hasRange) {
+        csvNote.textContent = "Isi rentang tanggal dahulu untuk menarik data CSV.";
+      } else if (!fromParsed || !toParsed) {
+        csvNote.textContent = "Format tanggal belum valid.";
+      } else if (fromParsed.iso > toParsed.iso) {
+        csvNote.textContent = "Rentang tanggal tidak valid (tanggal awal > akhir).";
+      } else {
+        csvNote.textContent = "Tekan tombol CSV untuk menarik data CSV.";
+      }
+    }
+    if (hasValidRange) {
+      clearCsvAlert();
+    }
+  };
+  updateCsvButtonState();
+  if (fromInput) {
+    fromInput.addEventListener("input", updateCsvButtonState);
+    fromInput.addEventListener("change", updateCsvButtonState);
+  }
+  if (toInput) {
+    toInput.addEventListener("input", updateCsvButtonState);
+    toInput.addEventListener("change", updateCsvButtonState);
+  }
   if (csvButton) {
     csvButton.addEventListener("click", () => {
+      updateCsvButtonState();
+      const fromValue = (fromInput?.value || "").trim();
+      const toValue = (toInput?.value || "").trim();
+      if (!fromValue || !toValue) {
+        showCsvAlert("Rentang tanggal wajib diisi untuk tarik CSV.");
+        return;
+      }
+      const fromParsed = parseDateValue(fromValue);
+      const toParsed = parseDateValue(toValue);
+      if (!fromParsed || !toParsed) {
+        showCsvAlert("Format tanggal tidak valid. Gunakan DD/MM/YYYY.");
+        return;
+      }
+      if (fromParsed.iso > toParsed.iso) {
+        showCsvAlert("Rentang tanggal tidak valid. Tanggal awal harus sebelum tanggal akhir.");
+        return;
+      }
       const csvUrl = csvButton.dataset.csvUrl;
       if (!csvUrl) return;
       const params = new URLSearchParams(new FormData(form));
