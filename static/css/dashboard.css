@@ -372,27 +372,47 @@ a:hover{ text-decoration:underline; }
 }
 .attendance-report-filters{
   display:grid;
-  grid-template-columns:40% 25% 30% auto;
+  grid-template-columns:32% 180px 1fr auto;
   gap:12px;
   align-items:center;
 }
 .attendance-report-filters .filter-col{
   display:flex;
-  flex-direction:column;
-  gap:4px;
-  align-items:flex-end;
+  flex-direction:row;
+  gap:8px;
+  align-items:center;
+  justify-content:flex-start;
 }
 .attendance-report-filters .filter-range{
-  align-items:flex-start;
+  justify-content:flex-start;
+  padding-left:-8%;
+}
+.attendance-report-filters .filter-method{
+  margin-left:-18%;
+}
+.attendance-report-filters .filter-name{
+  padding-right:15px;
+}
+.attendance-report-filters .filter-name .input{
+  flex:0 0 65%;
+  max-width:65%;
+  width:65%;
+}
+.attendance-report-filters .filter-method .input{
+  flex:0 0 140px;
+  width:140px;
+  max-width:140px;
 }
 .attendance-report-filters label{
   font-size:12px;
   letter-spacing:.04em;
+  white-space:nowrap;
 }
 .attendance-report-filters .attendance-range-inputs{
   display:flex;
   gap:5px;
   width:100%;
+  flex:1;
 }
 .attendance-report-filters .range-input{
   flex:1;
@@ -401,6 +421,8 @@ a:hover{ text-decoration:underline; }
   width:100%;
   min-height:38px;
   border-radius:12px;
+  flex:1;
+  min-width:0;
 }
 .attendance-report-filters .filter-actions{
   width:100%;
@@ -410,10 +432,17 @@ a:hover{ text-decoration:underline; }
   justify-content:flex-end;
   gap:8px;
 }
+.attendance-report-filters .filter-actions .filter-actions{
+  justify-content:flex-start;
+}
 .attendance-report-helper{
   font-size:13px;
   color:var(--muted);
   margin-top:4px;
+  text-align:right;
+}
+.attendance-report-note{
+  margin-top:1ch;
 }
 .attendance-report-table-wrap{
   margin-top:8px;
@@ -427,6 +456,7 @@ a:hover{ text-decoration:underline; }
   justify-content:flex-end;
   align-items:center;
   gap:12px;
+  margin-top:2ch;
 }
 .attendance-report-csv-note{
   font-size:11px;
@@ -439,12 +469,23 @@ a:hover{ text-decoration:underline; }
 .attendance-report-table tbody tr td:last-child{
   white-space:nowrap;
 }
+.attendance-name-stack{
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+}
 @media (max-width: 1024px){
   .attendance-report-filters{
     grid-template-columns:1fr;
   }
   .attendance-report-filters .filter-col{
     align-items:flex-start;
+  }
+  .attendance-report-filters .filter-range{
+    padding-left:0;
+  }
+  .attendance-report-filters .filter-method{
+    margin-left:0;
   }
   .filter-actions{
     justify-content:flex-start;

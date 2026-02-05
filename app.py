@@ -7824,7 +7824,7 @@ def admin_bp() -> Blueprint:
         normalized_to = _normalize_date_input(filter_range_to)
         records: list[dict] = []
         helper_text = "Isi rentang tanggal lalu apply untuk tampilkan data."
-        if selected_site:
+        if selected_site and normalized_from and normalized_to:
             selected_site_id = int(selected_site.get("id") or 0)
             allowed_emails = {
                 (emp.get("email") or "").strip().lower()

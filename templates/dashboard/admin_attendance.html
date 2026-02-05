@@ -90,16 +90,20 @@
       <label for="attendanceReportRangeFrom">Range</label>
       <div class="attendance-range-inputs">
         <div class="range-input">
-          <input id="attendanceReportRangeFrom" name="from" value="{{ filter_range_from }}" type="text" class="input" placeholder="DD/MM/YYYY" data-date-mode="date" autocomplete="off" />
+          <div class="date-input">
+            <input id="attendanceReportRangeFrom" name="from" value="{{ filter_range_from }}" type="text" class="input" placeholder="DD/MM/YYYY" data-date-mode="date" autocomplete="off" />
+          </div>
         </div>
         <div class="range-input">
-          <input id="attendanceReportRangeTo" name="to" value="{{ filter_range_to }}" type="text" class="input" placeholder="DD/MM/YYYY" data-date-mode="date" autocomplete="off" />
+          <div class="date-input">
+            <input id="attendanceReportRangeTo" name="to" value="{{ filter_range_to }}" type="text" class="input" placeholder="DD/MM/YYYY" data-date-mode="date" autocomplete="off" />
+          </div>
         </div>
       </div>
     </div>
     <div class="filter-col filter-actions">
       <div class="filter-actions">
-        <button class="btn secondary" type="button" id="attendanceReportReset" data-reset-url="{{ url_for('admin.attendance') }}{% if selected_site %}?site_id={{ selected_site.id }}{% endif %}">Reset</button>
+        <a class="btn secondary" id="attendanceReportReset" href="{{ url_for('admin.attendance') }}{% if selected_site %}?site_id={{ selected_site.id }}{% endif %}" data-reset-url="{{ url_for('admin.attendance') }}{% if selected_site %}?site_id={{ selected_site.id }}{% endif %}">Reset</a>
         <button class="btn primary" type="submit">Apply</button>
       </div>
     </div>
@@ -110,8 +114,7 @@
     <table class="table attendance-report-table" id="attendanceReportTable">
       <thead>
         <tr>
-          <th>Pegawai</th>
-          <th>Email</th>
+          <th>Nama Pegawai/Email</th>
           <th>Tanggal</th>
           <th>Check-in</th>
           <th>Check-out</th>
@@ -124,8 +127,12 @@
         {% if records %}
         {% for r in records %}
         <tr>
-          <td>{{ r.employee }}</td>
-          <td>{{ r.email }}</td>
+          <td>
+            <div class="attendance-name-stack">
+              <span>{{ r.employee }}</span>
+              <span class="muted small">{{ r.email }}</span>
+            </div>
+          </td>
           <td>{{ r.date|ddmmyyyy }}</td>
           <td>{{ r.check_in or '-' }}</td>
           <td>{{ r.check_out or '-' }}</td>
@@ -134,19 +141,16 @@
           <td>{{ r.created_at|display_datetime }}</td>
         </tr>
         {% endfor %}
-        {% else %}
-        <tr>
-          <td colspan="8" class="muted">Rentang belum dipilih atau tidak ada data.</td>
-        </tr>
         {% endif %}
       </tbody>
     </table>
   </div>
   <div class="attendance-report-export">
-    <button class="btn secondary" type="button" id="attendanceReportCsvButton" data-csv-url="{{ url_for('admin.attendance_csv') }}">CSV</button>
     <div class="attendance-report-csv-note">Tekan tombol CSV untuk menarik data CSV.</div>
+    <button class="btn secondary" type="button" id="attendanceReportCsvButton" data-csv-url="{{ url_for('admin.attendance_csv') }}">Tarik data CSV</button>
   </div>
 </section>
     </div>
 {% endif %}
+<script src="{{ url_for('static', filename='js/dashboard_admin.js') }}"></script>
 {% endblock %}
