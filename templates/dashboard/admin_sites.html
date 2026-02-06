@@ -18,7 +18,7 @@
     </div>
   </div>
   <div class="card-body-collapsible" id="add-site-body">
-    <form class="form-grid" style="grid-template-columns: repeat(2, minmax(260px, 1fr));" method="post" action="{{ url_for('admin.settings_sites_create') }}" data-site-shift-form data-shift-max="4">
+    <form class="form-grid site-form-compact" style="grid-template-columns: repeat(2, minmax(260px, 1fr));" method="post" action="{{ url_for('admin.settings_sites_create') }}" data-site-shift-form data-shift-max="4">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
     <div class="form-row">
       <label class="label" for="site-client">Client :</label>
@@ -76,7 +76,7 @@
       </div>
     </div>
     <div class="form-row">
-      <label class="label" for="site-lat">Latitude-Longitude :</label>
+      <label class="label" for="site-lat">Koordinat</label>
       <div class="form-inline">
         <input class="input" id="site-lat" type="number" name="latitude" placeholder="Latitude" step="0.000001" required />
         <input class="input" id="site-lon" type="number" name="longitude" placeholder="Longitude" step="0.000001" required />
@@ -121,15 +121,12 @@
     <table class="table" aria-label="Site list">
       <thead>
         <tr>
-          <th>Client</th>
-          <th>Nama Site</th>
+          <th>Site / Client</th>
           <th>Timezone</th>
           <th>Work Mode</th>
-          <th>Latitude</th>
-          <th>Longitude</th>
+          <th>Koordinat</th>
           <th>radius (m)</th>
-          <th>Nama PIC</th>
-          <th>PIC Email</th>
+          <th>PIC</th>
           <th>Compliance</th>
           <th>Status</th>
           <th>Aksi</th>
@@ -137,24 +134,30 @@
       </thead>
       <tbody>
         {% if not sites %}
-        <tr><td colspan="12" class="muted">Belum ada site.</td></tr>
+        <tr><td colspan="9" class="muted">Belum ada site.</td></tr>
         {% endif %}
         {% for s in sites %}
         <tr>
-          <td>
-            {{ s.client_name or "-" }}
-            {% if s.is_orphan %}
-            <span class="badge" style="margin-left:6px;">Orphan</span>
-            {% endif %}
+          <td class="site-name-cell">
+            <div class="site-name">{{ s.name }}</div>
+            <div class="site-client muted">
+              {{ s.client_name or "-" }}
+              {% if s.is_orphan %}
+              <span class="badge" style="margin-left:6px;">Orphan</span>
+              {% endif %}
+            </div>
           </td>
-          <td>{{ s.name }}</td>
           <td>{{ s.timezone or '-' }}</td>
           <td>{{ s.work_mode or '-' }}</td>
-          <td>{{ "%.6f"|format(s.latitude or 0) }}</td>
-          <td>{{ "%.6f"|format(s.longitude or 0) }}</td>
+          <td class="site-coord">
+            <div>{{ "%.6f"|format(s.latitude or 0) }}</div>
+            <div class="muted">{{ "%.6f"|format(s.longitude or 0) }}</div>
+          </td>
           <td>{{ s.radius_meters or 0 }}</td>
-          <td>{{ s.pic_name or "-" }}</td>
-          <td>{{ s.pic_email or "-" }}</td>
+          <td class="site-pic">
+            <div>{{ s.pic_name or "-" }}</div>
+            <div class="muted">{{ s.pic_email or "-" }}</div>
+          </td>
           <td>
             <span class="badge {{ s.compliance_class }}">
               {{ s.compliance_label }} ({{ s.compliance_score }}/3)
@@ -264,7 +267,7 @@
           </div>
         </div>
         <div class="form-row">
-          <label class="label" for="site-lat-{{ s.id }}">Latitude-Longitude</label>
+          <label class="label" for="site-lat-{{ s.id }}">Koordinat</label>
           <div class="form-inline">
             <input class="input" id="site-lat-{{ s.id }}" type="number" name="latitude" value="{{ s.latitude or '' }}" step="0.000001" required />
             <input class="input" id="site-lon-{{ s.id }}" type="number" name="longitude" value="{{ s.longitude or '' }}" step="0.000001" required />

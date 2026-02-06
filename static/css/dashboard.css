@@ -903,6 +903,20 @@ html[data-theme="light"] .site-placeholder{
   word-break: break-word;
   white-space: normal;
 }
+.site-name-cell .site-name{
+  font-weight: 700;
+  display: block;
+}
+.site-name-cell .site-client{
+  display: block;
+  white-space: normal;
+}
+.site-coord div{
+  line-height: 1.2;
+}
+.site-pic div{
+  line-height: 1.2;
+}
 .site-table-wrap{
   overflow: visible;
 }
@@ -1167,6 +1181,9 @@ html[data-theme="light"] .alert{
   grid-template-columns: 140px 1fr;
   gap:12px;
   align-items:center;
+}
+.site-form-compact .form-row{
+  gap: 6px;
 }
 .form-row.single{
   grid-template-columns: 1fr;
