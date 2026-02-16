@@ -366,6 +366,30 @@
     </section>
   </main>
 </div>
+<script>
+  (function () {
+    var lockKey = "gmi_dashboard_back_lock";
+    var homeKey = "gmi_dashboard_home_url";
+    try {
+      if (window.localStorage.getItem(lockKey) !== "1") {
+        return;
+      }
+      var home = window.localStorage.getItem(homeKey);
+      if (!home) {
+        return;
+      }
+      var nav = (window.performance && performance.getEntriesByType)
+        ? performance.getEntriesByType("navigation")[0]
+        : null;
+      var viaBackForward = !!(nav && nav.type === "back_forward");
+      var fromDashboard = (document.referrer || "").indexOf("/dashboard") !== -1;
+      if (!viaBackForward && !fromDashboard) {
+        return;
+      }
+      window.location.replace(home);
+    } catch (e) {}
+  })();
+</script>
 {% endblock %}
 
 
