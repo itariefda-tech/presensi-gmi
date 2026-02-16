@@ -15,7 +15,7 @@
   <title>{{ title or "Dashboard Admin" }}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}" />
 </head>
-<body>
+<body data-dashboard-home="{{ url_for('admin.overview') }}">
   {% set permissions = permissions if permissions is defined else {} %}
   <div class="shell">
     <aside class="sidebar">
@@ -218,6 +218,7 @@
   <script src="{{ url_for('static', filename='js/change_password.js') }}"></script>
   <script src="{{ url_for('static', filename='js/profile_photo.js') }}"></script>
   <script src="{{ url_for('static', filename='js/sidebar.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/dashboard_back_guard.js') }}"></script>
   <script>
     (function(){
       const collapsibleCards = document.querySelectorAll("[data-collapsible]");

@@ -16,7 +16,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/employee_mobile.css') }}" />
 </head>
-<body class="employee-body" data-email="{{ user.email }}">
+<body class="employee-body" data-email="{{ user.email }}" data-dashboard-home="{{ url_for('dashboard_employee') }}">
   <div class="employee-shell">
     <header class="employee-header">
       <div class="header-top">
@@ -632,6 +632,7 @@
 
   <script src="{{ url_for('static', filename='js/dashboard_employee_mobile.js') }}"></script>
   <script src="{{ url_for('static', filename='js/change_password.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/dashboard_back_guard.js') }}"></script>
   <script>
     (function(){
       const collapsibleCards = document.querySelectorAll("[data-collapsible]");

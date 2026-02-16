@@ -15,7 +15,7 @@
   <title>{{ client.name if client else "Client" }} | Dashboard Client</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/client_dashboard.css') }}" />
 </head>
-<body>
+<body data-dashboard-home="{{ url_for('dashboard_client') }}">
   {% macro employee_action_menu(employee, csrf_token) %}
   {% set notes = (employee.notes or "")|replace('\n', ' ') %}
   <div class="employee-actions"
@@ -1376,6 +1376,7 @@
   <script src="{{ url_for('static', filename='js/dashboard_theme.js') }}"></script>
   <script src="{{ url_for('static', filename='js/profile_photo.js') }}"></script>
   <script src="{{ url_for('static', filename='js/client_dashboard.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/dashboard_back_guard.js') }}"></script>
   <script>
     (function(){
       const forms = document.querySelectorAll("[data-site-shift-form]");
