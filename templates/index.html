@@ -10,9 +10,9 @@
       </div>
       <div>        
         <div class="headline">
-          <h2>Presensi pegawai</h2>
+          <h2>Smart Presensi Security System</h2>
           <p>
-            Presensi butuh <b>GPS</b> dan <b>foto selfie</b>.
+            Presensi bukan sekadar absen, tapi kontrol operasional lengkap dengan patroli digital, memastikan setiap langkah petugas tercatat, tervalidasi, dan dapat dimonitor secara real-time — no device, keep control, keep secure
           </p>
         </div>
 
@@ -36,6 +36,7 @@
                   <li><div class="dot"></div><div><b>GPS + Selfie</b><span> - Bukti presensi lebih kuat.</span></div></li>
                   <li><div class="dot"></div><div><b>Multi-role Admin</b><span> - HR, Supervisor dan Koordinator.</span></div></li>
                   <li><div class="dot"></div><div><b>Daftar pakai Kode Undangan</b><span> - Registrasi rapi.</span></div></li>
+                  <li><div class="dot"></div><div><b>Terintegrated guard tur</b><span> - patroly system</span></div></li>
                 </ul>
               </div>
             </section>
@@ -113,13 +114,28 @@
             </section>
             <section class="hero-pane" aria-label="Galeri">
               <div class="hero-gallery">
-                <div class="hero-shot">
-                  <img src="/static/img/gmi_logo.gif" alt="Logo GMI" />
-                </div>
-                <div class="hero-shot">
-                  <img src="/static/img/00gmi_logo.gif" alt="Logo GMI alternatif" />
+                <div class="hero-shot hero-shot-main">
+                  <img
+                    id="heroGalleryMainImage"
+                    alt="Galeri hero"
+                    {% if hero_gallery_images %}
+                    src="{{ hero_gallery_images[0] }}"
+                    {% else %}
+                    class="is-hidden"
+                    {% endif %}
+                  />
                 </div>
               </div>
+              <div class="hero-gallery-upload" aria-label="Upload galeri hero">
+                <input type="file" id="heroGalleryCameraInput" class="is-hidden" accept="image/*" capture="environment" />
+                <input type="file" id="heroGalleryFileInput" class="is-hidden" accept="image/*" />
+                <div class="hero-gallery-upload-buttons">
+                  <button type="button" class="hero-gallery-upload-btn" id="heroGalleryCameraBtn">Upload Kamera</button>
+                  <button type="button" class="hero-gallery-upload-btn" id="heroGalleryFileBtn">Upload File</button>
+                </div>
+                <div class="hero-gallery-upload-status" id="heroGalleryUploadStatus" aria-live="polite"></div>
+              </div>
+              <script id="heroGalleryData" type="application/json">{{ hero_gallery_images|default([], true)|tojson }}</script>
             </section>
           </div>
         </div>

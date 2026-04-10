@@ -104,8 +104,8 @@ const patrolProgressBar = document.getElementById("patrolProgressBar");
 const patrolNextCheckpoint = document.getElementById("patrolNextCheckpoint");
 const patrolSecurityMode = document.getElementById("patrolSecurityMode");
 const patrolCheckpointList = document.getElementById("patrolCheckpointList");
+const patrolCheckpointPagination = document.getElementById("patrolCheckpointPagination");
 const patrolHistoryList = document.getElementById("patrolHistoryList");
-const patrolUpgradeHint = document.getElementById("patrolUpgradeHint");
 const patrolToast = document.getElementById("patrolToast");
 const btnPatrolStart = document.getElementById("btnPatrolStart");
 const btnPatrolRefresh = document.getElementById("btnPatrolRefresh");
@@ -141,6 +141,7 @@ let isOnline = navigator.onLine;
 let hasCheckedIn = lastActionBadge?.textContent === "IN";
 let patrolState = null;
 let patrolMode = "qr";
+let patrolAllowedModes = ["qr"];
 let patrolQrStream = null;
 let patrolQrDetector = null;
 let patrolQrActive = false;
@@ -151,6 +152,8 @@ let patrolGpsAccuracy = "";
 let patrolGpsDeviceTime = "";
 let patrolToastTimer = null;
 let patrolAutoRefreshTimer = null;
+let patrolCheckpointPage = 1;
+const PATROL_CHECKPOINT_PAGE_SIZE = 5;
 const attendanceModeStorage = {
   gps_selfie: "gmi_att_mode_gps_selfie",
   gps: "gmi_att_mode_gps",
@@ -582,10 +585,35 @@ function clearPatrolScanValue(){
   }
 }
 
-function setPatrolMode(mode){
-  patrolMode = mode === "nfc" ? "nfc" : "qr";
+function normalizePatrolMode(mode){
+  return String(mode || "").toLowerCase() === "nfc" ? "nfc" : "qr";
+}
+
+function patrolModeLabel(mode){
+  return normalizePatrolMode(mode) === "nfc" ? "NFC Tag" : "Barcode";
+}
+
+function setPatrolAllowedModes(modes){
+  const source = Array.isArray(modes) ? modes : [];
+  const normalized = source.map((mode) => normalizePatrolMode(mode))
+    .filter((mode, index, arr) => arr.indexOf(mode) === index);
+  patrolAllowedModes = normalized.length ? normalized : ["qr"];
   patrolModeChips.forEach((chip) => {
-    const active = chip.dataset.patrolMode === patrolMode;
+    const chipMode = normalizePatrolMode(chip.dataset.patrolMode || "qr");
+    const allowed = patrolAllowedModes.includes(chipMode);
+    chip.classList.toggle("is-hidden", !allowed);
+    chip.disabled = !allowed;
+    chip.setAttribute("aria-disabled", allowed ? "false" : "true");
+  });
+}
+
+function setPatrolMode(mode){
+  const normalized = normalizePatrolMode(mode);
+  patrolMode = patrolAllowedModes.includes(normalized)
+    ? normalized
+    : (patrolAllowedModes[0] || "qr");
+  patrolModeChips.forEach((chip) => {
+    const active = chip.dataset.patrolMode === patrolMode && !chip.disabled;
     chip.classList.toggle("active", active);
     chip.setAttribute("aria-pressed", active ? "true" : "false");
   });
@@ -624,14 +652,39 @@ async function capturePatrolLocation(){
 function renderPatrolCheckpointList(rows){
   if (!patrolCheckpointList) return;
   patrolCheckpointList.innerHTML = "";
-  if (!rows || !rows.length) {
+  const checkpointRows = Array.isArray(rows) ? rows : [];
+  if (!checkpointRows.length) {
+    patrolCheckpointPage = 1;
+    if (patrolCheckpointPagination) {
+      patrolCheckpointPagination.style.display = "none";
+    }
     const empty = document.createElement("div");
     empty.className = "muted";
     empty.textContent = "Belum ada data checkpoint.";
     patrolCheckpointList.appendChild(empty);
     return;
   }
-  rows.forEach((row) => {
+  const totalPages = Math.max(1, Math.ceil(checkpointRows.length / PATROL_CHECKPOINT_PAGE_SIZE));
+  if (patrolCheckpointPage > totalPages) patrolCheckpointPage = totalPages;
+  if (patrolCheckpointPage < 1) patrolCheckpointPage = 1;
+  const start = (patrolCheckpointPage - 1) * PATROL_CHECKPOINT_PAGE_SIZE;
+  const pageRows = checkpointRows.slice(start, start + PATROL_CHECKPOINT_PAGE_SIZE);
+
+  if (patrolCheckpointPagination) {
+    const prevBtn = patrolCheckpointPagination.querySelector("[data-page='prev']");
+    const nextBtn = patrolCheckpointPagination.querySelector("[data-page='next']");
+    const info = patrolCheckpointPagination.querySelector("[data-page-info]");
+    if (totalPages <= 1) {
+      patrolCheckpointPagination.style.display = "none";
+    } else {
+      patrolCheckpointPagination.style.display = "flex";
+      if (info) info.textContent = `Page ${patrolCheckpointPage} of ${totalPages}`;
+      if (prevBtn) prevBtn.disabled = patrolCheckpointPage <= 1;
+      if (nextBtn) nextBtn.disabled = patrolCheckpointPage >= totalPages;
+    }
+  }
+
+  pageRows.forEach((row) => {
     const item = document.createElement("article");
     const status = (row.status || "pending").toLowerCase();
     item.className = `patrol-checkpoint-item is-${status}`;
@@ -649,9 +702,13 @@ function renderPatrolCheckpointList(rows){
 
     const meta = document.createElement("div");
     meta.className = "patrol-checkpoint-meta";
-    const marker = row.marker_type ? `Marker: ${row.marker_type.toUpperCase()}` : "Marker: -";
+    const markerRaw = (row.marker_type || "").toLowerCase();
+    const marker = markerRaw
+      ? `Marker: ${markerRaw === "nfc" ? "NFC" : "BARCODE"}`
+      : "Marker: -";
+    const markerReady = row.marker_ready === false ? " (belum diset)" : "";
     const scanned = row.scanned_at ? ` • ${formatPatrolDateTime(row.scanned_at)}` : "";
-    meta.textContent = `${marker}${scanned}`;
+    meta.textContent = `${marker}${markerReady}${scanned}`;
 
     body.append(name, meta);
     item.append(seq, body);
@@ -700,6 +757,12 @@ function renderPatrolState(data){
   const constraints = data?.constraints || {};
   const allowed = data?.allowed || {};
   const status = patrolStatusLabel(data?.status);
+  const routeScanMode = normalizePatrolMode(route?.scan_mode || constraints.scan_mode || patrolMode);
+  const scanModes = Array.isArray(data?.scan_modes) && data.scan_modes.length
+    ? data.scan_modes
+    : [routeScanMode];
+  setPatrolAllowedModes(scanModes);
+  setPatrolMode(routeScanMode);
 
   if (patrolRouteLabel) {
     patrolRouteLabel.textContent = route
@@ -720,14 +783,20 @@ function renderPatrolState(data){
     patrolProgressBar.style.width = `${progress.percent || 0}%`;
   }
   if (patrolSecurityMode) {
-    patrolSecurityMode.textContent = constraints.strict_mode
-      ? "Strict (GPS + Selfie)"
-      : "Standard";
+    const modeTags = [patrolModeLabel(routeScanMode)];
+    if (constraints.strict_mode) modeTags.push("Strict Sequence");
+    if (constraints.require_gps) modeTags.push("GPS");
+    if (constraints.require_selfie) modeTags.push("Selfie");
+    patrolSecurityMode.textContent = modeTags.length ? modeTags.join(" + ") : "Standard";
   }
   if (patrolSelfieHint) {
-    patrolSelfieHint.textContent = constraints.require_selfie
-      ? "Strict mode aktif: selfie wajib di setiap checkpoint."
-      : "Selfie opsional, menjadi wajib saat strict mode aktif.";
+    if (routeScanMode === "qr") {
+      patrolSelfieHint.textContent = "Selfie wajib karena mode Barcode aktif.";
+    } else {
+      patrolSelfieHint.textContent = constraints.require_selfie
+        ? "Selfie wajib di setiap checkpoint."
+        : "Selfie opsional pada mode NFC.";
+    }
   }
 
   let nextText = "-";
@@ -755,12 +824,6 @@ function renderPatrolState(data){
   }
   if (!allowed.can_scan) {
     stopPatrolQrScan();
-  }
-
-  if (patrolUpgradeHint) {
-    patrolUpgradeHint.textContent = constraints.pro_upgrade_required
-      ? (constraints.pro_upgrade_message || "Rute melebihi 30 checkpoint. Upgrade ke PRO+.")
-      : "Batas standar rute adalah 30 checkpoint. Jika lebih, gunakan versi PRO+.";
   }
 
   renderPatrolCheckpointList(checkpoints);
@@ -862,7 +925,7 @@ function stopPatrolQrScan(){
 async function startPatrolNfcScan(){
   if (!patrolNfcStatus) return;
   if (!("NDEFReader" in window)) {
-    patrolNfcStatus.textContent = "Device ini belum mendukung Web NFC. Gunakan mode QR.";
+    patrolNfcStatus.textContent = "Device ini belum mendukung Web NFC. Gunakan mode Barcode.";
     return;
   }
   try {
@@ -901,6 +964,12 @@ async function submitPatrolCheckpoint(){
     showPatrolToast("error", "Guard tour tidak dapat di-scan saat ini.");
     return;
   }
+  const activeMode = patrolAllowedModes.includes(patrolMode)
+    ? patrolMode
+    : (patrolAllowedModes[0] || "qr");
+  if (activeMode !== patrolMode) {
+    setPatrolMode(activeMode);
+  }
   const scanValue = (patrolScanData?.value || "").trim();
   if (!scanValue) {
     showPatrolToast("error", "Lakukan scan checkpoint terlebih dahulu.");
@@ -914,11 +983,16 @@ async function submitPatrolCheckpoint(){
       return;
     }
   }
+  const selfie = patrolSelfieFile?.files?.[0];
+  if (patrolState?.constraints?.require_selfie && !selfie) {
+    showPatrolToast("error", "Selfie wajib di setiap checkpoint.");
+    return;
+  }
 
   const formData = new FormData();
   appendCsrf(formData);
   formData.append("tour_id", String(patrolState.tour.id));
-  formData.append("method", patrolMode);
+  formData.append("method", activeMode);
   formData.append("scan_data", scanValue);
   if (patrolGpsLat && patrolGpsLng) {
     formData.append("lat", patrolGpsLat);
@@ -926,7 +1000,6 @@ async function submitPatrolCheckpoint(){
     formData.append("accuracy", patrolGpsAccuracy || "");
     formData.append("device_time", patrolGpsDeviceTime || new Date().toISOString());
   }
-  const selfie = patrolSelfieFile?.files?.[0];
   if (selfie) {
     formData.append("selfie", selfie);
   }
@@ -976,9 +1049,24 @@ function initPatrolSelfie(){
 
 function initPatrol(){
   if (!patrolRouteLabel) return;
+  setPatrolAllowedModes(["qr", "nfc"]);
   setPatrolMode("qr");
+  if (patrolCheckpointPagination) {
+    const prevBtn = patrolCheckpointPagination.querySelector("[data-page='prev']");
+    const nextBtn = patrolCheckpointPagination.querySelector("[data-page='next']");
+    prevBtn?.addEventListener("click", () => {
+      if (patrolCheckpointPage <= 1) return;
+      patrolCheckpointPage -= 1;
+      renderPatrolCheckpointList(patrolState?.checkpoints || []);
+    });
+    nextBtn?.addEventListener("click", () => {
+      patrolCheckpointPage += 1;
+      renderPatrolCheckpointList(patrolState?.checkpoints || []);
+    });
+  }
   patrolModeChips.forEach((chip) => {
     chip.addEventListener("click", () => {
+      if (chip.disabled) return;
       setPatrolMode(chip.dataset.patrolMode || "qr");
     });
   });

@@ -14,6 +14,7 @@ import hashlib
 import hmac
 import time
 import logging
+import string
 from datetime import datetime, date, timedelta, timezone
 from dataclasses import dataclass
 from typing import Dict
@@ -479,9 +480,48 @@ def create_app() -> Flask:
     def health():
         return jsonify(status="ok"), 200
 
+    def _list_hero_gallery_images() -> list[str]:
+        static_root = app.static_folder or os.path.join(app.root_path, "static")
+        gallery_dir = os.path.join(static_root, "img", "Galery_hero")
+        allowed_ext = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".avif"}
+        images: list[str] = []
+        if not os.path.isdir(gallery_dir):
+            return images
+        for file_name in sorted(os.listdir(gallery_dir)):
+            file_path = os.path.join(gallery_dir, file_name)
+            if not os.path.isfile(file_path):
+                continue
+            ext = os.path.splitext(file_name)[1].lower()
+            if ext not in allowed_ext:
+                continue
+            images.append(url_for("static", filename=f"img/Galery_hero/{file_name}"))
+        return images
+
+    @app.route("/api/hero-gallery/upload", methods=["POST"])
+    def hero_gallery_upload():
+        image_file = request.files.get("image")
+        if not image_file or not image_file.filename:
+            return jsonify(ok=False, message="File gambar wajib diunggah."), 400
+        try:
+            saved_path = _save_upload(image_file, "img/Galery_hero", 10 * 1024 * 1024)
+        except ValueError as err:
+            return jsonify(ok=False, message=str(err)), 400
+        return (
+            jsonify(
+                ok=True,
+                message="Gambar galeri berhasil diunggah.",
+                url=url_for("static", filename=saved_path),
+            ),
+            200,
+        )
+
     @app.route("/", methods=["GET"])
     def index():
-        return render_template("index.html", theme="dark")
+        return render_template(
+            "index.html",
+            theme="dark",
+            hero_gallery_images=_list_hero_gallery_images(),
+        )
 
     @app.route("/dashboard/pegawai", methods=["GET"])
     def dashboard_employee():
@@ -921,8 +961,21 @@ def create_app() -> Flask:
         user = _current_user()
         _require_client_admin(user)
         client_id, site_id, _site, _client = _client_site_context(user)
+        current_route = _client_patrol_route_for_site(site_id, client_id)
         data = _get_json()
         route_name = (data.get("route_name") or data.get("name") or "").strip() or "Guard Tour Route"
+        scan_mode = _normalize_patrol_scan_mode(
+            data.get("scan_mode"),
+            _normalize_patrol_scan_mode(
+                _row_get(current_route, "scan_mode", PATROL_SCAN_MODE_QR),
+                PATROL_SCAN_MODE_QR,
+            ),
+        )
+        strict_mode_flag = _client_patrol_flag(data.get("strict_mode"), default=0)
+        require_selfie_flag = _client_patrol_flag(data.get("require_selfie"), default=0)
+        if scan_mode == PATROL_SCAN_MODE_QR:
+            require_selfie_flag = 1
+        require_gps_flag = _client_patrol_flag(data.get("require_gps"), default=0)
         interval_raw = str(data.get("min_scan_interval_seconds") or "").strip()
         if interval_raw:
             try:
@@ -939,23 +992,30 @@ def create_app() -> Flask:
             site_id=site_id,
             client_id=client_id,
             name=route_name,
-            strict_mode=_client_patrol_flag(data.get("strict_mode"), default=0),
-            require_selfie=_client_patrol_flag(data.get("require_selfie"), default=0),
-            require_gps=_client_patrol_flag(data.get("require_gps"), default=1),
+            scan_mode=scan_mode,
+            strict_mode=strict_mode_flag,
+            require_selfie=require_selfie_flag,
+            require_gps=require_gps_flag,
             min_scan_interval_seconds=min_interval_seconds,
         )
+        route_id = int(_row_get(route, "id") or 0)
+        if route_id and not require_gps_flag:
+            _client_patrol_clear_checkpoint_gps(route_id)
+        if route_id:
+            _client_patrol_sync_checkpoint_markers(route_id, scan_mode)
         _log_audit_event(
             entity_type="patrol_route",
-            entity_id=int(_row_get(route, "id") or 0),
+            entity_id=route_id,
             action="UPDATE",
             actor=user,
             summary="Pengaturan guard tour route diperbarui dari dashboard client.",
             details={
                 "site_id": site_id,
                 "client_id": client_id,
-                "strict_mode": _client_patrol_flag(data.get("strict_mode"), default=0),
-                "require_selfie": _client_patrol_flag(data.get("require_selfie"), default=0),
-                "require_gps": _client_patrol_flag(data.get("require_gps"), default=1),
+                "scan_mode": scan_mode,
+                "strict_mode": strict_mode_flag,
+                "require_selfie": require_selfie_flag,
+                "require_gps": require_gps_flag,
                 "min_scan_interval_seconds": min_interval_seconds,
             },
         )
@@ -982,9 +1042,10 @@ def create_app() -> Flask:
                 site_id=site_id,
                 client_id=client_id,
                 name="Guard Tour Route",
+                scan_mode=PATROL_SCAN_MODE_QR,
                 strict_mode=0,
                 require_selfie=0,
-                require_gps=1,
+                require_gps=0,
                 min_scan_interval_seconds=PATROL_MIN_SCAN_INTERVAL_SECONDS,
             )
         route_id = int(_row_get(route, "id") or 0)
@@ -998,32 +1059,43 @@ def create_app() -> Flask:
                 message="Checkpoint maksimal 30 titik pada versi ini. Upgrade ke Pro+ untuk menambah kapasitas.",
             ), 400
 
-        qr_code = (data.get("qr_code") or "").strip()
-        nfc_tag = (data.get("nfc_tag") or "").strip()
+        flags = _patrol_security_flags(route)
+        scan_mode = _normalize_patrol_scan_mode(flags.get("scan_mode"), PATROL_SCAN_MODE_QR)
+        try:
+            marker_code = _patrol_generate_unique_marker_code()
+        except ValueError as err:
+            return jsonify(ok=False, message=str(err)), 500
+        qr_code = marker_code if scan_mode == PATROL_SCAN_MODE_QR else None
+        nfc_tag = marker_code if scan_mode == PATROL_SCAN_MODE_NFC else None
         lat_raw = (data.get("latitude") or "").strip()
         lng_raw = (data.get("longitude") or "").strip()
         radius_raw = (data.get("radius_meters") or "").strip()
+        gps_required = flags.get("require_gps", False)
 
         latitude = None
         longitude = None
-        if lat_raw or lng_raw:
+        radius_meters = None
+        if gps_required:
             if not lat_raw or not lng_raw:
-                return jsonify(ok=False, message="Latitude dan longitude harus diisi berpasangan."), 400
+                return jsonify(
+                    ok=False,
+                    message="Latitude dan longitude checkpoint wajib diisi saat GPS aktif.",
+                ), 400
             try:
                 latitude = float(lat_raw)
                 longitude = float(lng_raw)
             except ValueError:
                 return jsonify(ok=False, message="Koordinat checkpoint tidak valid."), 400
 
-        if radius_raw:
-            try:
-                radius_meters = int(radius_raw)
-            except ValueError:
-                return jsonify(ok=False, message="Radius checkpoint wajib angka."), 400
-        else:
-            radius_meters = PATROL_DEFAULT_CHECKPOINT_RADIUS_METERS
-        if radius_meters <= 0:
-            return jsonify(ok=False, message="Radius checkpoint harus lebih besar dari 0."), 400
+            if radius_raw:
+                try:
+                    radius_meters = int(radius_raw)
+                except ValueError:
+                    return jsonify(ok=False, message="Radius checkpoint wajib angka."), 400
+            else:
+                radius_meters = PATROL_DEFAULT_CHECKPOINT_RADIUS_METERS
+            if radius_meters <= 0:
+                return jsonify(ok=False, message="Radius checkpoint harus lebih besar dari 0."), 400
 
         sequence_no = len(checkpoints) + 1
         now_ts = _now_ts()
@@ -1060,7 +1132,11 @@ def create_app() -> Flask:
             action="CREATE",
             actor=user,
             summary="Checkpoint guard tour ditambahkan dari dashboard client.",
-            details={"site_id": site_id, "route_id": route_id, "name": name},
+            details={
+                "site_id": site_id,
+                "route_id": route_id,
+                "name": name,
+            },
         )
         payload = _client_patrol_dashboard_payload(
             client_id=client_id,
@@ -1086,41 +1162,55 @@ def create_app() -> Flask:
         name = (data.get("nama") or data.get("name") or "").strip()
         if not name:
             return jsonify(ok=False, message="Nama checkpoint wajib diisi."), 400
-
-        qr_code = (data.get("qr_code") or "").strip()
-        nfc_tag = (data.get("nfc_tag") or "").strip()
         lat_raw = (data.get("latitude") or "").strip()
         lng_raw = (data.get("longitude") or "").strip()
         radius_raw = (data.get("radius_meters") or "").strip()
 
+        flags = _patrol_security_flags(route)
+        scan_mode = _normalize_patrol_scan_mode(flags.get("scan_mode"), PATROL_SCAN_MODE_QR)
+        gps_required = bool(flags.get("require_gps", False))
+        active_code = (
+            (_row_get(checkpoint, "qr_code", "") or "").strip()
+            if scan_mode == PATROL_SCAN_MODE_QR
+            else (_row_get(checkpoint, "nfc_tag", "") or "").strip()
+        )
+        try:
+            if not active_code or _patrol_marker_code_exists(active_code, exclude_checkpoint_id=checkpoint_id):
+                active_code = _patrol_generate_unique_marker_code(exclude_checkpoint_id=checkpoint_id)
+        except ValueError as err:
+            return jsonify(ok=False, message=str(err)), 500
+        qr_code = active_code if scan_mode == PATROL_SCAN_MODE_QR else None
+        nfc_tag = active_code if scan_mode == PATROL_SCAN_MODE_NFC else None
         latitude = None
         longitude = None
-        if lat_raw or lng_raw:
+        radius_meters = None
+        if gps_required:
             if not lat_raw or not lng_raw:
-                return jsonify(ok=False, message="Latitude dan longitude harus diisi berpasangan."), 400
+                return jsonify(
+                    ok=False,
+                    message="Latitude dan longitude checkpoint wajib diisi saat GPS aktif.",
+                ), 400
             try:
                 latitude = float(lat_raw)
                 longitude = float(lng_raw)
             except ValueError:
                 return jsonify(ok=False, message="Koordinat checkpoint tidak valid."), 400
-
-        if radius_raw:
-            try:
-                radius_meters = int(radius_raw)
-            except ValueError:
-                return jsonify(ok=False, message="Radius checkpoint wajib angka."), 400
-        else:
-            radius_meters = int(_row_get(checkpoint, "radius_meters") or PATROL_DEFAULT_CHECKPOINT_RADIUS_METERS)
-        if radius_meters <= 0:
-            return jsonify(ok=False, message="Radius checkpoint harus lebih besar dari 0."), 400
+            if radius_raw:
+                try:
+                    radius_meters = int(radius_raw)
+                except ValueError:
+                    return jsonify(ok=False, message="Radius checkpoint wajib angka."), 400
+            else:
+                radius_meters = PATROL_DEFAULT_CHECKPOINT_RADIUS_METERS
+            if radius_meters <= 0:
+                return jsonify(ok=False, message="Radius checkpoint harus lebih besar dari 0."), 400
 
         conn = _db_connect()
         try:
             conn.execute(
                 """
                 UPDATE patrol_checkpoints
-                SET name = ?, qr_code = ?, nfc_tag = ?, latitude = ?, longitude = ?,
-                    radius_meters = ?, updated_at = ?
+                SET name = ?, qr_code = ?, nfc_tag = ?, latitude = ?, longitude = ?, radius_meters = ?, updated_at = ?
                 WHERE id = ?
                 """,
                 (
@@ -1143,7 +1233,11 @@ def create_app() -> Flask:
             action="UPDATE",
             actor=user,
             summary="Checkpoint guard tour diperbarui dari dashboard client.",
-            details={"site_id": site_id, "route_id": int(_row_get(route, "id") or 0), "name": name},
+            details={
+                "site_id": site_id,
+                "route_id": int(_row_get(route, "id") or 0),
+                "name": name,
+            },
         )
         payload = _client_patrol_dashboard_payload(
             client_id=client_id,
@@ -1928,6 +2022,18 @@ def create_app() -> Flask:
                 ok=False,
                 message="Rute melebihi 30 checkpoint. Upgrade ke PRO+ untuk mengaktifkan rute ini.",
             ), 400
+        route_flags = _patrol_security_flags(route)
+        scan_mode = _normalize_patrol_scan_mode(route_flags.get("scan_mode"), PATROL_SCAN_MODE_QR)
+        marker_field = "qr_code" if scan_mode == PATROL_SCAN_MODE_QR else "nfc_tag"
+        marker_label = "QR / Barcode ID" if scan_mode == PATROL_SCAN_MODE_QR else "NFC Tag"
+        for idx, cp in enumerate(checkpoints_full[:PATROL_MAX_CHECKPOINTS], start=1):
+            cp_seq = int(_row_get(cp, "sequence_no", idx) or idx)
+            marker_value = _row_get(cp, marker_field, "")
+            if not str(marker_value or "").strip():
+                return jsonify(
+                    ok=False,
+                    message=f"Checkpoint #{cp_seq} belum memiliki {marker_label} untuk mode scan aktif.",
+                ), 400
 
         latest = _patrol_latest_tour_for_today(user.email, today, _row_get(route, "id"))
         if latest:
@@ -2026,12 +2132,10 @@ def create_app() -> Flask:
         checkpoints = checkpoints_full[:PATROL_MAX_CHECKPOINTS]
 
         valid_scans = _patrol_valid_scans(tour_id)
-        completed_count = max(
-            len(valid_scans),
-            int(_row_get(tour, "completed_checkpoints", 0) or 0),
-        )
-        expected_sequence = completed_count + 1
-        if expected_sequence > len(checkpoints):
+        done_sequences = _patrol_done_sequences(valid_scans)
+        completed_count = len(done_sequences)
+        expected_sequence = _patrol_next_pending_sequence(checkpoints, done_sequences)
+        if expected_sequence is None:
             _update_patrol_tour_state(
                 tour_id,
                 status=PATROL_STATUS_COMPLETED,
@@ -2040,15 +2144,17 @@ def create_app() -> Flask:
             )
             return jsonify(ok=False, message="Guard tour sudah selesai."), 400
 
+        flags = _patrol_effective_flags(route=route, tour=tour)
+        scan_mode = _normalize_patrol_scan_mode(flags.get("scan_mode"), PATROL_SCAN_MODE_QR)
+        strict_mode = bool(flags["strict_mode"])
+        method_allowed = method == scan_mode
         matched_checkpoint = _patrol_checkpoint_match(checkpoints, method, scan_payload)
         checkpoint_id = int(_row_get(matched_checkpoint, "id", 0) or 0) if matched_checkpoint else None
         checkpoint_sequence = (
             int(_row_get(matched_checkpoint, "sequence_no", 0) or 0) if matched_checkpoint else None
         )
-        is_expected_sequence = bool(
-            matched_checkpoint and checkpoint_sequence == expected_sequence
-        )
-        flags = _patrol_security_flags(route)
+        already_scanned = bool(checkpoint_sequence and checkpoint_sequence in done_sequences)
+        is_expected_sequence = bool(matched_checkpoint and checkpoint_sequence == expected_sequence)
         scan_ts = _now_ts()
 
         lat_value = None
@@ -2123,14 +2229,30 @@ def create_app() -> Flask:
         validation_status = PATROL_SCAN_VALID
         validation_note = "Checkpoint tervalidasi."
         failure_reason = ""
-        if not matched_checkpoint:
+        if not method_allowed:
+            validation_status = "wrong_scan_mode"
+            validation_note = (
+                "Mode scan tidak sesuai route. Gunakan Barcode."
+                if scan_mode == PATROL_SCAN_MODE_QR
+                else "Mode scan tidak sesuai route. Gunakan NFC."
+            )
+            failure_reason = "wrong_scan_mode"
+        elif not matched_checkpoint:
             validation_status = "checkpoint_not_found"
             validation_note = "Marker checkpoint tidak dikenal."
             failure_reason = "checkpoint_not_found"
-        elif not is_expected_sequence:
+        elif strict_mode and not is_expected_sequence:
             validation_status = "wrong_sequence"
-            validation_note = "Urutan checkpoint salah."
+            validation_note = (
+                f"Urutan checkpoint salah. Lanjutkan ke checkpoint #{expected_sequence}."
+                if expected_sequence
+                else "Urutan checkpoint salah."
+            )
             failure_reason = "wrong_sequence"
+        elif not strict_mode and already_scanned:
+            validation_status = "checkpoint_already_scanned"
+            validation_note = "Checkpoint ini sudah tervalidasi sebelumnya."
+            failure_reason = "checkpoint_already_scanned"
         elif too_fast:
             validation_status = "scan_too_fast"
             validation_note = "Scan terlalu cepat dari checkpoint sebelumnya."
@@ -2192,7 +2314,10 @@ def create_app() -> Flask:
                 data=_patrol_status_payload(user),
             ), 400
 
-        completed_count = expected_sequence
+        done_sequences_after = set(done_sequences)
+        if checkpoint_sequence and checkpoint_sequence > 0:
+            done_sequences_after.add(checkpoint_sequence)
+        completed_count = len(done_sequences_after)
         if completed_count >= len(checkpoints):
             _update_patrol_tour_state(
                 tour_id,
@@ -2221,7 +2346,7 @@ def create_app() -> Flask:
         )
         return jsonify(
             ok=True,
-            message=f"Checkpoint {expected_sequence}/{len(checkpoints)} tervalidasi.",
+            message=f"Checkpoint tervalidasi ({completed_count}/{len(checkpoints)}).",
             data=_patrol_status_payload(user),
         ), 200
 
@@ -2504,10 +2629,14 @@ PATROL_STATUS_COMPLETED = "completed"
 PATROL_STATUS_INCOMPLETE = "incomplete"
 PATROL_STATUS_INVALID = "invalid"
 PATROL_SCAN_VALID = "valid"
-PATROL_SCAN_METHODS = {"qr", "nfc"}
+PATROL_SCAN_MODE_QR = "qr"
+PATROL_SCAN_MODE_NFC = "nfc"
+PATROL_SCAN_METHODS = {PATROL_SCAN_MODE_QR, PATROL_SCAN_MODE_NFC}
 PATROL_MAX_CHECKPOINTS = 30
 PATROL_MIN_SCAN_INTERVAL_SECONDS = 45
 PATROL_DEFAULT_CHECKPOINT_RADIUS_METERS = 35
+PATROL_MARKER_CODE_LENGTH = 10
+PATROL_MARKER_SYMBOLS = "!@#$%&*+-="
 
 
 @dataclass
@@ -6260,9 +6389,10 @@ def _init_db() -> None:
                 shift_id INTEGER,
                 name TEXT NOT NULL,
                 description TEXT,
+                scan_mode TEXT DEFAULT 'qr',
                 strict_mode INTEGER DEFAULT 0,
                 require_selfie INTEGER DEFAULT 0,
-                require_gps INTEGER DEFAULT 1,
+                require_gps INTEGER DEFAULT 0,
                 min_scan_interval_seconds INTEGER DEFAULT 45,
                 is_active INTEGER DEFAULT 1,
                 created_at TEXT,
@@ -6310,9 +6440,10 @@ def _init_db() -> None:
                 status TEXT NOT NULL DEFAULT 'ongoing',
                 total_checkpoints INTEGER DEFAULT 0,
                 completed_checkpoints INTEGER DEFAULT 0,
+                scan_mode TEXT DEFAULT 'qr',
                 strict_mode INTEGER DEFAULT 0,
                 require_selfie INTEGER DEFAULT 0,
-                require_gps INTEGER DEFAULT 1,
+                require_gps INTEGER DEFAULT 0,
                 min_scan_interval_seconds INTEGER DEFAULT 45,
                 invalid_reasons_json TEXT,
                 created_at TEXT NOT NULL,
@@ -6449,9 +6580,15 @@ def _init_db() -> None:
             _ensure_column(conn, "patrol_routes", "shift_id", "shift_id INTEGER")
             _ensure_column(conn, "patrol_routes", "name", "name TEXT")
             _ensure_column(conn, "patrol_routes", "description", "description TEXT")
+            _ensure_column(
+                conn,
+                "patrol_routes",
+                "scan_mode",
+                "scan_mode TEXT DEFAULT 'qr'",
+            )
             _ensure_column(conn, "patrol_routes", "strict_mode", "strict_mode INTEGER DEFAULT 0")
             _ensure_column(conn, "patrol_routes", "require_selfie", "require_selfie INTEGER DEFAULT 0")
-            _ensure_column(conn, "patrol_routes", "require_gps", "require_gps INTEGER DEFAULT 1")
+            _ensure_column(conn, "patrol_routes", "require_gps", "require_gps INTEGER DEFAULT 0")
             _ensure_column(
                 conn,
                 "patrol_routes",
@@ -6509,9 +6646,15 @@ def _init_db() -> None:
                 "completed_checkpoints",
                 "completed_checkpoints INTEGER DEFAULT 0",
             )
+            _ensure_column(
+                conn,
+                "patrol_tours",
+                "scan_mode",
+                "scan_mode TEXT DEFAULT 'qr'",
+            )
             _ensure_column(conn, "patrol_tours", "strict_mode", "strict_mode INTEGER DEFAULT 0")
             _ensure_column(conn, "patrol_tours", "require_selfie", "require_selfie INTEGER DEFAULT 0")
-            _ensure_column(conn, "patrol_tours", "require_gps", "require_gps INTEGER DEFAULT 1")
+            _ensure_column(conn, "patrol_tours", "require_gps", "require_gps INTEGER DEFAULT 0")
             _ensure_column(
                 conn,
                 "patrol_tours",
@@ -7662,10 +7805,78 @@ def _distance_meters(lat_a: float, lng_a: float, lat_b: float, lng_b: float) -> 
     return r * c
 
 
+def _patrol_random_marker_code(length: int = PATROL_MARKER_CODE_LENGTH) -> str:
+    marker_length = int(length or PATROL_MARKER_CODE_LENGTH)
+    if marker_length < 4:
+        marker_length = 4
+    parts = [
+        secrets.choice(string.digits),
+        secrets.choice(string.ascii_uppercase),
+        secrets.choice(string.ascii_lowercase),
+        secrets.choice(PATROL_MARKER_SYMBOLS),
+    ]
+    charset = string.digits + string.ascii_uppercase + string.ascii_lowercase + PATROL_MARKER_SYMBOLS
+    while len(parts) < marker_length:
+        parts.append(secrets.choice(charset))
+    secrets.SystemRandom().shuffle(parts)
+    return "".join(parts)
+
+
+def _patrol_marker_code_exists(code: str, exclude_checkpoint_id: int | None = None) -> bool:
+    marker = (code or "").strip()
+    if not marker:
+        return False
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "patrol_checkpoints"):
+            return False
+        query = """
+            SELECT id
+            FROM patrol_checkpoints
+            WHERE (qr_code = ? OR nfc_tag = ?)
+        """
+        params: list[object] = [marker, marker]
+        if exclude_checkpoint_id:
+            query += " AND id != ?"
+            params.append(int(exclude_checkpoint_id))
+        query += " LIMIT 1"
+        row = conn.execute(query, tuple(params)).fetchone()
+        return bool(row)
+    finally:
+        conn.close()
+
+
+def _patrol_generate_unique_marker_code(
+    *,
+    exclude_checkpoint_id: int | None = None,
+) -> str:
+    max_attempts = 400
+    for _ in range(max_attempts):
+        candidate = _patrol_random_marker_code(PATROL_MARKER_CODE_LENGTH)
+        if not _patrol_marker_code_exists(candidate, exclude_checkpoint_id=exclude_checkpoint_id):
+            return candidate
+    raise ValueError("Gagal membuat kode marker otomatis yang unik.")
+
+
+def _normalize_patrol_scan_mode(value: object, default: str = PATROL_SCAN_MODE_QR) -> str:
+    raw = (str(value or "")).strip().lower()
+    if raw in PATROL_SCAN_METHODS:
+        return raw
+    if default in PATROL_SCAN_METHODS:
+        return default
+    return PATROL_SCAN_MODE_QR
+
+
 def _patrol_security_flags(route: dict | sqlite3.Row | None) -> dict:
     strict_mode = int(_row_get(route, "strict_mode", 0) or 0) == 1
-    require_selfie = strict_mode or int(_row_get(route, "require_selfie", 0) or 0) == 1
-    require_gps = strict_mode or int(_row_get(route, "require_gps", 1) or 0) == 1
+    scan_mode = _normalize_patrol_scan_mode(
+        _row_get(route, "scan_mode", PATROL_SCAN_MODE_QR),
+        PATROL_SCAN_MODE_QR,
+    )
+    require_selfie = int(_row_get(route, "require_selfie", 0) or 0) == 1
+    if scan_mode == PATROL_SCAN_MODE_QR:
+        require_selfie = True
+    require_gps = int(_row_get(route, "require_gps", 0) or 0) == 1
     min_interval = int(
         _row_get(route, "min_scan_interval_seconds", PATROL_MIN_SCAN_INTERVAL_SECONDS)
         or PATROL_MIN_SCAN_INTERVAL_SECONDS
@@ -7673,6 +7884,49 @@ def _patrol_security_flags(route: dict | sqlite3.Row | None) -> dict:
     if min_interval < 0:
         min_interval = 0
     return {
+        "scan_mode": scan_mode,
+        "strict_mode": strict_mode,
+        "require_selfie": require_selfie,
+        "require_gps": require_gps,
+        "min_scan_interval_seconds": min_interval,
+    }
+
+
+def _patrol_effective_flags(
+    *,
+    route: dict | sqlite3.Row | None,
+    tour: dict | sqlite3.Row | None = None,
+) -> dict:
+    route_flags = _patrol_security_flags(route)
+    if not tour:
+        return route_flags
+    scan_mode = _normalize_patrol_scan_mode(
+        _row_get(tour, "scan_mode", route_flags["scan_mode"]),
+        route_flags["scan_mode"],
+    )
+    strict_mode = int(
+        _row_get(tour, "strict_mode", 1 if route_flags["strict_mode"] else 0) or 0
+    ) == 1
+    require_selfie = int(
+        _row_get(tour, "require_selfie", 1 if route_flags["require_selfie"] else 0) or 0
+    ) == 1
+    if scan_mode == PATROL_SCAN_MODE_QR:
+        require_selfie = True
+    require_gps = int(
+        _row_get(tour, "require_gps", 1 if route_flags["require_gps"] else 0) or 0
+    ) == 1
+    min_interval = int(
+        _row_get(
+            tour,
+            "min_scan_interval_seconds",
+            route_flags["min_scan_interval_seconds"],
+        )
+        or route_flags["min_scan_interval_seconds"]
+    )
+    if min_interval < 0:
+        min_interval = 0
+    return {
+        "scan_mode": scan_mode,
         "strict_mode": strict_mode,
         "require_selfie": require_selfie,
         "require_gps": require_gps,
@@ -7775,9 +8029,25 @@ def _patrol_checkpoint_match(
         token_str = (str(token).strip() if token is not None else "")
         if token_str and token_str.lower() == payload_lower:
             return cp
-        cp_id = int(_row_get(cp, "id", 0) or 0)
-        if cp_id and payload_lower in {f"cp:{cp_id}", f"checkpoint:{cp_id}", f"cp-{cp_id}"}:
-            return cp
+    return None
+
+
+def _patrol_done_sequences(valid_scans: list[dict]) -> set[int]:
+    done_sequences: set[int] = set()
+    for row in valid_scans:
+        seq = int(_row_get(row, "checkpoint_sequence", 0) or 0)
+        if seq > 0:
+            done_sequences.add(seq)
+    return done_sequences
+
+
+def _patrol_next_pending_sequence(checkpoints: list[dict], done_sequences: set[int]) -> int | None:
+    for idx, cp in enumerate(checkpoints, start=1):
+        seq = int(_row_get(cp, "sequence_no", idx) or idx)
+        if seq <= 0:
+            seq = idx
+        if seq not in done_sequences:
+            return seq
     return None
 
 
@@ -7934,9 +8204,9 @@ def _create_patrol_tour(
                 route_id, assignment_id, employee_user_id, employee_id, employee_email,
                 site_id, client_id, shift_id, date, started_at, ended_at, status,
                 total_checkpoints, completed_checkpoints,
-                strict_mode, require_selfie, require_gps, min_scan_interval_seconds,
+                scan_mode, strict_mode, require_selfie, require_gps, min_scan_interval_seconds,
                 invalid_reasons_json, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 _row_get(route, "id"),
@@ -7953,6 +8223,7 @@ def _create_patrol_tour(
                 PATROL_STATUS_ONGOING,
                 total_checkpoints,
                 0,
+                flags["scan_mode"],
                 1 if flags["strict_mode"] else 0,
                 1 if flags["require_selfie"] else 0,
                 1 if flags["require_gps"] else 0,
@@ -8163,36 +8434,52 @@ def _patrol_status_payload(user: User) -> dict:
 
     tour = _patrol_latest_tour_for_today(user.email, today, _row_get(route, "id")) if route else None
     valid_scans = _patrol_valid_scans(int(_row_get(tour, "id", 0) or 0)) if tour else []
-    done_sequences: set[int] = set()
+    done_sequences = _patrol_done_sequences(valid_scans)
     done_meta: dict[int, dict] = {}
     for row in valid_scans:
         seq = int(_row_get(row, "checkpoint_sequence", 0) or 0)
         if seq <= 0:
             continue
-        done_sequences.add(seq)
         done_meta[seq] = row
+    flags = _patrol_effective_flags(route=route, tour=tour)
 
     total_checkpoint_count = len(checkpoints)
     completed_count = len(done_sequences)
     if tour:
-        completed_count = max(completed_count, int(_row_get(tour, "completed_checkpoints", 0) or 0))
         total_checkpoint_count = int(_row_get(tour, "total_checkpoints", total_checkpoint_count) or total_checkpoint_count)
     if total_checkpoint_count < 0:
         total_checkpoint_count = 0
+    if completed_count > total_checkpoint_count and total_checkpoint_count > 0:
+        completed_count = total_checkpoint_count
 
     checkin_exists = _attendance_action_exists(user.email, today, "checkin")
     checkout_exists = _attendance_action_exists(user.email, today, "checkout")
 
     checkpoint_rows: list[dict] = []
-    next_sequence = completed_count + 1 if total_checkpoint_count > 0 else 1
+    next_sequence = (
+        _patrol_next_pending_sequence(checkpoints, done_sequences)
+        if total_checkpoint_count > 0
+        else None
+    )
     for idx, cp in enumerate(checkpoints, start=1):
         sequence_no = int(_row_get(cp, "sequence_no", idx) or idx)
         if sequence_no in done_sequences:
             cp_status = "done"
-        elif tour and _row_get(tour, "status") == PATROL_STATUS_ONGOING and sequence_no == next_sequence:
+        elif (
+            tour
+            and _row_get(tour, "status") == PATROL_STATUS_ONGOING
+            and next_sequence is not None
+            and sequence_no == next_sequence
+        ):
             cp_status = "next"
         else:
             cp_status = "pending"
+        marker_token = (
+            _row_get(cp, "qr_code", "")
+            if flags["scan_mode"] == PATROL_SCAN_MODE_QR
+            else _row_get(cp, "nfc_tag", "")
+        )
+        marker_value = (str(marker_token).strip() if marker_token is not None else "")
         cp_payload = {
             "id": int(_row_get(cp, "id", 0) or 0),
             "sequence_no": sequence_no,
@@ -8202,14 +8489,13 @@ def _patrol_status_payload(user: User) -> dict:
                 _row_get(cp, "radius_meters", PATROL_DEFAULT_CHECKPOINT_RADIUS_METERS)
                 or PATROL_DEFAULT_CHECKPOINT_RADIUS_METERS
             ),
-            "marker_type": "qr+nfc"
-            if (_row_get(cp, "qr_code") and _row_get(cp, "nfc_tag"))
-            else ("qr" if _row_get(cp, "qr_code") else ("nfc" if _row_get(cp, "nfc_tag") else "-")),
+            "marker_type": "barcode" if flags["scan_mode"] == PATROL_SCAN_MODE_QR else "nfc",
+            "marker_value": marker_value,
+            "marker_ready": bool(marker_value),
             "scanned_at": _row_get(done_meta.get(sequence_no), "timestamp"),
         }
         checkpoint_rows.append(cp_payload)
 
-    flags = _patrol_security_flags(route)
     tour_status = PATROL_STATUS_ONGOING
     if tour:
         tour_status = (_row_get(tour, "status", PATROL_STATUS_ONGOING) or PATROL_STATUS_ONGOING).strip().lower()
@@ -8248,6 +8534,7 @@ def _patrol_status_payload(user: User) -> dict:
             "description": _row_get(route, "description", "") or "",
             "site_id": _row_get(route, "site_id"),
             "shift_id": _row_get(route, "shift_id"),
+            "scan_mode": flags["scan_mode"],
             "strict_mode": flags["strict_mode"],
             "require_selfie": flags["require_selfie"],
             "require_gps": flags["require_gps"],
@@ -8309,6 +8596,7 @@ def _patrol_status_payload(user: User) -> dict:
                 if overflow_count > 0
                 else ""
             ),
+            "scan_mode": flags["scan_mode"],
             "strict_mode": flags["strict_mode"],
             "require_selfie": flags["require_selfie"],
             "require_gps": flags["require_gps"],
@@ -8318,7 +8606,7 @@ def _patrol_status_payload(user: User) -> dict:
             "can_start": can_start,
             "can_scan": can_scan,
         },
-        "scan_modes": ["qr", "nfc"],
+        "scan_modes": [flags["scan_mode"]],
         "checkpoints": checkpoint_rows,
         "history": history,
     }
@@ -8353,6 +8641,7 @@ def _client_patrol_ensure_route(
     site_id: int,
     client_id: int,
     name: str | None = None,
+    scan_mode: str | None = None,
     strict_mode: int | None = None,
     require_selfie: int | None = None,
     require_gps: int | None = None,
@@ -8361,9 +8650,15 @@ def _client_patrol_ensure_route(
     now_ts = _now_ts()
     route = _client_patrol_route_for_site(site_id, client_id)
     route_name = (name or "").strip() or "Guard Tour Route"
+    scan_mode_val = _normalize_patrol_scan_mode(
+        scan_mode if scan_mode is not None else _row_get(route, "scan_mode", PATROL_SCAN_MODE_QR),
+        PATROL_SCAN_MODE_QR,
+    )
     strict_val = 1 if int(strict_mode or 0) == 1 else 0
     require_selfie_val = 1 if int(require_selfie or 0) == 1 else 0
-    require_gps_val = 1 if int(require_gps if require_gps is not None else 1) == 1 else 0
+    if scan_mode_val == PATROL_SCAN_MODE_QR:
+        require_selfie_val = 1
+    require_gps_val = 1 if int(require_gps if require_gps is not None else 0) == 1 else 0
     interval_val = int(min_scan_interval_seconds or PATROL_MIN_SCAN_INTERVAL_SECONDS)
     if interval_val < 0:
         interval_val = 0
@@ -8373,12 +8668,13 @@ def _client_patrol_ensure_route(
             conn.execute(
                 """
                 UPDATE patrol_routes
-                SET name = ?, strict_mode = ?, require_selfie = ?, require_gps = ?,
+                SET name = ?, scan_mode = ?, strict_mode = ?, require_selfie = ?, require_gps = ?,
                     min_scan_interval_seconds = ?, is_active = 1, updated_at = ?
                 WHERE id = ?
                 """,
                 (
                     route_name,
+                    scan_mode_val,
                     strict_val,
                     require_selfie_val,
                     require_gps_val,
@@ -8393,15 +8689,16 @@ def _client_patrol_ensure_route(
                 """
                 INSERT INTO patrol_routes (
                     client_id, site_id, shift_id, name, description,
-                    strict_mode, require_selfie, require_gps, min_scan_interval_seconds,
+                    scan_mode, strict_mode, require_selfie, require_gps, min_scan_interval_seconds,
                     is_active, created_at, updated_at
-                ) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+                ) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
                 """,
                 (
                     client_id,
                     site_id,
                     route_name,
                     "Route patroli aktif untuk client site.",
+                    scan_mode_val,
                     strict_val,
                     require_selfie_val,
                     require_gps_val,
@@ -8438,6 +8735,72 @@ def _client_patrol_checkpoint_rows(route_id: int, include_inactive: bool = False
         )
         return [dict(row) for row in cur.fetchall()]
     finally:
+        conn.close()
+
+
+def _client_patrol_clear_checkpoint_gps(route_id: int) -> None:
+    if route_id <= 0:
+        return
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "patrol_checkpoints"):
+            return
+        conn.execute(
+            """
+            UPDATE patrol_checkpoints
+            SET latitude = NULL,
+                longitude = NULL,
+                radius_meters = NULL,
+                updated_at = ?
+            WHERE route_id = ?
+            """,
+            (_now_ts(), route_id),
+        )
+    finally:
+        conn.commit()
+        conn.close()
+
+
+def _client_patrol_sync_checkpoint_markers(route_id: int, scan_mode: str) -> None:
+    if route_id <= 0:
+        return
+    mode = _normalize_patrol_scan_mode(scan_mode, PATROL_SCAN_MODE_QR)
+    checkpoints = _client_patrol_checkpoint_rows(route_id, include_inactive=True)
+    if not checkpoints:
+        return
+    now_ts = _now_ts()
+    conn = _db_connect()
+    try:
+        for cp in checkpoints:
+            cp_id = int(_row_get(cp, "id", 0) or 0)
+            if cp_id <= 0:
+                continue
+            if mode == PATROL_SCAN_MODE_QR:
+                active_code = (_row_get(cp, "qr_code", "") or "").strip()
+                if not active_code or _patrol_marker_code_exists(active_code, exclude_checkpoint_id=cp_id):
+                    active_code = _patrol_generate_unique_marker_code(exclude_checkpoint_id=cp_id)
+                conn.execute(
+                    """
+                    UPDATE patrol_checkpoints
+                    SET qr_code = ?, nfc_tag = NULL, updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (active_code, now_ts, cp_id),
+                )
+            else:
+                active_code = (_row_get(cp, "nfc_tag", "") or "").strip()
+                if not active_code or _patrol_marker_code_exists(active_code, exclude_checkpoint_id=cp_id):
+                    active_code = _patrol_generate_unique_marker_code(exclude_checkpoint_id=cp_id)
+                conn.execute(
+                    """
+                    UPDATE patrol_checkpoints
+                    SET qr_code = NULL, nfc_tag = ?, updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (active_code, now_ts, cp_id),
+                )
+    finally:
+        conn.commit()
         conn.close()
 
 
@@ -8685,6 +9048,21 @@ def _client_patrol_dashboard_payload(
     max_limit = PATROL_MAX_CHECKPOINTS
     current_count = len(checkpoints)
     over_limit = current_count > max_limit
+    route_flags = (
+        _patrol_security_flags(route)
+        if route
+        else {
+            "scan_mode": PATROL_SCAN_MODE_QR,
+            "strict_mode": False,
+            "require_selfie": False,
+            "require_gps": False,
+            "min_scan_interval_seconds": PATROL_MIN_SCAN_INTERVAL_SECONDS,
+        }
+    )
+    scan_mode = _normalize_patrol_scan_mode(route_flags.get("scan_mode"), PATROL_SCAN_MODE_QR)
+    gps_required = bool(route_flags.get("require_gps"))
+    marker_key = "qr_code" if scan_mode == PATROL_SCAN_MODE_QR else "nfc_tag"
+    marker_label = "QR / Barcode ID" if scan_mode == PATROL_SCAN_MODE_QR else "NFC Tag"
     return {
         "permissions": {
             "can_manage": bool(can_manage),
@@ -8693,14 +9071,11 @@ def _client_patrol_dashboard_payload(
             "route": {
                 "id": int(route["id"]) if route else None,
                 "name": (route.get("name") if route else "") or "Guard Tour Route",
-                "strict_mode": bool(int(route.get("strict_mode") or 0)) if route else False,
-                "require_selfie": bool(int(route.get("require_selfie") or 0)) if route else False,
-                "require_gps": bool(int(route.get("require_gps") or 1)) if route else True,
-                "min_scan_interval_seconds": int(
-                    route.get("min_scan_interval_seconds") or PATROL_MIN_SCAN_INTERVAL_SECONDS
-                )
-                if route
-                else PATROL_MIN_SCAN_INTERVAL_SECONDS,
+                "scan_mode": scan_mode,
+                "strict_mode": bool(route_flags.get("strict_mode")),
+                "require_selfie": bool(route_flags.get("require_selfie")),
+                "require_gps": gps_required,
+                "min_scan_interval_seconds": int(route_flags.get("min_scan_interval_seconds") or PATROL_MIN_SCAN_INTERVAL_SECONDS),
                 "site_name": site.get("name") or "-",
             },
             "checkpoints": [
@@ -8708,11 +9083,18 @@ def _client_patrol_dashboard_payload(
                     "id": int(cp.get("id") or 0),
                     "nama": cp.get("name") or "-",
                     "urutan": int(cp.get("sequence_no") or 0),
+                    "scan_mode": scan_mode,
+                    "marker_label": marker_label,
+                    "marker_value": (cp.get(marker_key) or "").strip(),
                     "qr_code": cp.get("qr_code") or "",
                     "nfc_tag": cp.get("nfc_tag") or "",
-                    "latitude": cp.get("latitude"),
-                    "longitude": cp.get("longitude"),
-                    "radius_meters": int(cp.get("radius_meters") or PATROL_DEFAULT_CHECKPOINT_RADIUS_METERS),
+                    "latitude": cp.get("latitude") if gps_required else None,
+                    "longitude": cp.get("longitude") if gps_required else None,
+                    "radius_meters": (
+                        int(cp.get("radius_meters") or PATROL_DEFAULT_CHECKPOINT_RADIUS_METERS)
+                        if gps_required
+                        else None
+                    ),
                 }
                 for cp in checkpoints
             ],

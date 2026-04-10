@@ -212,11 +212,11 @@
               </div>
             </article>
             {% set current_policy = policies[0] if policies else None %}
-            <div class="policy-card policy-card-main">
-              <div class="policy-head">
+            <article class="panel policy-card policy-card-main panel-collapsible is-collapsed" id="policy">
+              <div class="panel-head policy-head">
                 <div>
-                  <div class="policy-title">Policy Aktif</div>
-                  <div class="policy-meta">Informasi policy yang terpasang untuk site ini.</div>
+                  <h3>Policy Aktif</h3>
+                  <div class="panel-sub">Informasi dan pengaturan policy untuk site ini.</div>
                 </div>
                 {% if current_policy %}
                 <span class="policy-pill {% if current_policy.effective_to and current_policy.effective_to < today %}muted{% else %}ok{% endif %}">
@@ -235,14 +235,12 @@
               {% else %}
               <div class="empty-state">Belum ada policy untuk site ini.</div>
               {% endif %}
-            </div>
-            <div class="policy-card policy-card-main panel-collapsible is-collapsed" id="policy-edit-card">
-              <div class="policy-head">
+              <div class="panel-head panel-head-collapsible">
                 <div>
                   <div class="policy-title">Edit Policy</div>
                   <div class="policy-meta">Perbarui policy untuk site ini.</div>
                 </div>
-                <button class="mini-btn collapse-toggle" type="button" data-collapse-toggle="policy-edit-card" aria-expanded="false" aria-controls="policy-edit-body" aria-label="Toggle edit policy">
+                <button class="mini-btn collapse-toggle" type="button" data-collapse-toggle="policy" aria-expanded="false" aria-controls="policy-edit-body" aria-label="Toggle edit policy">
                   <span class="icon-burger" aria-hidden="true"><span></span><span></span><span></span></span>
                   <span class="icon-minus" aria-hidden="true"></span>
                 </button>
@@ -294,14 +292,14 @@
                         Wajib selfie
                       </label>
                     </div>
-                  <div class="form-row toggle-divider">
-                    <label class="toggle-line">
-                      <input type="checkbox" name="auto_checkout" value="1" {% if current_policy.auto_checkout %}checked{% endif %} />
-                      Checkout otomatis
-                    </label>
+                    <div class="form-row toggle-divider">
+                      <label class="toggle-line">
+                        <input type="checkbox" name="auto_checkout" value="1" {% if current_policy.auto_checkout %}checked{% endif %} />
+                        Checkout otomatis
+                      </label>
+                    </div>
+                    <div class="toggle-note">Toggle ini hanya penanda bahwa checkout otomatis tersedia; tidak memicu jalur/logic lain di klien.</div>
                   </div>
-                  <div class="toggle-note">Toggle ini hanya penanda bahwa checkout otomatis tersedia; tidak memicu jalur/logic lain di klien.</div>
-                </div>
                   <div class="form-actions">
                     <button class="btn primary" type="submit">Simpan</button>
                   </div>
@@ -368,7 +366,7 @@
                 <div class="panel-sub">Pengaturan policy hanya untuk Client Admin.</div>
                 {% endif %}
               </div>
-            </div>
+            </article>
           </div>
         </section>
 
@@ -835,7 +833,7 @@
               <div class="panel-head">
                 <div>
                   <h3>Setup Patroli</h3>
-                  <div class="panel-sub">Maksimal 30 checkpoint untuk versi ini. Jika melebihi limit tampilkan upgrade Pro+.</div>
+                  <div class="panel-sub">Maksimal 30 checkpoint untuk versi ini.</div>
                 </div>
                 <span class="panel-badge" id="patrolCheckpointBadge">0/30</span>
               </div>
@@ -852,6 +850,20 @@
                     <input class="input" id="patrol-min-interval" name="min_scan_interval_seconds" type="number" min="0" max="3600" />
                   </div>
                   <div class="form-row">
+                    <label class="label">Mode Marker Checkpoint</label>
+                    <div class="patrol-toggle-stack">
+                      <label class="toggle-line">
+                        <input type="radio" id="patrol-route-scan-qr" name="scan_mode" value="qr" checked />
+                        Barcode
+                      </label>
+                      <label class="toggle-line">
+                        <input type="radio" id="patrol-route-scan-nfc" name="scan_mode" value="nfc" />
+                        NFC Tag
+                      </label>
+                    </div>
+                    <div class="panel-sub" id="patrol-selfie-rule-note">Mode Barcode: selfie otomatis wajib.</div>
+                  </div>
+                  <div class="form-row">
                     <label class="label">Mode Keamanan</label>
                     <div class="patrol-toggle-stack">
                       <label class="toggle-line">
@@ -860,10 +872,10 @@
                       </label>
                       <label class="toggle-line">
                         <input type="checkbox" id="patrol-route-selfie" name="require_selfie" value="1" />
-                        Wajib selfie per checkpoint
+                        Wajib selfie per checkpoint (opsional untuk mode NFC)
                       </label>
                       <label class="toggle-line">
-                        <input type="checkbox" id="patrol-route-gps" name="require_gps" value="1" checked />
+                        <input type="checkbox" id="patrol-route-gps" name="require_gps" value="1" />
                         Wajib GPS valid
                       </label>
                     </div>
@@ -880,23 +892,18 @@
                     <label class="label" for="patrol-checkpoint-name">Nama Checkpoint</label>
                     <input class="input" id="patrol-checkpoint-name" name="name" type="text" placeholder="Contoh: Gerbang Utama" required />
                   </div>
-                  <div class="form-row">
-                    <label class="label" for="patrol-checkpoint-qr">QR / Barcode ID</label>
-                    <input class="input" id="patrol-checkpoint-qr" name="qr_code" type="text" placeholder="Opsional" />
+                  <div class="form-row full">
+                    <div class="panel-sub">Kode unik 10 karakter dibuat otomatis sesuai mode marker aktif saat checkpoint disimpan.</div>
                   </div>
-                  <div class="form-row">
-                    <label class="label" for="patrol-checkpoint-nfc">NFC Tag</label>
-                    <input class="input" id="patrol-checkpoint-nfc" name="nfc_tag" type="text" placeholder="Opsional" />
-                  </div>
-                  <div class="form-row">
+                  <div class="form-row is-hidden" data-patrol-gps-field="1">
                     <label class="label" for="patrol-checkpoint-lat">Latitude</label>
                     <input class="input" id="patrol-checkpoint-lat" name="latitude" type="text" placeholder="-6.200000" />
                   </div>
-                  <div class="form-row">
+                  <div class="form-row is-hidden" data-patrol-gps-field="1">
                     <label class="label" for="patrol-checkpoint-lng">Longitude</label>
                     <input class="input" id="patrol-checkpoint-lng" name="longitude" type="text" placeholder="106.816666" />
                   </div>
-                  <div class="form-row">
+                  <div class="form-row is-hidden" data-patrol-gps-field="1">
                     <label class="label" for="patrol-checkpoint-radius">Radius (meter)</label>
                     <input class="input" id="patrol-checkpoint-radius" name="radius_meters" type="number" min="1" placeholder="35" />
                   </div>
@@ -918,6 +925,11 @@
                 </div>
                 <div class="patrol-checkpoint-list" id="patrolCheckpointList" aria-live="polite"></div>
                 <div class="empty-state patrol-empty-state" id="patrolCheckpointEmpty">Belum ada checkpoint. Tambahkan checkpoint pertama untuk memulai route.</div>
+                <div class="table-pagination" id="patrolCheckpointPagination" style="display:none;">
+                  <button class="btn ghost" type="button" data-page="prev">Prev</button>
+                  <span class="page-info" data-page-info>Page 1 of 1</span>
+                  <button class="btn ghost" type="button" data-page="next">Next ....</button>
+                </div>
               </div>
             </article>
 
@@ -943,15 +955,20 @@
               </div>
               <div class="patrol-recap-list" id="patrolRecapList"></div>
               <div class="empty-state patrol-empty-state" id="patrolRecapEmpty">Belum ada data rekap patroli.</div>
+              <div class="table-pagination" id="patrolRecapPagination" style="display:none;">
+                <button class="btn ghost" type="button" data-page="prev">Prev</button>
+                <span class="page-info" data-page-info>Page 1 of 1</span>
+                <button class="btn ghost" type="button" data-page="next">Next ....</button>
+              </div>
             </article>
 
-            <article class="panel patrol-structure-panel" id="patrol-structure">
+            <article class="panel patrol-structure-panel is-hidden" id="patrol-structure" hidden>
               <div class="panel-head">
                 <div>
                   <h3>Data Structure Snapshot</h3>
-                  <div class="panel-sub">Fondasi backend untuk analisa lanjutan (siap dipakai dashboard admin utama).</div>
+                  <div class="panel-sub">Preview diagnostik backend (belum menjadi kontrol operasional).</div>
                 </div>
-                <span class="panel-badge muted">JSON</span>
+                <span class="panel-badge muted">JSON PREVIEW</span>
               </div>
               <pre class="patrol-structure-preview" id="patrolStructurePreview">{}</pre>
             </article>

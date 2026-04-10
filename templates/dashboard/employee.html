@@ -406,7 +406,7 @@
               </div>
             </div>
             <div class="mode-chips patrol-mode-chips" id="patrolModeChips" role="group" aria-label="Metode scan checkpoint">
-              <button class="chip patrol-mode-chip active" type="button" data-patrol-mode="qr" aria-pressed="true">Scan QR / Barcode</button>
+              <button class="chip patrol-mode-chip active" type="button" data-patrol-mode="qr" aria-pressed="true">Barcode</button>
               <button class="chip patrol-mode-chip" type="button" data-patrol-mode="nfc" aria-pressed="false">NFC Tag</button>
             </div>
             <div class="patrol-scan-panel" id="patrolScanPanelQr">
@@ -440,7 +440,7 @@
                 </div>
                 <input type="file" id="patrolSelfieFile" class="input" accept="image/*" capture="user" />
                 <img id="patrolSelfiePreview" class="preview patrol-selfie-preview" alt="" />
-                <div class="muted" id="patrolSelfieHint">Selfie opsional, menjadi wajib saat strict mode aktif.</div>
+                <div class="muted" id="patrolSelfieHint">Selfie opsional, menjadi wajib jika mode selfie aktif.</div>
               </article>
             </div>
             <button class="btn primary full" id="btnPatrolSubmit" type="button">Validasi Checkpoint Berikutnya</button>
@@ -455,6 +455,11 @@
             </div>
             <div class="patrol-checkpoint-list" id="patrolCheckpointList">
               <div class="muted">Belum ada data checkpoint.</div>
+            </div>
+            <div class="patrol-list-pagination" id="patrolCheckpointPagination" style="display:none;">
+              <button class="btn ghost" type="button" data-page="prev">Prev</button>
+              <span class="page-info" data-page-info>Page 1 of 1</span>
+              <button class="btn ghost" type="button" data-page="next">Next ....</button>
             </div>
           </div>
 
@@ -473,11 +478,6 @@
             </div>
           </div>
 
-          <div class="card mobile-card patrol-note-card">
-            <div class="muted" id="patrolUpgradeHint">
-              Batas standar rute adalah 30 checkpoint. Jika lebih, gunakan versi PRO+.
-            </div>
-          </div>
         </section>
       </div>
     </div>
@@ -512,8 +512,8 @@
         <button class="nav-btn" data-tab="3" type="button">
           <span class="nav-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none">
-              <path d="M12 2a1 1 0 0 1 1 1v3h3a1 1 0 0 1 0 2h-3v3a1 1 0 0 1-2 0V8H8a1 1 0 0 1 0-2h3V3a1 1 0 0 1 1-1Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-              <path d="M6 12h12v9H6z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M12 4l5 2.25v5.75c0 3.5-2.3 6.9-5 8-2.7-1.1-5-4.5-5-8V6.25L12 4z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+              <path d="M9 12l2 2 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
             </svg>
           </span>
           <span class="nav-label">Patroli</span>

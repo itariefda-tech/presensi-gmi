@@ -259,7 +259,121 @@ syncHero();
 const heroTrack = document.getElementById("heroTrack");
 const heroTabs = Array.from(document.querySelectorAll("[data-hero-go]"));
 const heroPaneCount = heroTrack ? heroTrack.children.length : 0;
+const heroGalleryMainImage = document.getElementById("heroGalleryMainImage");
+const heroGalleryData = document.getElementById("heroGalleryData");
+const heroGalleryFileInput = document.getElementById("heroGalleryFileInput");
+const heroGalleryCameraInput = document.getElementById("heroGalleryCameraInput");
+const heroGalleryFileBtn = document.getElementById("heroGalleryFileBtn");
+const heroGalleryCameraBtn = document.getElementById("heroGalleryCameraBtn");
+const heroGalleryUploadStatus = document.getElementById("heroGalleryUploadStatus");
+const HERO_GALLERY_TAB_INDEX = 2;
+const HERO_GALLERY_AUTO_SLIDE_MS = 5000;
+let heroGalleryImages = [];
 let heroIndex = 0;
+let heroGalleryIndex = 0;
+let heroGalleryIntervalId = null;
+
+if (heroGalleryData){
+  try {
+    const parsed = JSON.parse(heroGalleryData.textContent || "[]");
+    if (Array.isArray(parsed)){
+      heroGalleryImages = parsed.filter(src => typeof src === "string" && src.trim() !== "");
+    }
+  } catch (_err) {
+    heroGalleryImages = [];
+  }
+}
+
+if (!heroGalleryImages.length && heroGalleryMainImage?.getAttribute("src")){
+  heroGalleryImages = [heroGalleryMainImage.getAttribute("src")];
+}
+
+function renderHeroGalleryImage(){
+  if (!heroGalleryMainImage) return;
+  if (!heroGalleryImages.length){
+    heroGalleryMainImage.removeAttribute("src");
+    heroGalleryMainImage.classList.add("is-hidden");
+    return;
+  }
+  heroGalleryMainImage.classList.remove("is-hidden");
+  heroGalleryMainImage.src = heroGalleryImages[heroGalleryIndex];
+}
+
+function stopHeroGalleryAutoSlide(){
+  if (heroGalleryIntervalId !== null){
+    window.clearInterval(heroGalleryIntervalId);
+    heroGalleryIntervalId = null;
+  }
+}
+
+function startHeroGalleryAutoSlide(){
+  stopHeroGalleryAutoSlide();
+  if (!heroGalleryMainImage || heroGalleryImages.length <= 1 || heroIndex !== HERO_GALLERY_TAB_INDEX){
+    return;
+  }
+  heroGalleryIntervalId = window.setInterval(() => {
+    heroGalleryIndex = (heroGalleryIndex + 1) % heroGalleryImages.length;
+    renderHeroGalleryImage();
+  }, HERO_GALLERY_AUTO_SLIDE_MS);
+}
+
+function setHeroGalleryUploadStatus(message, state){
+  if (!heroGalleryUploadStatus) return;
+  heroGalleryUploadStatus.textContent = message || "";
+  if (state){
+    heroGalleryUploadStatus.dataset.state = state;
+  } else {
+    delete heroGalleryUploadStatus.dataset.state;
+  }
+}
+
+function addHeroGalleryImage(nextUrl){
+  if (typeof nextUrl !== "string" || !nextUrl.trim()) return;
+  const cleanUrl = nextUrl.trim();
+  if (!heroGalleryImages.includes(cleanUrl)){
+    heroGalleryImages.push(cleanUrl);
+  }
+  if (heroGalleryImages.length === 1){
+    heroGalleryIndex = 0;
+  }
+  renderHeroGalleryImage();
+  if (heroIndex === HERO_GALLERY_TAB_INDEX){
+    startHeroGalleryAutoSlide();
+  }
+}
+
+async function uploadHeroGalleryFile(file){
+  if (!file) return;
+  const formData = new FormData();
+  formData.append("image", file);
+  setHeroGalleryUploadStatus("Mengunggah gambar...", "loading");
+  try {
+    const response = await fetch("/api/hero-gallery/upload", {
+      method: "POST",
+      body: formData,
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.ok){
+      throw new Error(payload.message || "Upload gambar gagal.");
+    }
+    addHeroGalleryImage(payload.url || "");
+    setHeroGalleryUploadStatus("Upload berhasil.", "success");
+  } catch (err){
+    const message = err instanceof Error ? err.message : "Upload gambar gagal.";
+    setHeroGalleryUploadStatus(message, "error");
+  }
+}
+
+function bindHeroGalleryUploadButton(button, input){
+  if (!button || !input) return;
+  button.addEventListener("click", () => input.click());
+  input.addEventListener("change", async () => {
+    const file = input.files && input.files[0];
+    input.value = "";
+    if (!file) return;
+    await uploadHeroGalleryFile(file);
+  });
+}
 
 function heroGo(i){
   if (!heroTrack || !heroPaneCount) return;
@@ -269,12 +383,30 @@ function heroGo(i){
   heroTabs.forEach(btn => {
     btn.classList.toggle("active", parseInt(btn.dataset.heroGo, 10) === heroIndex);
   });
+  if (heroIndex === HERO_GALLERY_TAB_INDEX){
+    startHeroGalleryAutoSlide();
+  } else {
+    stopHeroGalleryAutoSlide();
+  }
 }
 
 heroTabs.forEach(btn => {
   btn.addEventListener("click", () => {
     heroGo(parseInt(btn.dataset.heroGo, 10));
   });
+});
+
+renderHeroGalleryImage();
+bindHeroGalleryUploadButton(heroGalleryFileBtn, heroGalleryFileInput);
+bindHeroGalleryUploadButton(heroGalleryCameraBtn, heroGalleryCameraInput);
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden){
+    stopHeroGalleryAutoSlide();
+    return;
+  }
+  if (heroIndex === HERO_GALLERY_TAB_INDEX){
+    startHeroGalleryAutoSlide();
+  }
 });
 
 heroGo(0);

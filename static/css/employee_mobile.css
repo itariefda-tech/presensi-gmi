@@ -2119,6 +2119,17 @@ html[data-theme="light"] .nav-btn.nav-logout{
   display: grid;
   gap: 8px;
 }
+.patrol-list-pagination{
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+.patrol-list-pagination .page-info{
+  font-size: 11px;
+  color: var(--muted);
+}
 .patrol-checkpoint-item{
   display: flex;
   align-items: flex-start;

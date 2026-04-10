@@ -13,7 +13,16 @@
     dragCheckpointId: null,
     loading: false,
     initialized: false,
+    gpsRequired: false,
+    scanMode: "qr",
+    editIdleTimer: null,
+    editIdleFormId: 0,
+    checkpointPage: 1,
+    recapPage: 1,
   };
+
+  const PATROL_EDIT_IDLE_CLOSE_MS = 10000;
+  const PATROL_LIST_PAGE_SIZE = 5;
 
   function scrollToTop(){
     const root = document.scrollingElement || document.documentElement;
@@ -738,6 +747,51 @@
     return patrolPane()?.dataset.canManage === "1";
   }
 
+  function patrolNormalizeScanMode(value){
+    return String(value || "").trim().toLowerCase() === "nfc" ? "nfc" : "qr";
+  }
+
+  function patrolSyncScanModeFields(mode, options = {}){
+    const normalized = patrolNormalizeScanMode(mode);
+    patrolState.scanMode = normalized;
+    const routeForm = document.getElementById("patrolRouteForm");
+    if (routeForm) {
+      routeForm.querySelectorAll("input[name='scan_mode']").forEach((input) => {
+        input.checked = input.value === normalized;
+      });
+      const selfieInput = routeForm.querySelector("[name='require_selfie']");
+      if (selfieInput) {
+        if (normalized === "qr") {
+          selfieInput.checked = true;
+          selfieInput.disabled = true;
+        } else {
+          selfieInput.disabled = false;
+        }
+      }
+    }
+    const ruleNote = document.getElementById("patrol-selfie-rule-note");
+    if (ruleNote) {
+      ruleNote.textContent = normalized === "qr"
+        ? "Mode Barcode: selfie otomatis wajib."
+        : "Mode NFC: selfie boleh wajib atau opsional.";
+    }
+  }
+
+  function patrolSyncGpsFields(enabled, options = {}){
+    const isEnabled = Boolean(enabled);
+    const shouldClear = Boolean(options.clearValues);
+    const rows = document.querySelectorAll("[data-patrol-gps-field='1']");
+    rows.forEach((row) => {
+      row.classList.toggle("is-hidden", !isEnabled);
+      row.querySelectorAll("input, select, textarea").forEach((input) => {
+        input.disabled = !isEnabled;
+        if (!isEnabled && shouldClear) {
+          input.value = "";
+        }
+      });
+    });
+  }
+
   function patrolSetFeedback(message, type = "muted"){
     const el = document.getElementById("patrolFeedbackMessage");
     if (!el) return;
@@ -745,6 +799,32 @@
     el.classList.toggle("is-error", type === "error");
     el.classList.toggle("is-success", type === "success");
     el.classList.toggle("is-muted", type === "muted");
+  }
+
+  function patrolClearEditIdleTimer(){
+    if (patrolState.editIdleTimer) {
+      window.clearTimeout(patrolState.editIdleTimer);
+      patrolState.editIdleTimer = null;
+    }
+    patrolState.editIdleFormId = 0;
+  }
+
+  function patrolScheduleEditIdleTimer(form){
+    if (!form) return;
+    const checkpointId = Number(form.dataset.id || 0);
+    if (!checkpointId) return;
+    patrolClearEditIdleTimer();
+    patrolState.editIdleFormId = checkpointId;
+    patrolState.editIdleTimer = window.setTimeout(async () => {
+      const list = document.getElementById("patrolCheckpointList");
+      if (!list) return;
+      const activeForm = list.querySelector(`.patrol-cp-edit-form[data-id="${checkpointId}"]`);
+      if (!activeForm || activeForm.classList.contains("is-hidden")) return;
+      const saved = await patrolSubmitCheckpointEditForm(activeForm, { autoSave: true });
+      if (saved) {
+        patrolToggleCheckpointEditor(0, false);
+      }
+    }, PATROL_EDIT_IDLE_CLOSE_MS);
   }
 
   function patrolFormatDate(value){
@@ -795,6 +875,21 @@
     if (!totalValue || totalValue <= 0) return 0;
     const percent = Math.round((doneValue / totalValue) * 100);
     return Math.max(0, Math.min(100, percent));
+  }
+
+  function patrolUpdatePager(pager, page, totalPages){
+    if (!pager) return;
+    const prevBtn = pager.querySelector("[data-page='prev']");
+    const nextBtn = pager.querySelector("[data-page='next']");
+    const info = pager.querySelector("[data-page-info]");
+    if (!totalPages || totalPages <= 1) {
+      pager.style.display = "none";
+      return;
+    }
+    pager.style.display = "flex";
+    if (info) info.textContent = `Page ${page} of ${totalPages}`;
+    if (prevBtn) prevBtn.disabled = page <= 1;
+    if (nextBtn) nextBtn.disabled = page >= totalPages;
   }
 
   async function patrolApi(path, options = {}){
@@ -850,6 +945,8 @@
     const canManage = patrolCanManage();
     const setup = payload?.setup || {};
     const route = setup.route || {};
+    const scanMode = patrolNormalizeScanMode(route.scan_mode || patrolState.scanMode || "qr");
+    const activeMarkerLabel = scanMode === "nfc" ? "NFC Tag" : "Barcode";
     const checkpoints = Array.isArray(setup.checkpoints) ? setup.checkpoints : [];
     const count = Number(setup.checkpoint_count || checkpoints.length || 0);
     const limit = Number(setup.checkpoint_limit || 30);
@@ -859,20 +956,25 @@
     const strictInput = document.getElementById("patrol-route-strict");
     const selfieInput = document.getElementById("patrol-route-selfie");
     const gpsInput = document.getElementById("patrol-route-gps");
+    const gpsEnabled = Boolean(route.require_gps ?? false);
     const badge = document.getElementById("patrolCheckpointBadge");
     const heroCount = document.getElementById("patrolHeroCheckpointCount");
     const submitBtn = document.getElementById("patrolCheckpointSubmitBtn");
     const limitMessage = document.getElementById("patrolLimitMessage");
     const list = document.getElementById("patrolCheckpointList");
     const empty = document.getElementById("patrolCheckpointEmpty");
+    const pager = document.getElementById("patrolCheckpointPagination");
 
     if (routeNameInput) routeNameInput.value = route.name || "Guard Tour Route";
     if (intervalInput) intervalInput.value = String(route.min_scan_interval_seconds ?? 45);
     if (strictInput) strictInput.checked = Boolean(route.strict_mode);
     if (selfieInput) selfieInput.checked = Boolean(route.require_selfie);
-    if (gpsInput) gpsInput.checked = Boolean(route.require_gps ?? true);
+    if (gpsInput) gpsInput.checked = gpsEnabled;
+    patrolSyncScanModeFields(scanMode);
     if (badge) badge.textContent = `${count}/${limit}`;
     if (heroCount) heroCount.textContent = `${count}/${limit}`;
+    patrolState.gpsRequired = gpsEnabled;
+    patrolSyncGpsFields(gpsEnabled);
 
     if (submitBtn) {
       submitBtn.disabled = !canManage || limitReached;
@@ -882,7 +984,8 @@
     if (limitMessage) {
       const customMessage = setup.upgrade_message || "";
       if (customMessage || limitReached) {
-        limitMessage.textContent = customMessage || "Checkpoint maksimal 30 titik. Upgrade ke Pro+ untuk menambah kapasitas.";
+        const upgradeMessage = customMessage || "Checkpoint maksimal 30 titik. Upgrade ke Pro+ untuk menambah kapasitas.";
+        limitMessage.textContent = `${upgradeMessage} (MOCK CTA: alur upgrade belum tersedia di aplikasi).`;
         limitMessage.classList.add("is-warning");
       } else {
         limitMessage.textContent = "";
@@ -894,26 +997,65 @@
     if (!checkpoints.length) {
       list.innerHTML = "";
       empty.classList.remove("is-hidden");
+      patrolState.checkpointPage = 1;
+      patrolUpdatePager(pager, 1, 0);
       return;
     }
 
+    const checkpointTotalPages = Math.max(1, Math.ceil(checkpoints.length / PATROL_LIST_PAGE_SIZE));
+    if (patrolState.checkpointPage > checkpointTotalPages) {
+      patrolState.checkpointPage = checkpointTotalPages;
+    }
+    if (patrolState.checkpointPage < 1) {
+      patrolState.checkpointPage = 1;
+    }
+    const checkpointStart = (patrolState.checkpointPage - 1) * PATROL_LIST_PAGE_SIZE;
+    const checkpointRows = checkpoints.slice(checkpointStart, checkpointStart + PATROL_LIST_PAGE_SIZE);
+
     empty.classList.add("is-hidden");
-    list.innerHTML = checkpoints.map((checkpoint) => {
+    list.innerHTML = checkpointRows.map((checkpoint) => {
       const checkpointId = Number(checkpoint.id || 0);
       const name = escapeHtml(checkpoint.nama || "-");
       const sequence = Number(checkpoint.urutan || 0);
-      const qrCode = escapeHtml(checkpoint.qr_code || "");
+      const qrCode = escapeHtml(checkpoint.qr_code || checkpoint.barcode_code || "");
       const nfcTag = escapeHtml(checkpoint.nfc_tag || "");
-      const latitude = checkpoint.latitude ?? "";
-      const longitude = checkpoint.longitude ?? "";
-      const radiusMeters = checkpoint.radius_meters ?? "";
+      const activeMarkerCode = scanMode === "nfc" ? nfcTag : qrCode;
+      const latitudeValue = escapeHtml(
+        checkpoint.latitude === null || checkpoint.latitude === undefined
+          ? ""
+          : String(checkpoint.latitude)
+      );
+      const longitudeValue = escapeHtml(
+        checkpoint.longitude === null || checkpoint.longitude === undefined
+          ? ""
+          : String(checkpoint.longitude)
+      );
+      const radiusValue = escapeHtml(
+        checkpoint.radius_meters === null || checkpoint.radius_meters === undefined
+          ? ""
+          : String(checkpoint.radius_meters)
+      );
+      const gpsEditFields = gpsEnabled ? `
+              <div class="form-row">
+                <label class="label">Latitude</label>
+                <input class="input" name="latitude" type="text" value="${latitudeValue}" placeholder="-6.200000" required />
+              </div>
+              <div class="form-row">
+                <label class="label">Longitude</label>
+                <input class="input" name="longitude" type="text" value="${longitudeValue}" placeholder="106.816666" required />
+              </div>
+              <div class="form-row">
+                <label class="label">Radius (meter)</label>
+                <input class="input" name="radius_meters" type="number" min="1" value="${radiusValue}" placeholder="35" />
+              </div>
+      ` : "";
       return `
         <article class="patrol-cp-item" data-checkpoint-id="${checkpointId}" draggable="${canManage ? "true" : "false"}">
           <div class="patrol-cp-top">
             <div class="patrol-cp-seq">#${sequence}</div>
             <div class="patrol-cp-main">
               <div class="patrol-cp-name">${name}</div>
-              <div class="patrol-cp-meta">QR: ${qrCode || "-"} | NFC: ${nfcTag || "-"}</div>
+              <div class="patrol-cp-meta">${activeMarkerLabel}: ${activeMarkerCode || "-"}</div>
             </div>
             ${canManage ? `
             <div class="patrol-cp-actions">
@@ -930,25 +1072,10 @@
                 <input class="input" name="name" type="text" value="${name}" required />
               </div>
               <div class="form-row">
-                <label class="label">QR / Barcode ID</label>
-                <input class="input" name="qr_code" type="text" value="${qrCode}" />
+                <label class="label">${activeMarkerLabel} (otomatis)</label>
+                <input class="input patrol-marker-readonly" type="text" value="${activeMarkerCode}" readonly />
               </div>
-              <div class="form-row">
-                <label class="label">NFC Tag</label>
-                <input class="input" name="nfc_tag" type="text" value="${nfcTag}" />
-              </div>
-              <div class="form-row">
-                <label class="label">Latitude</label>
-                <input class="input" name="latitude" type="text" value="${escapeHtml(latitude)}" placeholder="-6.200000" />
-              </div>
-              <div class="form-row">
-                <label class="label">Longitude</label>
-                <input class="input" name="longitude" type="text" value="${escapeHtml(longitude)}" placeholder="106.816666" />
-              </div>
-              <div class="form-row">
-                <label class="label">Radius (meter)</label>
-                <input class="input" name="radius_meters" type="number" min="1" placeholder="35" value="${escapeHtml(radiusMeters)}" />
-              </div>
+              ${gpsEditFields}
             </div>
             <div class="patrol-cp-edit-actions">
               <button class="btn primary" type="submit">Simpan</button>
@@ -960,7 +1087,10 @@
       `;
     }).join("");
 
-    patrolBindCheckpointDrag(canManage);
+    patrolSyncScanModeFields(scanMode);
+    patrolSyncGpsFields(gpsEnabled);
+    patrolUpdatePager(pager, patrolState.checkpointPage, checkpointTotalPages);
+    patrolBindCheckpointDrag(canManage && checkpointTotalPages === 1);
   }
 
   function patrolRenderMonitoring(payload){
@@ -1008,15 +1138,27 @@
     const totalEl = document.getElementById("patrolRecapTotal");
     const list = document.getElementById("patrolRecapList");
     const empty = document.getElementById("patrolRecapEmpty");
+    const pager = document.getElementById("patrolRecapPagination");
     if (totalEl) totalEl.textContent = `${total} sesi`;
     if (!list || !empty) return;
     if (!rows.length) {
       list.innerHTML = "";
       empty.classList.remove("is-hidden");
+      patrolState.recapPage = 1;
+      patrolUpdatePager(pager, 1, 0);
       return;
     }
+    const recapTotalPages = Math.max(1, Math.ceil(rows.length / PATROL_LIST_PAGE_SIZE));
+    if (patrolState.recapPage > recapTotalPages) {
+      patrolState.recapPage = recapTotalPages;
+    }
+    if (patrolState.recapPage < 1) {
+      patrolState.recapPage = 1;
+    }
+    const recapStart = (patrolState.recapPage - 1) * PATROL_LIST_PAGE_SIZE;
+    const recapRows = rows.slice(recapStart, recapStart + PATROL_LIST_PAGE_SIZE);
     empty.classList.add("is-hidden");
-    list.innerHTML = rows.map((row) => {
+    list.innerHTML = recapRows.map((row) => {
       const employee = escapeHtml(row.employee_name || row.employee_email || "-");
       const progressLabel = `${Number(row.checkpoint_tercapai || 0)} tercapai`;
       const missedLabel = `${Number(row.checkpoint_terlewat || 0)} terlewat`;
@@ -1039,6 +1181,7 @@
         </article>
       `;
     }).join("");
+    patrolUpdatePager(pager, patrolState.recapPage, recapTotalPages);
   }
 
   function patrolRenderStructure(payload){
@@ -1060,6 +1203,7 @@
   }
 
   function patrolApplyPayload(payload){
+    patrolClearEditIdleTimer();
     patrolState.payload = payload || {};
     patrolState.lastSyncAt = Date.now();
     patrolRenderHero(patrolState.payload);
@@ -1077,6 +1221,9 @@
       const mustOpen = shouldOpen && currentId === checkpointId;
       form.classList.toggle("is-hidden", !mustOpen);
     });
+    if (!shouldOpen) {
+      patrolClearEditIdleTimer();
+    }
   }
 
   async function patrolLoadDashboard({ silent = false } = {}){
@@ -1102,11 +1249,17 @@
   async function patrolSubmitRouteForm(form){
     if (!form) return;
     const submitBtn = form.querySelector("button[type='submit']");
+    const scanMode = patrolNormalizeScanMode(
+      form.querySelector("[name='scan_mode']:checked")?.value || patrolState.scanMode || "qr"
+    );
     const payload = {
       route_name: (form.querySelector("[name='route_name']")?.value || "").trim(),
       min_scan_interval_seconds: (form.querySelector("[name='min_scan_interval_seconds']")?.value || "").trim(),
+      scan_mode: scanMode,
       strict_mode: form.querySelector("[name='strict_mode']")?.checked ? 1 : 0,
-      require_selfie: form.querySelector("[name='require_selfie']")?.checked ? 1 : 0,
+      require_selfie: scanMode === "qr"
+        ? 1
+        : (form.querySelector("[name='require_selfie']")?.checked ? 1 : 0),
       require_gps: form.querySelector("[name='require_gps']")?.checked ? 1 : 0,
     };
     if (submitBtn) submitBtn.disabled = true;
@@ -1128,16 +1281,22 @@
   async function patrolSubmitCheckpointForm(form){
     if (!form) return;
     const submitBtn = form.querySelector("button[type='submit']");
+    const gpsRequired = Boolean(document.getElementById("patrol-route-gps")?.checked);
+    const latitude = (form.querySelector("[name='latitude']")?.value || "").trim();
+    const longitude = (form.querySelector("[name='longitude']")?.value || "").trim();
+    const radiusMeters = (form.querySelector("[name='radius_meters']")?.value || "").trim();
     const payload = {
       name: (form.querySelector("[name='name']")?.value || "").trim(),
-      qr_code: (form.querySelector("[name='qr_code']")?.value || "").trim(),
-      nfc_tag: (form.querySelector("[name='nfc_tag']")?.value || "").trim(),
-      latitude: (form.querySelector("[name='latitude']")?.value || "").trim(),
-      longitude: (form.querySelector("[name='longitude']")?.value || "").trim(),
-      radius_meters: (form.querySelector("[name='radius_meters']")?.value || "").trim(),
+      latitude: gpsRequired ? latitude : "",
+      longitude: gpsRequired ? longitude : "",
+      radius_meters: gpsRequired ? radiusMeters : "",
     };
     if (!payload.name) {
       patrolSetFeedback("Nama checkpoint wajib diisi.", "error");
+      return;
+    }
+    if (gpsRequired && (!latitude || !longitude)) {
+      patrolSetFeedback("Latitude dan longitude checkpoint wajib diisi saat GPS aktif.", "error");
       return;
     }
     if (submitBtn) submitBtn.disabled = true;
@@ -1157,34 +1316,59 @@
     }
   }
 
-  async function patrolSubmitCheckpointEditForm(form){
-    if (!form) return;
+  async function patrolSubmitCheckpointEditForm(form, options = {}){
+    if (!form) return false;
     const checkpointId = Number(form.dataset.id || 0);
-    if (!checkpointId) return;
+    if (!checkpointId) return false;
+    const isAutoSave = Boolean(options.autoSave);
     const submitBtn = form.querySelector("button[type='submit']");
+    const gpsRequired = Boolean(document.getElementById("patrol-route-gps")?.checked);
+    const latitude = (form.querySelector("[name='latitude']")?.value || "").trim();
+    const longitude = (form.querySelector("[name='longitude']")?.value || "").trim();
+    const radiusMeters = (form.querySelector("[name='radius_meters']")?.value || "").trim();
     const payload = {
       name: (form.querySelector("[name='name']")?.value || "").trim(),
-      qr_code: (form.querySelector("[name='qr_code']")?.value || "").trim(),
-      nfc_tag: (form.querySelector("[name='nfc_tag']")?.value || "").trim(),
-      latitude: (form.querySelector("[name='latitude']")?.value || "").trim(),
-      longitude: (form.querySelector("[name='longitude']")?.value || "").trim(),
-      radius_meters: (form.querySelector("[name='radius_meters']")?.value || "").trim(),
+      latitude: gpsRequired ? latitude : "",
+      longitude: gpsRequired ? longitude : "",
+      radius_meters: gpsRequired ? radiusMeters : "",
     };
     if (!payload.name) {
       patrolSetFeedback("Nama checkpoint wajib diisi.", "error");
-      return;
+      return false;
     }
+    if (gpsRequired && (!latitude || !longitude)) {
+      patrolSetFeedback("Latitude dan longitude checkpoint wajib diisi saat GPS aktif.", "error");
+      return false;
+    }
+    patrolClearEditIdleTimer();
     if (submitBtn) submitBtn.disabled = true;
-    patrolSetFeedback("Menyimpan perubahan checkpoint...", "muted");
+    patrolSetFeedback(
+      isAutoSave
+        ? "Tidak ada input 10 detik. Menyimpan otomatis..."
+        : "Menyimpan perubahan checkpoint...",
+      "muted"
+    );
     try {
       const response = await patrolApi(`/api/client/patrol/checkpoints/${checkpointId}/update`, {
         method: "POST",
         body: payload,
       });
       patrolApplyPayload(response.data || {});
-      patrolSetFeedback(response.message || "Checkpoint berhasil diperbarui.", "success");
+      patrolSetFeedback(
+        isAutoSave
+          ? (response.message || "Checkpoint tersimpan otomatis.")
+          : (response.message || "Checkpoint berhasil diperbarui."),
+        "success"
+      );
+      return true;
     } catch (error) {
-      patrolSetFeedback(error.message || "Gagal memperbarui checkpoint.", "error");
+      patrolSetFeedback(
+        isAutoSave
+          ? (error.message || "Simpan otomatis checkpoint gagal.")
+          : (error.message || "Gagal memperbarui checkpoint."),
+        "error"
+      );
+      return false;
     } finally {
       if (submitBtn) submitBtn.disabled = false;
     }
@@ -1304,7 +1488,9 @@
     const routeForm = document.getElementById("patrolRouteForm");
     const checkpointForm = document.getElementById("patrolCheckpointForm");
     const checkpointList = document.getElementById("patrolCheckpointList");
+    const checkpointPager = document.getElementById("patrolCheckpointPagination");
     const refreshBtn = document.getElementById("patrolRefreshBtn");
+    const recapPager = document.getElementById("patrolRecapPagination");
 
     if (refreshBtn) {
       refreshBtn.addEventListener("click", () => {
@@ -1312,7 +1498,53 @@
       });
     }
 
+    if (checkpointPager) {
+      const prevBtn = checkpointPager.querySelector("[data-page='prev']");
+      const nextBtn = checkpointPager.querySelector("[data-page='next']");
+      prevBtn?.addEventListener("click", () => {
+        if (patrolState.checkpointPage <= 1) return;
+        patrolState.checkpointPage -= 1;
+        patrolRenderSetup(patrolState.payload || {});
+      });
+      nextBtn?.addEventListener("click", () => {
+        patrolState.checkpointPage += 1;
+        patrolRenderSetup(patrolState.payload || {});
+      });
+    }
+
+    if (recapPager) {
+      const prevBtn = recapPager.querySelector("[data-page='prev']");
+      const nextBtn = recapPager.querySelector("[data-page='next']");
+      prevBtn?.addEventListener("click", () => {
+        if (patrolState.recapPage <= 1) return;
+        patrolState.recapPage -= 1;
+        patrolRenderRecap(patrolState.payload || {});
+      });
+      nextBtn?.addEventListener("click", () => {
+        patrolState.recapPage += 1;
+        patrolRenderRecap(patrolState.payload || {});
+      });
+    }
+
     if (routeForm) {
+      const scanModeInputs = Array.from(routeForm.querySelectorAll("[name='scan_mode']"));
+      const gpsToggle = routeForm.querySelector("[name='require_gps']");
+      scanModeInputs.forEach((input) => {
+        input.addEventListener("change", () => {
+          if (!input.checked) return;
+          patrolSyncScanModeFields(input.value, { clearValues: true });
+        });
+      });
+      if (gpsToggle) {
+        gpsToggle.addEventListener("change", () => {
+          patrolState.gpsRequired = Boolean(gpsToggle.checked);
+          patrolSyncGpsFields(gpsToggle.checked, { clearValues: !gpsToggle.checked });
+        });
+        patrolSyncGpsFields(gpsToggle.checked);
+      }
+      patrolSyncScanModeFields(
+        routeForm.querySelector("[name='scan_mode']:checked")?.value || patrolState.scanMode || "qr"
+      );
       routeForm.addEventListener("submit", async (event) => {
         event.preventDefault();
         await patrolSubmitRouteForm(routeForm);
@@ -1334,6 +1566,15 @@
         const checkpointId = Number(button.dataset.id || 0);
         if (action === "edit-toggle") {
           patrolToggleCheckpointEditor(checkpointId, true);
+          const list = document.getElementById("patrolCheckpointList");
+          const targetForm = list?.querySelector(`.patrol-cp-edit-form[data-id="${checkpointId}"]`);
+          const nameInput = targetForm?.querySelector("[name='name']");
+          if (nameInput) {
+            nameInput.focus();
+            const valueLength = String(nameInput.value || "").length;
+            nameInput.setSelectionRange(valueLength, valueLength);
+          }
+          patrolScheduleEditIdleTimer(targetForm || null);
           return;
         }
         if (action === "edit-cancel") {
@@ -1350,6 +1591,12 @@
         if (!form) return;
         event.preventDefault();
         await patrolSubmitCheckpointEditForm(form);
+      });
+
+      checkpointList.addEventListener("input", (event) => {
+        const form = event.target.closest("form[data-edit-form='1']");
+        if (!form || form.classList.contains("is-hidden")) return;
+        patrolScheduleEditIdleTimer(form);
       });
     }
 

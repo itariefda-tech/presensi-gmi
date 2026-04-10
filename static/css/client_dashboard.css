@@ -1712,6 +1712,18 @@ html[data-theme="light"] .nav-btn.active{
   padding-top: 8px;
 }
 
+.patrol-cp-edit-form .patrol-marker-readonly{
+  background: linear-gradient(180deg, rgba(100, 116, 139, 0.24), rgba(100, 116, 139, 0.18));
+  border-color: rgba(148, 163, 184, 0.5);
+  color: rgba(226, 232, 240, 0.9);
+  cursor: not-allowed;
+}
+
+.patrol-cp-edit-form .patrol-marker-readonly:focus{
+  outline: none;
+  box-shadow: none;
+}
+
 .patrol-cp-edit-actions{
   display: flex;
   gap: 8px;
@@ -2222,6 +2234,53 @@ body.modal-open{
   .brand-title{
     font-size: 23px;
   }
+}
+
+html[data-theme="light"] .patrol-hero-grid .patrol-hero-card{
+  background:
+    radial-gradient(180px 100px at 90% 0%, rgba(255, 255, 255, 0.85), transparent 68%),
+    linear-gradient(180deg, #ffffff 0%, #f2f8ff 100%) !important;
+  border-color: rgba(15, 23, 42, 0.16) !important;
+  color: #0f172a !important;
+}
+
+html[data-theme="light"] .patrol-hero-grid .patrol-hero-label{
+  color: #334155 !important;
+}
+
+html[data-theme="light"] .patrol-hero-grid .patrol-hero-meta,
+html[data-theme="light"] .patrol-live-meta{
+  color: #475569 !important;
+}
+
+html[data-theme="light"] .patrol-hero-grid .patrol-hero-value{
+  color: #0b1220 !important;
+}
+
+html[data-theme="light"] .patrol-cp-edit-form .patrol-marker-readonly{
+  background: linear-gradient(180deg, #e2e8f0 0%, #d9e2ec 100%);
+  border-color: rgba(100, 116, 139, 0.46);
+  color: #334155;
+}
+
+html[data-theme="light"] .payroll-kpi-grid .payroll-kpi{
+  background:
+    radial-gradient(180px 110px at 88% 0%, rgba(255, 255, 255, 0.9), transparent 66%),
+    linear-gradient(180deg, #ffffff 0%, #f5f9ff 100%) !important;
+  border-color: rgba(15, 23, 42, 0.16) !important;
+  color: #0f172a !important;
+}
+
+html[data-theme="light"] .payroll-kpi-grid .payroll-kpi .label{
+  color: #334155 !important;
+}
+
+html[data-theme="light"] .payroll-kpi-grid .payroll-kpi .meta{
+  color: #475569 !important;
+}
+
+html[data-theme="light"] .payroll-kpi-grid .payroll-kpi .value{
+  color: #0b1220 !important;
 }
 
 @media (prefers-reduced-motion: reduce){
