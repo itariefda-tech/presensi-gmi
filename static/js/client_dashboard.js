@@ -6,6 +6,14 @@
   const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || "";
   let swipeIndex = 0;
   const tabStorageKey = "client_active_tab";
+  const patrolState = {
+    payload: null,
+    pollingHandle: null,
+    lastSyncAt: 0,
+    dragCheckpointId: null,
+    loading: false,
+    initialized: false,
+  };
 
   function scrollToTop(){
     const root = document.scrollingElement || document.documentElement;
@@ -32,6 +40,7 @@
       localStorage.setItem(tabStorageKey, String(swipeIndex));
     } catch (e) {}
     scrollToTop();
+    patrolHandleTabChange();
   }
 
   navButtons.forEach((btn) => {
@@ -712,6 +721,648 @@
     });
   }
 
+  function escapeHtml(value){
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  function patrolPane(){
+    return document.getElementById("patrolAdminPane");
+  }
+
+  function patrolCanManage(){
+    return patrolPane()?.dataset.canManage === "1";
+  }
+
+  function patrolSetFeedback(message, type = "muted"){
+    const el = document.getElementById("patrolFeedbackMessage");
+    if (!el) return;
+    el.textContent = message || "";
+    el.classList.toggle("is-error", type === "error");
+    el.classList.toggle("is-success", type === "success");
+    el.classList.toggle("is-muted", type === "muted");
+  }
+
+  function patrolFormatDate(value){
+    const raw = (value || "").toString().trim();
+    if (!raw) return "-";
+    const date = new Date(`${raw}T00:00:00`);
+    if (Number.isNaN(date.getTime())) return raw;
+    return date.toLocaleDateString("id-ID", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    });
+  }
+
+  function patrolFormatDateTime(value){
+    const raw = (value || "").toString().trim();
+    if (!raw) return "-";
+    const iso = raw.includes("T") ? raw : raw.replace(" ", "T");
+    const date = new Date(iso);
+    if (Number.isNaN(date.getTime())) return raw;
+    return date.toLocaleString("id-ID", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  }
+
+  function patrolStatusLabel(status){
+    const normalized = (status || "").toString().trim().toLowerCase();
+    if (normalized === "ongoing") return "Sedang berjalan";
+    if (normalized === "completed") return "Selesai";
+    if (normalized === "invalid") return "Invalid";
+    return "Terhenti";
+  }
+
+  function patrolStatusClass(status){
+    const normalized = (status || "").toString().trim().toLowerCase();
+    if (normalized === "ongoing") return "is-ongoing";
+    if (normalized === "completed") return "is-completed";
+    return "is-stopped";
+  }
+
+  function patrolProgressPercent(done, total){
+    const doneValue = Number(done || 0);
+    const totalValue = Number(total || 0);
+    if (!totalValue || totalValue <= 0) return 0;
+    const percent = Math.round((doneValue / totalValue) * 100);
+    return Math.max(0, Math.min(100, percent));
+  }
+
+  async function patrolApi(path, options = {}){
+    const method = (options.method || "GET").toUpperCase();
+    const headers = {
+      Accept: "application/json",
+    };
+    const fetchOptions = {
+      method,
+      headers,
+    };
+    if (method !== "GET") {
+      headers["Content-Type"] = "application/json";
+      headers["X-CSRF-Token"] = csrfToken;
+      const payload = options.body && typeof options.body === "object"
+        ? { ...options.body, csrf_token: csrfToken }
+        : { csrf_token: csrfToken };
+      fetchOptions.body = JSON.stringify(payload);
+    }
+    const response = await fetch(path, fetchOptions);
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || !payload?.ok) {
+      throw new Error(payload?.message || "Permintaan Guard Tour gagal diproses.");
+    }
+    return payload;
+  }
+
+  function patrolRenderHero(payload){
+    const setup = payload?.setup || {};
+    const route = setup.route || {};
+    const monitoring = payload?.monitoring || {};
+    const counts = monitoring.counts || {};
+    const checkpointCount = Number(setup.checkpoint_count || 0);
+    const checkpointLimit = Number(setup.checkpoint_limit || 30);
+    const checkpointEl = document.getElementById("patrolHeroCheckpointCount");
+    const routeNameEl = document.getElementById("patrolHeroRouteName");
+    const ongoingEl = document.getElementById("patrolHeroOngoing");
+    const completedEl = document.getElementById("patrolHeroCompleted");
+    const stoppedEl = document.getElementById("patrolHeroStopped");
+    const timeEl = document.getElementById("patrolLiveTimestamp");
+    if (checkpointEl) checkpointEl.textContent = `${checkpointCount}/${checkpointLimit}`;
+    if (routeNameEl) routeNameEl.textContent = route.name || "Guard Tour Route";
+    if (ongoingEl) ongoingEl.textContent = String(Number(counts.ongoing || 0));
+    if (completedEl) completedEl.textContent = String(Number(counts.completed || 0));
+    if (stoppedEl) stoppedEl.textContent = String(Number(counts.stopped || 0));
+    if (timeEl) {
+      const now = new Date();
+      timeEl.textContent = `Sinkron terakhir ${now.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`;
+    }
+  }
+
+  function patrolRenderSetup(payload){
+    const canManage = patrolCanManage();
+    const setup = payload?.setup || {};
+    const route = setup.route || {};
+    const checkpoints = Array.isArray(setup.checkpoints) ? setup.checkpoints : [];
+    const count = Number(setup.checkpoint_count || checkpoints.length || 0);
+    const limit = Number(setup.checkpoint_limit || 30);
+    const limitReached = Boolean(setup.limit_reached);
+    const routeNameInput = document.getElementById("patrol-route-name");
+    const intervalInput = document.getElementById("patrol-min-interval");
+    const strictInput = document.getElementById("patrol-route-strict");
+    const selfieInput = document.getElementById("patrol-route-selfie");
+    const gpsInput = document.getElementById("patrol-route-gps");
+    const badge = document.getElementById("patrolCheckpointBadge");
+    const heroCount = document.getElementById("patrolHeroCheckpointCount");
+    const submitBtn = document.getElementById("patrolCheckpointSubmitBtn");
+    const limitMessage = document.getElementById("patrolLimitMessage");
+    const list = document.getElementById("patrolCheckpointList");
+    const empty = document.getElementById("patrolCheckpointEmpty");
+
+    if (routeNameInput) routeNameInput.value = route.name || "Guard Tour Route";
+    if (intervalInput) intervalInput.value = String(route.min_scan_interval_seconds ?? 45);
+    if (strictInput) strictInput.checked = Boolean(route.strict_mode);
+    if (selfieInput) selfieInput.checked = Boolean(route.require_selfie);
+    if (gpsInput) gpsInput.checked = Boolean(route.require_gps ?? true);
+    if (badge) badge.textContent = `${count}/${limit}`;
+    if (heroCount) heroCount.textContent = `${count}/${limit}`;
+
+    if (submitBtn) {
+      submitBtn.disabled = !canManage || limitReached;
+      submitBtn.textContent = limitReached ? "Upgrade ke Pro+" : "Tambah Checkpoint";
+    }
+
+    if (limitMessage) {
+      const customMessage = setup.upgrade_message || "";
+      if (customMessage || limitReached) {
+        limitMessage.textContent = customMessage || "Checkpoint maksimal 30 titik. Upgrade ke Pro+ untuk menambah kapasitas.";
+        limitMessage.classList.add("is-warning");
+      } else {
+        limitMessage.textContent = "";
+        limitMessage.classList.remove("is-warning");
+      }
+    }
+
+    if (!list || !empty) return;
+    if (!checkpoints.length) {
+      list.innerHTML = "";
+      empty.classList.remove("is-hidden");
+      return;
+    }
+
+    empty.classList.add("is-hidden");
+    list.innerHTML = checkpoints.map((checkpoint) => {
+      const checkpointId = Number(checkpoint.id || 0);
+      const name = escapeHtml(checkpoint.nama || "-");
+      const sequence = Number(checkpoint.urutan || 0);
+      const qrCode = escapeHtml(checkpoint.qr_code || "");
+      const nfcTag = escapeHtml(checkpoint.nfc_tag || "");
+      const latitude = checkpoint.latitude ?? "";
+      const longitude = checkpoint.longitude ?? "";
+      const radiusMeters = checkpoint.radius_meters ?? "";
+      return `
+        <article class="patrol-cp-item" data-checkpoint-id="${checkpointId}" draggable="${canManage ? "true" : "false"}">
+          <div class="patrol-cp-top">
+            <div class="patrol-cp-seq">#${sequence}</div>
+            <div class="patrol-cp-main">
+              <div class="patrol-cp-name">${name}</div>
+              <div class="patrol-cp-meta">QR: ${qrCode || "-"} | NFC: ${nfcTag || "-"}</div>
+            </div>
+            ${canManage ? `
+            <div class="patrol-cp-actions">
+              <button class="btn ghost patrol-cp-btn" type="button" data-action="edit-toggle" data-id="${checkpointId}">Edit</button>
+              <button class="btn danger patrol-cp-btn" type="button" data-action="delete" data-id="${checkpointId}">Hapus</button>
+            </div>
+            ` : ""}
+          </div>
+          ${canManage ? `
+          <form class="patrol-cp-edit-form is-hidden" data-edit-form="1" data-id="${checkpointId}">
+            <div class="form-grid">
+              <div class="form-row full">
+                <label class="label">Nama Checkpoint</label>
+                <input class="input" name="name" type="text" value="${name}" required />
+              </div>
+              <div class="form-row">
+                <label class="label">QR / Barcode ID</label>
+                <input class="input" name="qr_code" type="text" value="${qrCode}" />
+              </div>
+              <div class="form-row">
+                <label class="label">NFC Tag</label>
+                <input class="input" name="nfc_tag" type="text" value="${nfcTag}" />
+              </div>
+              <div class="form-row">
+                <label class="label">Latitude</label>
+                <input class="input" name="latitude" type="text" value="${escapeHtml(latitude)}" placeholder="-6.200000" />
+              </div>
+              <div class="form-row">
+                <label class="label">Longitude</label>
+                <input class="input" name="longitude" type="text" value="${escapeHtml(longitude)}" placeholder="106.816666" />
+              </div>
+              <div class="form-row">
+                <label class="label">Radius (meter)</label>
+                <input class="input" name="radius_meters" type="number" min="1" placeholder="35" value="${escapeHtml(radiusMeters)}" />
+              </div>
+            </div>
+            <div class="patrol-cp-edit-actions">
+              <button class="btn primary" type="submit">Simpan</button>
+              <button class="btn ghost" type="button" data-action="edit-cancel" data-id="${checkpointId}">Batal</button>
+            </div>
+          </form>
+          ` : ""}
+        </article>
+      `;
+    }).join("");
+
+    patrolBindCheckpointDrag(canManage);
+  }
+
+  function patrolRenderMonitoring(payload){
+    const monitoring = payload?.monitoring || {};
+    const rows = Array.isArray(monitoring.rows) ? monitoring.rows : [];
+    const list = document.getElementById("patrolMonitoringList");
+    const empty = document.getElementById("patrolMonitoringEmpty");
+    if (!list || !empty) return;
+    if (!rows.length) {
+      list.innerHTML = "";
+      empty.classList.remove("is-hidden");
+      return;
+    }
+    empty.classList.add("is-hidden");
+    list.innerHTML = rows.map((row) => {
+      const done = Number(row.progress_done || 0);
+      const total = Number(row.progress_total || 0);
+      const percent = patrolProgressPercent(done, total);
+      const employee = escapeHtml(row.employee_name || row.employee_email || "-");
+      const email = escapeHtml(row.employee_email || "-");
+      const status = (row.status || "").toString();
+      return `
+        <article class="patrol-monitor-item">
+          <div class="patrol-monitor-top">
+            <div class="patrol-monitor-name">${employee}</div>
+            <span class="patrol-state-badge ${patrolStatusClass(status)}">${patrolStatusLabel(status)}</span>
+          </div>
+          <div class="patrol-monitor-email">${email}</div>
+          <div class="patrol-progress-track">
+            <span style="width:${percent}%"></span>
+          </div>
+          <div class="patrol-monitor-meta">
+            <span>Progress ${done}/${total}</span>
+            <span>Mulai ${patrolFormatDateTime(row.started_at)}</span>
+          </div>
+        </article>
+      `;
+    }).join("");
+  }
+
+  function patrolRenderRecap(payload){
+    const rekap = payload?.rekap || {};
+    const rows = Array.isArray(rekap.rows) ? rekap.rows : [];
+    const total = Number(rekap.total || rows.length || 0);
+    const totalEl = document.getElementById("patrolRecapTotal");
+    const list = document.getElementById("patrolRecapList");
+    const empty = document.getElementById("patrolRecapEmpty");
+    if (totalEl) totalEl.textContent = `${total} sesi`;
+    if (!list || !empty) return;
+    if (!rows.length) {
+      list.innerHTML = "";
+      empty.classList.remove("is-hidden");
+      return;
+    }
+    empty.classList.add("is-hidden");
+    list.innerHTML = rows.map((row) => {
+      const employee = escapeHtml(row.employee_name || row.employee_email || "-");
+      const progressLabel = `${Number(row.checkpoint_tercapai || 0)} tercapai`;
+      const missedLabel = `${Number(row.checkpoint_terlewat || 0)} terlewat`;
+      const status = (row.status || "").toString();
+      return `
+        <article class="patrol-recap-item">
+          <div class="patrol-recap-top">
+            <div class="patrol-recap-name">${employee}</div>
+            <span class="patrol-state-badge ${patrolStatusClass(status)}">${patrolStatusLabel(status)}</span>
+          </div>
+          <div class="patrol-recap-meta">${patrolFormatDate(row.tanggal_patroli)}</div>
+          <div class="patrol-recap-stats">
+            <span>${progressLabel}</span>
+            <span>${missedLabel}</span>
+          </div>
+          <div class="patrol-recap-time">
+            <span>Mulai: ${patrolFormatDateTime(row.waktu_mulai)}</span>
+            <span>Selesai: ${patrolFormatDateTime(row.waktu_selesai)}</span>
+          </div>
+        </article>
+      `;
+    }).join("");
+  }
+
+  function patrolRenderStructure(payload){
+    const dataStructure = payload?.data_structure || {};
+    const preview = document.getElementById("patrolStructurePreview");
+    if (!preview) return;
+    const checkpoints = Array.isArray(dataStructure.checkpoints) ? dataStructure.checkpoints.slice(0, 30) : [];
+    const sessions = Array.isArray(dataStructure.patrol_sessions) ? dataStructure.patrol_sessions.slice(0, 80) : [];
+    const logs = Array.isArray(dataStructure.patrol_logs) ? dataStructure.patrol_logs.slice(-120) : [];
+    preview.textContent = JSON.stringify(
+      {
+        checkpoints,
+        patrol_sessions: sessions,
+        patrol_logs: logs,
+      },
+      null,
+      2
+    );
+  }
+
+  function patrolApplyPayload(payload){
+    patrolState.payload = payload || {};
+    patrolState.lastSyncAt = Date.now();
+    patrolRenderHero(patrolState.payload);
+    patrolRenderSetup(patrolState.payload);
+    patrolRenderMonitoring(patrolState.payload);
+    patrolRenderRecap(patrolState.payload);
+    patrolRenderStructure(patrolState.payload);
+  }
+
+  function patrolToggleCheckpointEditor(checkpointId, shouldOpen){
+    const list = document.getElementById("patrolCheckpointList");
+    if (!list) return;
+    list.querySelectorAll(".patrol-cp-edit-form").forEach((form) => {
+      const currentId = Number(form.dataset.id || 0);
+      const mustOpen = shouldOpen && currentId === checkpointId;
+      form.classList.toggle("is-hidden", !mustOpen);
+    });
+  }
+
+  async function patrolLoadDashboard({ silent = false } = {}){
+    if (!patrolPane()) return;
+    if (patrolState.loading) return;
+    patrolState.loading = true;
+    if (!silent) {
+      patrolSetFeedback("Memuat data Guard Tour...", "muted");
+    }
+    try {
+      const response = await patrolApi("/api/client/patrol/dashboard");
+      patrolApplyPayload(response.data || {});
+      if (!silent) {
+        patrolSetFeedback("Data Guard Tour berhasil dimuat.", "success");
+      }
+    } catch (error) {
+      patrolSetFeedback(error.message || "Gagal memuat data Guard Tour.", "error");
+    } finally {
+      patrolState.loading = false;
+    }
+  }
+
+  async function patrolSubmitRouteForm(form){
+    if (!form) return;
+    const submitBtn = form.querySelector("button[type='submit']");
+    const payload = {
+      route_name: (form.querySelector("[name='route_name']")?.value || "").trim(),
+      min_scan_interval_seconds: (form.querySelector("[name='min_scan_interval_seconds']")?.value || "").trim(),
+      strict_mode: form.querySelector("[name='strict_mode']")?.checked ? 1 : 0,
+      require_selfie: form.querySelector("[name='require_selfie']")?.checked ? 1 : 0,
+      require_gps: form.querySelector("[name='require_gps']")?.checked ? 1 : 0,
+    };
+    if (submitBtn) submitBtn.disabled = true;
+    patrolSetFeedback("Menyimpan setup patrol...", "muted");
+    try {
+      const response = await patrolApi("/api/client/patrol/route", {
+        method: "POST",
+        body: payload,
+      });
+      patrolApplyPayload(response.data || {});
+      patrolSetFeedback(response.message || "Setup patroli tersimpan.", "success");
+    } catch (error) {
+      patrolSetFeedback(error.message || "Gagal menyimpan setup patroli.", "error");
+    } finally {
+      if (submitBtn) submitBtn.disabled = false;
+    }
+  }
+
+  async function patrolSubmitCheckpointForm(form){
+    if (!form) return;
+    const submitBtn = form.querySelector("button[type='submit']");
+    const payload = {
+      name: (form.querySelector("[name='name']")?.value || "").trim(),
+      qr_code: (form.querySelector("[name='qr_code']")?.value || "").trim(),
+      nfc_tag: (form.querySelector("[name='nfc_tag']")?.value || "").trim(),
+      latitude: (form.querySelector("[name='latitude']")?.value || "").trim(),
+      longitude: (form.querySelector("[name='longitude']")?.value || "").trim(),
+      radius_meters: (form.querySelector("[name='radius_meters']")?.value || "").trim(),
+    };
+    if (!payload.name) {
+      patrolSetFeedback("Nama checkpoint wajib diisi.", "error");
+      return;
+    }
+    if (submitBtn) submitBtn.disabled = true;
+    patrolSetFeedback("Menambahkan checkpoint...", "muted");
+    try {
+      const response = await patrolApi("/api/client/patrol/checkpoints/create", {
+        method: "POST",
+        body: payload,
+      });
+      form.reset();
+      patrolApplyPayload(response.data || {});
+      patrolSetFeedback(response.message || "Checkpoint berhasil ditambahkan.", "success");
+    } catch (error) {
+      patrolSetFeedback(error.message || "Gagal menambahkan checkpoint.", "error");
+    } finally {
+      if (submitBtn) submitBtn.disabled = false;
+    }
+  }
+
+  async function patrolSubmitCheckpointEditForm(form){
+    if (!form) return;
+    const checkpointId = Number(form.dataset.id || 0);
+    if (!checkpointId) return;
+    const submitBtn = form.querySelector("button[type='submit']");
+    const payload = {
+      name: (form.querySelector("[name='name']")?.value || "").trim(),
+      qr_code: (form.querySelector("[name='qr_code']")?.value || "").trim(),
+      nfc_tag: (form.querySelector("[name='nfc_tag']")?.value || "").trim(),
+      latitude: (form.querySelector("[name='latitude']")?.value || "").trim(),
+      longitude: (form.querySelector("[name='longitude']")?.value || "").trim(),
+      radius_meters: (form.querySelector("[name='radius_meters']")?.value || "").trim(),
+    };
+    if (!payload.name) {
+      patrolSetFeedback("Nama checkpoint wajib diisi.", "error");
+      return;
+    }
+    if (submitBtn) submitBtn.disabled = true;
+    patrolSetFeedback("Menyimpan perubahan checkpoint...", "muted");
+    try {
+      const response = await patrolApi(`/api/client/patrol/checkpoints/${checkpointId}/update`, {
+        method: "POST",
+        body: payload,
+      });
+      patrolApplyPayload(response.data || {});
+      patrolSetFeedback(response.message || "Checkpoint berhasil diperbarui.", "success");
+    } catch (error) {
+      patrolSetFeedback(error.message || "Gagal memperbarui checkpoint.", "error");
+    } finally {
+      if (submitBtn) submitBtn.disabled = false;
+    }
+  }
+
+  async function patrolDeleteCheckpoint(checkpointId){
+    if (!checkpointId) return;
+    if (!window.confirm("Hapus checkpoint ini dari route patroli?")) return;
+    patrolSetFeedback("Menghapus checkpoint...", "muted");
+    try {
+      const response = await patrolApi(`/api/client/patrol/checkpoints/${checkpointId}/delete`, {
+        method: "POST",
+      });
+      patrolApplyPayload(response.data || {});
+      patrolSetFeedback(response.message || "Checkpoint berhasil dihapus.", "success");
+    } catch (error) {
+      patrolSetFeedback(error.message || "Gagal menghapus checkpoint.", "error");
+    }
+  }
+
+  async function patrolPersistCheckpointOrder(){
+    const list = document.getElementById("patrolCheckpointList");
+    if (!list) return;
+    const orderedIds = Array.from(list.querySelectorAll(".patrol-cp-item"))
+      .map((item) => Number(item.dataset.checkpointId || 0))
+      .filter((value) => value > 0);
+    if (!orderedIds.length) return;
+    patrolSetFeedback("Menyimpan urutan checkpoint...", "muted");
+    try {
+      const response = await patrolApi("/api/client/patrol/checkpoints/reorder", {
+        method: "POST",
+        body: { checkpoint_ids: orderedIds },
+      });
+      patrolApplyPayload(response.data || {});
+      patrolSetFeedback(response.message || "Urutan checkpoint berhasil diperbarui.", "success");
+    } catch (error) {
+      patrolSetFeedback(error.message || "Gagal menyimpan urutan checkpoint.", "error");
+      patrolLoadDashboard({ silent: true });
+    }
+  }
+
+  function patrolBindCheckpointDrag(canManage){
+    const list = document.getElementById("patrolCheckpointList");
+    if (!list) return;
+    const items = Array.from(list.querySelectorAll(".patrol-cp-item"));
+    items.forEach((item) => {
+      if (!canManage) {
+        item.draggable = false;
+        return;
+      }
+      item.draggable = true;
+      item.addEventListener("dragstart", () => {
+        patrolState.dragCheckpointId = Number(item.dataset.checkpointId || 0);
+        item.classList.add("is-dragging");
+      });
+      item.addEventListener("dragend", () => {
+        patrolState.dragCheckpointId = null;
+        item.classList.remove("is-dragging");
+        items.forEach((target) => target.classList.remove("is-dragover"));
+      });
+      item.addEventListener("dragover", (event) => {
+        event.preventDefault();
+        item.classList.add("is-dragover");
+      });
+      item.addEventListener("dragleave", () => {
+        item.classList.remove("is-dragover");
+      });
+      item.addEventListener("drop", async (event) => {
+        event.preventDefault();
+        item.classList.remove("is-dragover");
+        const dragId = patrolState.dragCheckpointId;
+        const targetId = Number(item.dataset.checkpointId || 0);
+        if (!dragId || !targetId || dragId === targetId) return;
+        const dragged = list.querySelector(`.patrol-cp-item[data-checkpoint-id="${dragId}"]`);
+        if (!dragged) return;
+        const rect = item.getBoundingClientRect();
+        const shouldInsertBefore = event.clientY < rect.top + rect.height / 2;
+        if (shouldInsertBefore) {
+          list.insertBefore(dragged, item);
+        } else {
+          list.insertBefore(dragged, item.nextSibling);
+        }
+        await patrolPersistCheckpointOrder();
+      });
+    });
+  }
+
+  function patrolStartPolling(){
+    if (patrolState.pollingHandle) return;
+    patrolState.pollingHandle = window.setInterval(() => {
+      if (swipeIndex !== 4) return;
+      if (document.hidden) return;
+      patrolLoadDashboard({ silent: true });
+    }, 15000);
+  }
+
+  function patrolStopPolling(){
+    if (!patrolState.pollingHandle) return;
+    window.clearInterval(patrolState.pollingHandle);
+    patrolState.pollingHandle = null;
+  }
+
+  function patrolHandleTabChange(){
+    if (!patrolPane()) return;
+    if (swipeIndex === 4) {
+      patrolStartPolling();
+      patrolLoadDashboard({ silent: true });
+    } else {
+      patrolStopPolling();
+    }
+  }
+
+  function initPatrolDashboard(){
+    const root = patrolPane();
+    if (!root || patrolState.initialized) return;
+    patrolState.initialized = true;
+    const routeForm = document.getElementById("patrolRouteForm");
+    const checkpointForm = document.getElementById("patrolCheckpointForm");
+    const checkpointList = document.getElementById("patrolCheckpointList");
+    const refreshBtn = document.getElementById("patrolRefreshBtn");
+
+    if (refreshBtn) {
+      refreshBtn.addEventListener("click", () => {
+        patrolLoadDashboard({ silent: false });
+      });
+    }
+
+    if (routeForm) {
+      routeForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        await patrolSubmitRouteForm(routeForm);
+      });
+    }
+
+    if (checkpointForm) {
+      checkpointForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        await patrolSubmitCheckpointForm(checkpointForm);
+      });
+    }
+
+    if (checkpointList) {
+      checkpointList.addEventListener("click", async (event) => {
+        const button = event.target.closest("button[data-action]");
+        if (!button) return;
+        const action = button.dataset.action || "";
+        const checkpointId = Number(button.dataset.id || 0);
+        if (action === "edit-toggle") {
+          patrolToggleCheckpointEditor(checkpointId, true);
+          return;
+        }
+        if (action === "edit-cancel") {
+          patrolToggleCheckpointEditor(0, false);
+          return;
+        }
+        if (action === "delete") {
+          await patrolDeleteCheckpoint(checkpointId);
+        }
+      });
+
+      checkpointList.addEventListener("submit", async (event) => {
+        const form = event.target.closest("form[data-edit-form='1']");
+        if (!form) return;
+        event.preventDefault();
+        await patrolSubmitCheckpointEditForm(form);
+      });
+    }
+
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) return;
+      if (swipeIndex === 4) {
+        patrolLoadDashboard({ silent: true });
+      }
+    });
+
+    window.addEventListener("beforeunload", patrolStopPolling);
+  }
+
   function initEmployeeActionMenus(){
     const menus = Array.from(document.querySelectorAll(".employee-actions"));
     if (!menus.length) return;
@@ -909,6 +1560,7 @@
     initAttendanceTablePagination();
     initAttendanceReportToggle();
     initAttendanceRangeReport();
+    initPatrolDashboard();
     try {
       localStorage.removeItem(tabStorageKey);
     } catch (e) {}

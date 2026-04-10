@@ -580,6 +580,7 @@ def create_app() -> Flask:
             can_manage_site=user.role == "client_admin",
             can_manage_employees=user.role == "client_admin",
             can_manage_policies=user.role == "client_admin",
+            can_manage_patrol=user.role == "client_admin",
             can_manage_users=user.role == "client_admin",
             can_change_password=user.role == "client_admin",
         )
@@ -870,6 +871,394 @@ def create_app() -> Flask:
                 }
             )
         return jsonify(ok=True, data=sanitized, total=len(sanitized))
+
+    def _client_patrol_flag(value: object, default: int = 0) -> int:
+        default_flag = 1 if int(default or 0) == 1 else 0
+        if value is None:
+            return default_flag
+        if isinstance(value, bool):
+            return 1 if value else 0
+        raw = str(value).strip().lower()
+        if raw in {"1", "true", "yes", "on"}:
+            return 1
+        if raw in {"0", "false", "no", "off"}:
+            return 0
+        return default_flag
+
+    def _client_patrol_checkpoint_scope(
+        *,
+        checkpoint_id: int,
+        site_id: int,
+        client_id: int,
+    ) -> tuple[dict | None, dict | None]:
+        checkpoint = _client_patrol_checkpoint_by_id(checkpoint_id)
+        if not checkpoint:
+            return None, None
+        route = _patrol_route_by_id(int(_row_get(checkpoint, "route_id") or 0))
+        if not route:
+            return None, None
+        if int(_row_get(route, "site_id") or 0) != site_id:
+            return None, None
+        route_client_id = int(_row_get(route, "client_id") or 0)
+        if route_client_id and route_client_id != client_id:
+            return None, None
+        return checkpoint, route
+
+    @app.route("/api/client/patrol/dashboard", methods=["GET"])
+    def client_patrol_dashboard():
+        user = _current_user()
+        _require_client_user(user)
+        client_id, site_id, _site, _client = _client_site_context(user)
+        data = _client_patrol_dashboard_payload(
+            client_id=client_id,
+            site_id=site_id,
+            can_manage=user.role == "client_admin",
+        )
+        return jsonify(ok=True, data=data), 200
+
+    @app.route("/api/client/patrol/route", methods=["POST"])
+    def client_patrol_route_save():
+        user = _current_user()
+        _require_client_admin(user)
+        client_id, site_id, _site, _client = _client_site_context(user)
+        data = _get_json()
+        route_name = (data.get("route_name") or data.get("name") or "").strip() or "Guard Tour Route"
+        interval_raw = str(data.get("min_scan_interval_seconds") or "").strip()
+        if interval_raw:
+            try:
+                min_interval_seconds = int(interval_raw)
+            except ValueError:
+                return jsonify(ok=False, message="Interval minimal scan wajib angka."), 400
+        else:
+            min_interval_seconds = PATROL_MIN_SCAN_INTERVAL_SECONDS
+        if min_interval_seconds < 0:
+            min_interval_seconds = 0
+        if min_interval_seconds > 3600:
+            min_interval_seconds = 3600
+        route = _client_patrol_ensure_route(
+            site_id=site_id,
+            client_id=client_id,
+            name=route_name,
+            strict_mode=_client_patrol_flag(data.get("strict_mode"), default=0),
+            require_selfie=_client_patrol_flag(data.get("require_selfie"), default=0),
+            require_gps=_client_patrol_flag(data.get("require_gps"), default=1),
+            min_scan_interval_seconds=min_interval_seconds,
+        )
+        _log_audit_event(
+            entity_type="patrol_route",
+            entity_id=int(_row_get(route, "id") or 0),
+            action="UPDATE",
+            actor=user,
+            summary="Pengaturan guard tour route diperbarui dari dashboard client.",
+            details={
+                "site_id": site_id,
+                "client_id": client_id,
+                "strict_mode": _client_patrol_flag(data.get("strict_mode"), default=0),
+                "require_selfie": _client_patrol_flag(data.get("require_selfie"), default=0),
+                "require_gps": _client_patrol_flag(data.get("require_gps"), default=1),
+                "min_scan_interval_seconds": min_interval_seconds,
+            },
+        )
+        payload = _client_patrol_dashboard_payload(
+            client_id=client_id,
+            site_id=site_id,
+            can_manage=True,
+        )
+        return jsonify(ok=True, message="Pengaturan Guard Tour tersimpan.", data=payload), 200
+
+    @app.route("/api/client/patrol/checkpoints/create", methods=["POST"])
+    def client_patrol_checkpoint_create():
+        user = _current_user()
+        _require_client_admin(user)
+        client_id, site_id, _site, _client = _client_site_context(user)
+        data = _get_json()
+        name = (data.get("nama") or data.get("name") or "").strip()
+        if not name:
+            return jsonify(ok=False, message="Nama checkpoint wajib diisi."), 400
+
+        route = _client_patrol_route_for_site(site_id, client_id)
+        if not route:
+            route = _client_patrol_ensure_route(
+                site_id=site_id,
+                client_id=client_id,
+                name="Guard Tour Route",
+                strict_mode=0,
+                require_selfie=0,
+                require_gps=1,
+                min_scan_interval_seconds=PATROL_MIN_SCAN_INTERVAL_SECONDS,
+            )
+        route_id = int(_row_get(route, "id") or 0)
+        if not route_id:
+            return jsonify(ok=False, message="Rute patrol tidak ditemukan."), 400
+
+        checkpoints = _client_patrol_checkpoint_rows(route_id)
+        if len(checkpoints) >= PATROL_MAX_CHECKPOINTS:
+            return jsonify(
+                ok=False,
+                message="Checkpoint maksimal 30 titik pada versi ini. Upgrade ke Pro+ untuk menambah kapasitas.",
+            ), 400
+
+        qr_code = (data.get("qr_code") or "").strip()
+        nfc_tag = (data.get("nfc_tag") or "").strip()
+        lat_raw = (data.get("latitude") or "").strip()
+        lng_raw = (data.get("longitude") or "").strip()
+        radius_raw = (data.get("radius_meters") or "").strip()
+
+        latitude = None
+        longitude = None
+        if lat_raw or lng_raw:
+            if not lat_raw or not lng_raw:
+                return jsonify(ok=False, message="Latitude dan longitude harus diisi berpasangan."), 400
+            try:
+                latitude = float(lat_raw)
+                longitude = float(lng_raw)
+            except ValueError:
+                return jsonify(ok=False, message="Koordinat checkpoint tidak valid."), 400
+
+        if radius_raw:
+            try:
+                radius_meters = int(radius_raw)
+            except ValueError:
+                return jsonify(ok=False, message="Radius checkpoint wajib angka."), 400
+        else:
+            radius_meters = PATROL_DEFAULT_CHECKPOINT_RADIUS_METERS
+        if radius_meters <= 0:
+            return jsonify(ok=False, message="Radius checkpoint harus lebih besar dari 0."), 400
+
+        sequence_no = len(checkpoints) + 1
+        now_ts = _now_ts()
+        conn = _db_connect()
+        try:
+            cur = conn.execute(
+                """
+                INSERT INTO patrol_checkpoints (
+                    route_id, sequence_no, name, qr_code, nfc_tag,
+                    latitude, longitude, radius_meters, is_active, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+                """,
+                (
+                    route_id,
+                    sequence_no,
+                    name,
+                    qr_code or None,
+                    nfc_tag or None,
+                    latitude,
+                    longitude,
+                    radius_meters,
+                    now_ts,
+                    now_ts,
+                ),
+            )
+            checkpoint_id = int(cur.lastrowid or 0)
+        finally:
+            conn.commit()
+            conn.close()
+        _client_patrol_resequence(route_id)
+        _log_audit_event(
+            entity_type="patrol_checkpoint",
+            entity_id=checkpoint_id,
+            action="CREATE",
+            actor=user,
+            summary="Checkpoint guard tour ditambahkan dari dashboard client.",
+            details={"site_id": site_id, "route_id": route_id, "name": name},
+        )
+        payload = _client_patrol_dashboard_payload(
+            client_id=client_id,
+            site_id=site_id,
+            can_manage=True,
+        )
+        return jsonify(ok=True, message="Checkpoint berhasil ditambahkan.", data=payload), 200
+
+    @app.route("/api/client/patrol/checkpoints/<int:checkpoint_id>/update", methods=["POST"])
+    def client_patrol_checkpoint_update(checkpoint_id: int):
+        user = _current_user()
+        _require_client_admin(user)
+        client_id, site_id, _site, _client = _client_site_context(user)
+        checkpoint, route = _client_patrol_checkpoint_scope(
+            checkpoint_id=checkpoint_id,
+            site_id=site_id,
+            client_id=client_id,
+        )
+        if not checkpoint or not route:
+            return jsonify(ok=False, message="Checkpoint tidak ditemukan."), 404
+
+        data = _get_json()
+        name = (data.get("nama") or data.get("name") or "").strip()
+        if not name:
+            return jsonify(ok=False, message="Nama checkpoint wajib diisi."), 400
+
+        qr_code = (data.get("qr_code") or "").strip()
+        nfc_tag = (data.get("nfc_tag") or "").strip()
+        lat_raw = (data.get("latitude") or "").strip()
+        lng_raw = (data.get("longitude") or "").strip()
+        radius_raw = (data.get("radius_meters") or "").strip()
+
+        latitude = None
+        longitude = None
+        if lat_raw or lng_raw:
+            if not lat_raw or not lng_raw:
+                return jsonify(ok=False, message="Latitude dan longitude harus diisi berpasangan."), 400
+            try:
+                latitude = float(lat_raw)
+                longitude = float(lng_raw)
+            except ValueError:
+                return jsonify(ok=False, message="Koordinat checkpoint tidak valid."), 400
+
+        if radius_raw:
+            try:
+                radius_meters = int(radius_raw)
+            except ValueError:
+                return jsonify(ok=False, message="Radius checkpoint wajib angka."), 400
+        else:
+            radius_meters = int(_row_get(checkpoint, "radius_meters") or PATROL_DEFAULT_CHECKPOINT_RADIUS_METERS)
+        if radius_meters <= 0:
+            return jsonify(ok=False, message="Radius checkpoint harus lebih besar dari 0."), 400
+
+        conn = _db_connect()
+        try:
+            conn.execute(
+                """
+                UPDATE patrol_checkpoints
+                SET name = ?, qr_code = ?, nfc_tag = ?, latitude = ?, longitude = ?,
+                    radius_meters = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    name,
+                    qr_code or None,
+                    nfc_tag or None,
+                    latitude,
+                    longitude,
+                    radius_meters,
+                    _now_ts(),
+                    checkpoint_id,
+                ),
+            )
+        finally:
+            conn.commit()
+            conn.close()
+        _log_audit_event(
+            entity_type="patrol_checkpoint",
+            entity_id=checkpoint_id,
+            action="UPDATE",
+            actor=user,
+            summary="Checkpoint guard tour diperbarui dari dashboard client.",
+            details={"site_id": site_id, "route_id": int(_row_get(route, "id") or 0), "name": name},
+        )
+        payload = _client_patrol_dashboard_payload(
+            client_id=client_id,
+            site_id=site_id,
+            can_manage=True,
+        )
+        return jsonify(ok=True, message="Checkpoint berhasil diperbarui.", data=payload), 200
+
+    @app.route("/api/client/patrol/checkpoints/<int:checkpoint_id>/delete", methods=["POST"])
+    def client_patrol_checkpoint_delete(checkpoint_id: int):
+        user = _current_user()
+        _require_client_admin(user)
+        client_id, site_id, _site, _client = _client_site_context(user)
+        checkpoint, route = _client_patrol_checkpoint_scope(
+            checkpoint_id=checkpoint_id,
+            site_id=site_id,
+            client_id=client_id,
+        )
+        if not checkpoint or not route:
+            return jsonify(ok=False, message="Checkpoint tidak ditemukan."), 404
+        route_id = int(_row_get(route, "id") or 0)
+        conn = _db_connect()
+        try:
+            conn.execute("DELETE FROM patrol_checkpoints WHERE id = ?", (checkpoint_id,))
+        finally:
+            conn.commit()
+            conn.close()
+        _client_patrol_resequence(route_id)
+        _log_audit_event(
+            entity_type="patrol_checkpoint",
+            entity_id=checkpoint_id,
+            action="DELETE",
+            actor=user,
+            summary="Checkpoint guard tour dihapus dari dashboard client.",
+            details={"site_id": site_id, "route_id": route_id},
+        )
+        payload = _client_patrol_dashboard_payload(
+            client_id=client_id,
+            site_id=site_id,
+            can_manage=True,
+        )
+        return jsonify(ok=True, message="Checkpoint berhasil dihapus.", data=payload), 200
+
+    @app.route("/api/client/patrol/checkpoints/reorder", methods=["POST"])
+    def client_patrol_checkpoint_reorder():
+        user = _current_user()
+        _require_client_admin(user)
+        client_id, site_id, _site, _client = _client_site_context(user)
+        route = _client_patrol_route_for_site(site_id, client_id)
+        if not route:
+            return jsonify(ok=False, message="Rute patrol belum tersedia."), 400
+        route_id = int(_row_get(route, "id") or 0)
+        checkpoints = _client_patrol_checkpoint_rows(route_id)
+        if not checkpoints:
+            return jsonify(ok=False, message="Belum ada checkpoint untuk diurutkan."), 400
+
+        data = _get_json()
+        checkpoint_ids_raw = data.get("checkpoint_ids")
+        if isinstance(checkpoint_ids_raw, str):
+            parsed: object = checkpoint_ids_raw
+            try:
+                parsed = json.loads(checkpoint_ids_raw)
+            except json.JSONDecodeError:
+                parsed = [item.strip() for item in checkpoint_ids_raw.split(",")]
+            checkpoint_ids_raw = parsed
+        if not isinstance(checkpoint_ids_raw, list):
+            return jsonify(ok=False, message="Format urutan checkpoint tidak valid."), 400
+
+        ordered_ids: list[int] = []
+        seen: set[int] = set()
+        for item in checkpoint_ids_raw:
+            try:
+                checkpoint_id_value = int(item)
+            except (TypeError, ValueError):
+                continue
+            if checkpoint_id_value in seen:
+                continue
+            seen.add(checkpoint_id_value)
+            ordered_ids.append(checkpoint_id_value)
+
+        existing_ids = [int(cp.get("id") or 0) for cp in checkpoints]
+        if len(ordered_ids) != len(existing_ids) or set(ordered_ids) != set(existing_ids):
+            return jsonify(ok=False, message="Daftar checkpoint untuk urutan tidak lengkap."), 400
+
+        now_ts = _now_ts()
+        conn = _db_connect()
+        try:
+            for idx, cp_id in enumerate(ordered_ids, start=1):
+                conn.execute(
+                    """
+                    UPDATE patrol_checkpoints
+                    SET sequence_no = ?, updated_at = ?
+                    WHERE id = ? AND route_id = ?
+                    """,
+                    (-idx, now_ts, cp_id, route_id),
+                )
+            for idx, cp_id in enumerate(ordered_ids, start=1):
+                conn.execute(
+                    """
+                    UPDATE patrol_checkpoints
+                    SET sequence_no = ?, updated_at = ?
+                    WHERE id = ? AND route_id = ?
+                    """,
+                    (idx, now_ts, cp_id, route_id),
+                )
+        finally:
+            conn.commit()
+            conn.close()
+
+        payload = _client_patrol_dashboard_payload(
+            client_id=client_id,
+            site_id=site_id,
+            can_manage=True,
+        )
+        return jsonify(ok=True, message="Urutan checkpoint berhasil diperbarui.", data=payload), 200
 
     @app.route("/client/policies/create", methods=["POST"])
     def client_policies_create():
@@ -1387,6 +1776,7 @@ def create_app() -> Flask:
             source="app",
             selfie_path=selfie_path,
         )
+        closed_tours = _close_open_patrol_tours_on_checkout(user.email, today)
         _log_audit_event(
             entity_type="attendance",
             entity_id=record.get("id"),
@@ -1395,7 +1785,12 @@ def create_app() -> Flask:
             summary="Check-out tercatat.",
             details={"method": record.get("method"), "date": record.get("date"), "time": record.get("time")},
         )
-        return jsonify(ok=True, message="Check-out tercatat.", data=record), 200
+        return jsonify(
+            ok=True,
+            message="Check-out tercatat.",
+            data=record,
+            patrol_closed=closed_tours,
+        ), 200
 
     @app.route("/api/attendance/today", methods=["GET"])
     def attendance_today():
@@ -1494,6 +1889,341 @@ def create_app() -> Flask:
         if not ok:
             return jsonify(ok=False, message=message), 400
         return jsonify(ok=True, message="Manual attendance disetujui."), 200
+
+    @app.route("/api/patrol/status", methods=["GET"])
+    def patrol_status():
+        user = _current_user()
+        forbidden = _require_api_role(user, EMPLOYEE_ROLES)
+        if forbidden:
+            return forbidden
+        data = _patrol_status_payload(user)
+        return jsonify(ok=True, data=data), 200
+
+    @app.route("/api/patrol/start", methods=["POST"])
+    def patrol_start():
+        user = _current_user()
+        forbidden = _require_api_role(user, EMPLOYEE_ROLES)
+        if forbidden:
+            return forbidden
+        employee = _employee_by_email(user.email, only_active=False)
+        if not employee:
+            return jsonify(ok=False, message="Lengkapi data master pegawai terlebih dahulu."), 400
+        assignment = _get_active_assignment(user.id)
+        if not assignment:
+            return jsonify(ok=False, message="Belum ada penempatan aktif. Hubungi admin."), 400
+        today = _today_key()
+        if not _attendance_action_exists(user.email, today, "checkin"):
+            return jsonify(ok=False, message="Guard Tour hanya bisa dimulai setelah check-in."), 400
+        if _attendance_action_exists(user.email, today, "checkout"):
+            return jsonify(ok=False, message="Shift sudah check-out. Guard Tour ditutup."), 400
+
+        route = _active_patrol_route(_row_get(assignment, "site_id"), _row_get(assignment, "shift_id"))
+        if not route:
+            return jsonify(ok=False, message="Belum ada rute guard tour aktif untuk shift ini."), 400
+        checkpoints_full = _patrol_checkpoints(_row_get(route, "id"))
+        if not checkpoints_full:
+            return jsonify(ok=False, message="Rute guard tour belum memiliki checkpoint."), 400
+        if len(checkpoints_full) > PATROL_MAX_CHECKPOINTS:
+            return jsonify(
+                ok=False,
+                message="Rute melebihi 30 checkpoint. Upgrade ke PRO+ untuk mengaktifkan rute ini.",
+            ), 400
+
+        latest = _patrol_latest_tour_for_today(user.email, today, _row_get(route, "id"))
+        if latest:
+            latest_status = (_row_get(latest, "status", "") or "").lower()
+            if latest_status == PATROL_STATUS_ONGOING:
+                return jsonify(
+                    ok=True,
+                    message="Guard Tour sedang berjalan.",
+                    data=_patrol_status_payload(user),
+                ), 200
+            if latest_status == PATROL_STATUS_COMPLETED:
+                return jsonify(ok=False, message="Guard Tour sudah selesai untuk shift ini."), 400
+            return jsonify(ok=False, message="Guard Tour shift ini sudah ditutup dan tidak dapat diulang."), 400
+
+        tour = _create_patrol_tour(
+            route=route,
+            assignment=assignment,
+            employee=employee,
+            user=user,
+            total_checkpoints=len(checkpoints_full),
+        )
+        _log_audit_event(
+            entity_type="patrol_tour",
+            entity_id=_row_get(tour, "id"),
+            action="PATROL_START",
+            actor=user,
+            summary="Guard tour dimulai.",
+            details={
+                "route_id": _row_get(route, "id"),
+                "route_name": _row_get(route, "name"),
+                "checkpoints": len(checkpoints_full),
+            },
+        )
+        return jsonify(
+            ok=True,
+            message="Guard Tour dimulai.",
+            data=_patrol_status_payload(user),
+        ), 200
+
+    @app.route("/api/patrol/scan", methods=["POST"])
+    def patrol_scan():
+        user = _current_user()
+        forbidden = _require_api_role(user, EMPLOYEE_ROLES)
+        if forbidden:
+            return forbidden
+        employee = _employee_by_email(user.email, only_active=False)
+        if not employee:
+            return jsonify(ok=False, message="Lengkapi data master pegawai terlebih dahulu."), 400
+        assignment = _get_active_assignment(user.id)
+        if not assignment:
+            return jsonify(ok=False, message="Belum ada penempatan aktif. Hubungi admin."), 400
+
+        today = _today_key()
+        if not _attendance_action_exists(user.email, today, "checkin"):
+            return jsonify(ok=False, message="Guard Tour hanya bisa dijalankan setelah check-in."), 400
+        if _attendance_action_exists(user.email, today, "checkout"):
+            return jsonify(ok=False, message="Shift sudah check-out. Guard Tour tidak dapat dilanjutkan."), 400
+
+        data = request.form or {}
+        method = (data.get("method") or "qr").strip().lower()
+        scan_payload = (data.get("scan_data") or data.get("scan_payload") or "").strip()
+        tour_raw = (data.get("tour_id") or "").strip()
+        lat_raw = (data.get("lat") or "").strip()
+        lng_raw = (data.get("lng") or data.get("lon") or "").strip()
+        selfie_file = request.files.get("selfie")
+        if method not in PATROL_SCAN_METHODS:
+            return jsonify(ok=False, message="Metode scan tidak valid."), 400
+        if not scan_payload:
+            return jsonify(ok=False, message="Data scan wajib diisi dari scanner."), 400
+        try:
+            tour_id = int(tour_raw)
+        except (TypeError, ValueError):
+            return jsonify(ok=False, message="ID guard tour tidak valid."), 400
+
+        tour = _patrol_tour_by_id(tour_id)
+        if not tour:
+            return jsonify(ok=False, message="Data guard tour tidak ditemukan."), 404
+        if (_row_get(tour, "employee_email", "") or "").lower() != user.email.lower():
+            return _json_forbidden()
+        if _row_get(tour, "date") != today:
+            return jsonify(ok=False, message="Guard tour ini bukan untuk shift hari ini."), 400
+        if (_row_get(tour, "status", "") or "").lower() != PATROL_STATUS_ONGOING:
+            return jsonify(ok=False, message="Guard tour tidak dalam status ongoing."), 400
+
+        route = _patrol_route_by_id(_row_get(tour, "route_id"))
+        if not route:
+            return jsonify(ok=False, message="Rute guard tour tidak ditemukan."), 404
+        checkpoints_full = _patrol_checkpoints(_row_get(route, "id"))
+        if not checkpoints_full:
+            return jsonify(ok=False, message="Checkpoint route tidak tersedia."), 400
+        if len(checkpoints_full) > PATROL_MAX_CHECKPOINTS:
+            return jsonify(
+                ok=False,
+                message="Rute melebihi 30 checkpoint. Upgrade ke PRO+ untuk melanjutkan scan.",
+            ), 400
+        checkpoints = checkpoints_full[:PATROL_MAX_CHECKPOINTS]
+
+        valid_scans = _patrol_valid_scans(tour_id)
+        completed_count = max(
+            len(valid_scans),
+            int(_row_get(tour, "completed_checkpoints", 0) or 0),
+        )
+        expected_sequence = completed_count + 1
+        if expected_sequence > len(checkpoints):
+            _update_patrol_tour_state(
+                tour_id,
+                status=PATROL_STATUS_COMPLETED,
+                completed_checkpoints=len(checkpoints),
+                ended_at=_now_ts(),
+            )
+            return jsonify(ok=False, message="Guard tour sudah selesai."), 400
+
+        matched_checkpoint = _patrol_checkpoint_match(checkpoints, method, scan_payload)
+        checkpoint_id = int(_row_get(matched_checkpoint, "id", 0) or 0) if matched_checkpoint else None
+        checkpoint_sequence = (
+            int(_row_get(matched_checkpoint, "sequence_no", 0) or 0) if matched_checkpoint else None
+        )
+        is_expected_sequence = bool(
+            matched_checkpoint and checkpoint_sequence == expected_sequence
+        )
+        flags = _patrol_security_flags(route)
+        scan_ts = _now_ts()
+
+        lat_value = None
+        lng_value = None
+        gps_distance_m = None
+        gps_valid = not flags["require_gps"]
+        gps_reason = ""
+        if flags["require_gps"]:
+            if not lat_raw or not lng_raw:
+                gps_valid = False
+                gps_reason = "Lokasi GPS wajib aktif pada saat scan checkpoint."
+            else:
+                try:
+                    lat_value = float(lat_raw)
+                    lng_value = float(lng_raw)
+                except ValueError:
+                    gps_valid = False
+                    gps_reason = "Format GPS tidak valid."
+                else:
+                    if matched_checkpoint:
+                        cp_lat = _row_get(matched_checkpoint, "latitude")
+                        cp_lng = _row_get(matched_checkpoint, "longitude")
+                        if cp_lat is None or cp_lng is None:
+                            gps_valid = False
+                            gps_reason = "Koordinat checkpoint belum diatur oleh admin."
+                        else:
+                            try:
+                                cp_lat_f = float(cp_lat)
+                                cp_lng_f = float(cp_lng)
+                            except (TypeError, ValueError):
+                                gps_valid = False
+                                gps_reason = "Koordinat checkpoint tidak valid."
+                            else:
+                                gps_distance_m = _distance_meters(lat_value, lng_value, cp_lat_f, cp_lng_f)
+                                cp_radius = int(
+                                    _row_get(
+                                        matched_checkpoint,
+                                        "radius_meters",
+                                        PATROL_DEFAULT_CHECKPOINT_RADIUS_METERS,
+                                    )
+                                    or PATROL_DEFAULT_CHECKPOINT_RADIUS_METERS
+                                )
+                                gps_valid = gps_distance_m <= cp_radius
+                                if not gps_valid:
+                                    gps_reason = "GPS di luar radius checkpoint."
+                    else:
+                        gps_valid = False
+                        gps_reason = "Checkpoint tidak dikenali untuk validasi GPS."
+
+        selfie_required = flags["require_selfie"]
+        selfie_path = None
+        selfie_valid = not selfie_required
+        if selfie_file and selfie_file.filename:
+            try:
+                selfie_path = _save_upload(selfie_file, "uploads/patrol", 10 * 1024 * 1024)
+                selfie_valid = True if selfie_required else True
+            except ValueError as err:
+                return jsonify(ok=False, message=str(err)), 400
+        elif selfie_required:
+            selfie_valid = False
+
+        last_valid_scan = _patrol_last_valid_scan(tour_id)
+        interval_seconds = None
+        too_fast = False
+        if last_valid_scan:
+            previous_ts = _parse_db_timestamp(_row_get(last_valid_scan, "timestamp"))
+            current_ts = _parse_db_timestamp(scan_ts)
+            if previous_ts and current_ts:
+                interval_seconds = int((current_ts - previous_ts).total_seconds())
+                too_fast = interval_seconds < flags["min_scan_interval_seconds"]
+
+        validation_status = PATROL_SCAN_VALID
+        validation_note = "Checkpoint tervalidasi."
+        failure_reason = ""
+        if not matched_checkpoint:
+            validation_status = "checkpoint_not_found"
+            validation_note = "Marker checkpoint tidak dikenal."
+            failure_reason = "checkpoint_not_found"
+        elif not is_expected_sequence:
+            validation_status = "wrong_sequence"
+            validation_note = "Urutan checkpoint salah."
+            failure_reason = "wrong_sequence"
+        elif too_fast:
+            validation_status = "scan_too_fast"
+            validation_note = "Scan terlalu cepat dari checkpoint sebelumnya."
+            failure_reason = "scan_too_fast"
+        elif not gps_valid:
+            validation_status = "gps_invalid"
+            validation_note = gps_reason or "GPS tidak valid."
+            failure_reason = "gps_invalid"
+        elif not selfie_valid:
+            validation_status = "selfie_missing"
+            validation_note = "Selfie wajib pada mode keamanan saat ini."
+            failure_reason = "selfie_missing"
+
+        _insert_patrol_scan(
+            tour_id=tour_id,
+            route_id=int(_row_get(route, "id", 0) or 0),
+            employee_email=user.email,
+            checkpoint_id=checkpoint_id,
+            checkpoint_sequence=checkpoint_sequence,
+            expected_sequence=expected_sequence,
+            is_expected_sequence=is_expected_sequence,
+            method=method,
+            scan_payload=scan_payload,
+            timestamp_value=scan_ts,
+            lat=lat_value,
+            lng=lng_value,
+            gps_distance_m=gps_distance_m,
+            gps_valid=gps_valid,
+            selfie_path=selfie_path,
+            selfie_required=selfie_required,
+            selfie_valid=selfie_valid,
+            interval_seconds=interval_seconds,
+            validation_status=validation_status,
+            validation_note=validation_note,
+        )
+
+        if failure_reason:
+            _update_patrol_tour_state(
+                tour_id,
+                status=PATROL_STATUS_INVALID,
+                ended_at=scan_ts,
+                append_reason=failure_reason,
+            )
+            _log_audit_event(
+                entity_type="patrol_tour",
+                entity_id=tour_id,
+                action="PATROL_INVALID",
+                actor=user,
+                summary="Guard tour tidak valid.",
+                details={
+                    "reason": failure_reason,
+                    "checkpoint_id": checkpoint_id,
+                    "method": method,
+                },
+            )
+            return jsonify(
+                ok=False,
+                message=validation_note,
+                data=_patrol_status_payload(user),
+            ), 400
+
+        completed_count = expected_sequence
+        if completed_count >= len(checkpoints):
+            _update_patrol_tour_state(
+                tour_id,
+                status=PATROL_STATUS_COMPLETED,
+                completed_checkpoints=len(checkpoints),
+                ended_at=scan_ts,
+            )
+            _log_audit_event(
+                entity_type="patrol_tour",
+                entity_id=tour_id,
+                action="PATROL_COMPLETED",
+                actor=user,
+                summary="Guard tour selesai.",
+                details={"route_id": _row_get(route, "id"), "checkpoints": len(checkpoints)},
+            )
+            return jsonify(
+                ok=True,
+                message="Semua checkpoint selesai. Guard tour completed.",
+                data=_patrol_status_payload(user),
+            ), 200
+
+        _update_patrol_tour_state(
+            tour_id,
+            status=PATROL_STATUS_ONGOING,
+            completed_checkpoints=completed_count,
+        )
+        return jsonify(
+            ok=True,
+            message=f"Checkpoint {expected_sequence}/{len(checkpoints)} tervalidasi.",
+            data=_patrol_status_payload(user),
+        ), 200
 
     @app.route("/api/leave/request", methods=["POST"])
     def leave_request():
@@ -1769,6 +2499,15 @@ DEFAULT_ATTENDANCE_POLICY = {
     "auto_checkout": 0,
     "cutoff_time": None,
 }
+PATROL_STATUS_ONGOING = "ongoing"
+PATROL_STATUS_COMPLETED = "completed"
+PATROL_STATUS_INCOMPLETE = "incomplete"
+PATROL_STATUS_INVALID = "invalid"
+PATROL_SCAN_VALID = "valid"
+PATROL_SCAN_METHODS = {"qr", "nfc"}
+PATROL_MAX_CHECKPOINTS = 30
+PATROL_MIN_SCAN_INTERVAL_SECONDS = 45
+PATROL_DEFAULT_CHECKPOINT_RADIUS_METERS = 35
 
 
 @dataclass
@@ -5096,6 +5835,69 @@ def _cleanup_orphans(conn: sqlite3.Connection) -> None:
               AND manual_request_id NOT IN (SELECT id FROM manual_attendance_requests)
             """
         )
+    if _table_exists(conn, "patrol_routes"):
+        conn.execute(
+            """
+            DELETE FROM patrol_routes
+            WHERE site_id NOT IN (SELECT id FROM sites)
+               OR (client_id IS NOT NULL AND client_id NOT IN (SELECT id FROM clients))
+               OR (shift_id IS NOT NULL AND shift_id NOT IN (SELECT id FROM shifts))
+            """
+        )
+    if _table_exists(conn, "patrol_checkpoints"):
+        conn.execute(
+            """
+            DELETE FROM patrol_checkpoints
+            WHERE route_id NOT IN (SELECT id FROM patrol_routes)
+            """
+        )
+    if _table_exists(conn, "patrol_tours"):
+        conn.execute(
+            """
+            DELETE FROM patrol_tours
+            WHERE route_id NOT IN (SELECT id FROM patrol_routes)
+            """
+        )
+        conn.execute(
+            """
+            UPDATE patrol_tours
+            SET assignment_id = NULL
+            WHERE assignment_id IS NOT NULL
+              AND assignment_id NOT IN (SELECT id FROM assignments)
+            """
+        )
+        conn.execute(
+            """
+            UPDATE patrol_tours
+            SET employee_user_id = NULL
+            WHERE employee_user_id IS NOT NULL
+              AND employee_user_id NOT IN (SELECT id FROM users)
+            """
+        )
+        conn.execute(
+            """
+            UPDATE patrol_tours
+            SET employee_id = NULL
+            WHERE employee_id IS NOT NULL
+              AND employee_id NOT IN (SELECT id FROM employees)
+            """
+        )
+    if _table_exists(conn, "patrol_scans"):
+        conn.execute(
+            """
+            DELETE FROM patrol_scans
+            WHERE tour_id NOT IN (SELECT id FROM patrol_tours)
+               OR route_id NOT IN (SELECT id FROM patrol_routes)
+            """
+        )
+        conn.execute(
+            """
+            UPDATE patrol_scans
+            SET checkpoint_id = NULL
+            WHERE checkpoint_id IS NOT NULL
+              AND checkpoint_id NOT IN (SELECT id FROM patrol_checkpoints)
+            """
+        )
 
 
 def _dedupe_employees(conn: sqlite3.Connection) -> None:
@@ -5451,6 +6253,134 @@ def _init_db() -> None:
         )
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS patrol_routes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                client_id INTEGER,
+                site_id INTEGER NOT NULL,
+                shift_id INTEGER,
+                name TEXT NOT NULL,
+                description TEXT,
+                strict_mode INTEGER DEFAULT 0,
+                require_selfie INTEGER DEFAULT 0,
+                require_gps INTEGER DEFAULT 1,
+                min_scan_interval_seconds INTEGER DEFAULT 45,
+                is_active INTEGER DEFAULT 1,
+                created_at TEXT,
+                updated_at TEXT,
+                FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE RESTRICT,
+                FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE CASCADE,
+                FOREIGN KEY (shift_id) REFERENCES shifts(id) ON DELETE SET NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS patrol_checkpoints (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                route_id INTEGER NOT NULL,
+                sequence_no INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                qr_code TEXT,
+                nfc_tag TEXT,
+                latitude REAL,
+                longitude REAL,
+                radius_meters INTEGER DEFAULT 35,
+                is_active INTEGER DEFAULT 1,
+                created_at TEXT,
+                updated_at TEXT,
+                FOREIGN KEY (route_id) REFERENCES patrol_routes(id) ON DELETE CASCADE
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS patrol_tours (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                route_id INTEGER NOT NULL,
+                assignment_id INTEGER,
+                employee_user_id INTEGER,
+                employee_id INTEGER,
+                employee_email TEXT NOT NULL,
+                site_id INTEGER,
+                client_id INTEGER,
+                shift_id INTEGER,
+                date TEXT NOT NULL,
+                started_at TEXT NOT NULL,
+                ended_at TEXT,
+                status TEXT NOT NULL DEFAULT 'ongoing',
+                total_checkpoints INTEGER DEFAULT 0,
+                completed_checkpoints INTEGER DEFAULT 0,
+                strict_mode INTEGER DEFAULT 0,
+                require_selfie INTEGER DEFAULT 0,
+                require_gps INTEGER DEFAULT 1,
+                min_scan_interval_seconds INTEGER DEFAULT 45,
+                invalid_reasons_json TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT,
+                FOREIGN KEY (route_id) REFERENCES patrol_routes(id) ON DELETE RESTRICT,
+                FOREIGN KEY (assignment_id) REFERENCES assignments(id) ON DELETE SET NULL,
+                FOREIGN KEY (employee_user_id) REFERENCES users(id) ON DELETE SET NULL,
+                FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE SET NULL,
+                FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE SET NULL,
+                FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE SET NULL,
+                FOREIGN KEY (shift_id) REFERENCES shifts(id) ON DELETE SET NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS patrol_scans (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tour_id INTEGER NOT NULL,
+                route_id INTEGER NOT NULL,
+                employee_email TEXT NOT NULL,
+                checkpoint_id INTEGER,
+                checkpoint_sequence INTEGER,
+                expected_sequence INTEGER,
+                is_expected_sequence INTEGER DEFAULT 0,
+                method TEXT NOT NULL,
+                scan_payload TEXT,
+                timestamp TEXT NOT NULL,
+                lat REAL,
+                lng REAL,
+                gps_distance_m REAL,
+                gps_valid INTEGER DEFAULT 0,
+                selfie_path TEXT,
+                selfie_required INTEGER DEFAULT 0,
+                selfie_valid INTEGER DEFAULT 0,
+                interval_seconds INTEGER,
+                validation_status TEXT NOT NULL,
+                validation_note TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (tour_id) REFERENCES patrol_tours(id) ON DELETE CASCADE,
+                FOREIGN KEY (route_id) REFERENCES patrol_routes(id) ON DELETE CASCADE,
+                FOREIGN KEY (checkpoint_id) REFERENCES patrol_checkpoints(id) ON DELETE SET NULL
+            )
+            """
+        )
+        try:
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_patrol_checkpoint_sequence ON patrol_checkpoints(route_id, sequence_no)"
+            )
+        except sqlite3.IntegrityError:
+            pass
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_patrol_routes_site_shift ON patrol_routes(site_id, shift_id, is_active)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_patrol_tours_employee_date ON patrol_tours(employee_email, date)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_patrol_tours_status ON patrol_tours(status)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_patrol_scans_tour_ts ON patrol_scans(tour_id, timestamp)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_patrol_scans_validation ON patrol_scans(validation_status)"
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS role_permissions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 role TEXT NOT NULL UNIQUE,
@@ -5513,6 +6443,128 @@ def _init_db() -> None:
             _ensure_column(conn, "sites", "shift_mode", "shift_mode TEXT")
             _ensure_column(conn, "sites", "shift_data", "shift_data TEXT")
             _ensure_column(conn, "sites", "updated_at", "updated_at TEXT")
+        if _table_exists(conn, "patrol_routes"):
+            _ensure_column(conn, "patrol_routes", "client_id", "client_id INTEGER")
+            _ensure_column(conn, "patrol_routes", "site_id", "site_id INTEGER")
+            _ensure_column(conn, "patrol_routes", "shift_id", "shift_id INTEGER")
+            _ensure_column(conn, "patrol_routes", "name", "name TEXT")
+            _ensure_column(conn, "patrol_routes", "description", "description TEXT")
+            _ensure_column(conn, "patrol_routes", "strict_mode", "strict_mode INTEGER DEFAULT 0")
+            _ensure_column(conn, "patrol_routes", "require_selfie", "require_selfie INTEGER DEFAULT 0")
+            _ensure_column(conn, "patrol_routes", "require_gps", "require_gps INTEGER DEFAULT 1")
+            _ensure_column(
+                conn,
+                "patrol_routes",
+                "min_scan_interval_seconds",
+                "min_scan_interval_seconds INTEGER DEFAULT 45",
+            )
+            _ensure_column(conn, "patrol_routes", "is_active", "is_active INTEGER DEFAULT 1")
+            _ensure_column(conn, "patrol_routes", "created_at", "created_at TEXT")
+            _ensure_column(conn, "patrol_routes", "updated_at", "updated_at TEXT")
+        if _table_exists(conn, "patrol_checkpoints"):
+            _ensure_column(conn, "patrol_checkpoints", "route_id", "route_id INTEGER")
+            _ensure_column(conn, "patrol_checkpoints", "sequence_no", "sequence_no INTEGER")
+            _ensure_column(conn, "patrol_checkpoints", "name", "name TEXT")
+            _ensure_column(conn, "patrol_checkpoints", "qr_code", "qr_code TEXT")
+            _ensure_column(conn, "patrol_checkpoints", "nfc_tag", "nfc_tag TEXT")
+            _ensure_column(conn, "patrol_checkpoints", "latitude", "latitude REAL")
+            _ensure_column(conn, "patrol_checkpoints", "longitude", "longitude REAL")
+            _ensure_column(
+                conn,
+                "patrol_checkpoints",
+                "radius_meters",
+                "radius_meters INTEGER DEFAULT 35",
+            )
+            _ensure_column(conn, "patrol_checkpoints", "is_active", "is_active INTEGER DEFAULT 1")
+            _ensure_column(conn, "patrol_checkpoints", "created_at", "created_at TEXT")
+            _ensure_column(conn, "patrol_checkpoints", "updated_at", "updated_at TEXT")
+            try:
+                conn.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_patrol_checkpoint_sequence ON patrol_checkpoints(route_id, sequence_no)"
+                )
+            except sqlite3.IntegrityError:
+                pass
+        if _table_exists(conn, "patrol_tours"):
+            _ensure_column(conn, "patrol_tours", "route_id", "route_id INTEGER")
+            _ensure_column(conn, "patrol_tours", "assignment_id", "assignment_id INTEGER")
+            _ensure_column(conn, "patrol_tours", "employee_user_id", "employee_user_id INTEGER")
+            _ensure_column(conn, "patrol_tours", "employee_id", "employee_id INTEGER")
+            _ensure_column(conn, "patrol_tours", "employee_email", "employee_email TEXT")
+            _ensure_column(conn, "patrol_tours", "site_id", "site_id INTEGER")
+            _ensure_column(conn, "patrol_tours", "client_id", "client_id INTEGER")
+            _ensure_column(conn, "patrol_tours", "shift_id", "shift_id INTEGER")
+            _ensure_column(conn, "patrol_tours", "date", "date TEXT")
+            _ensure_column(conn, "patrol_tours", "started_at", "started_at TEXT")
+            _ensure_column(conn, "patrol_tours", "ended_at", "ended_at TEXT")
+            _ensure_column(
+                conn,
+                "patrol_tours",
+                "status",
+                "status TEXT NOT NULL DEFAULT 'ongoing'",
+            )
+            _ensure_column(conn, "patrol_tours", "total_checkpoints", "total_checkpoints INTEGER DEFAULT 0")
+            _ensure_column(
+                conn,
+                "patrol_tours",
+                "completed_checkpoints",
+                "completed_checkpoints INTEGER DEFAULT 0",
+            )
+            _ensure_column(conn, "patrol_tours", "strict_mode", "strict_mode INTEGER DEFAULT 0")
+            _ensure_column(conn, "patrol_tours", "require_selfie", "require_selfie INTEGER DEFAULT 0")
+            _ensure_column(conn, "patrol_tours", "require_gps", "require_gps INTEGER DEFAULT 1")
+            _ensure_column(
+                conn,
+                "patrol_tours",
+                "min_scan_interval_seconds",
+                "min_scan_interval_seconds INTEGER DEFAULT 45",
+            )
+            _ensure_column(conn, "patrol_tours", "invalid_reasons_json", "invalid_reasons_json TEXT")
+            _ensure_column(conn, "patrol_tours", "created_at", "created_at TEXT")
+            _ensure_column(conn, "patrol_tours", "updated_at", "updated_at TEXT")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_patrol_tours_employee_date ON patrol_tours(employee_email, date)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_patrol_tours_status ON patrol_tours(status)"
+            )
+        if _table_exists(conn, "patrol_scans"):
+            _ensure_column(conn, "patrol_scans", "tour_id", "tour_id INTEGER")
+            _ensure_column(conn, "patrol_scans", "route_id", "route_id INTEGER")
+            _ensure_column(conn, "patrol_scans", "employee_email", "employee_email TEXT")
+            _ensure_column(conn, "patrol_scans", "checkpoint_id", "checkpoint_id INTEGER")
+            _ensure_column(conn, "patrol_scans", "checkpoint_sequence", "checkpoint_sequence INTEGER")
+            _ensure_column(conn, "patrol_scans", "expected_sequence", "expected_sequence INTEGER")
+            _ensure_column(
+                conn,
+                "patrol_scans",
+                "is_expected_sequence",
+                "is_expected_sequence INTEGER DEFAULT 0",
+            )
+            _ensure_column(conn, "patrol_scans", "method", "method TEXT")
+            _ensure_column(conn, "patrol_scans", "scan_payload", "scan_payload TEXT")
+            _ensure_column(conn, "patrol_scans", "timestamp", "timestamp TEXT")
+            _ensure_column(conn, "patrol_scans", "lat", "lat REAL")
+            _ensure_column(conn, "patrol_scans", "lng", "lng REAL")
+            _ensure_column(conn, "patrol_scans", "gps_distance_m", "gps_distance_m REAL")
+            _ensure_column(conn, "patrol_scans", "gps_valid", "gps_valid INTEGER DEFAULT 0")
+            _ensure_column(conn, "patrol_scans", "selfie_path", "selfie_path TEXT")
+            _ensure_column(
+                conn,
+                "patrol_scans",
+                "selfie_required",
+                "selfie_required INTEGER DEFAULT 0",
+            )
+            _ensure_column(conn, "patrol_scans", "selfie_valid", "selfie_valid INTEGER DEFAULT 0")
+            _ensure_column(conn, "patrol_scans", "interval_seconds", "interval_seconds INTEGER")
+            _ensure_column(conn, "patrol_scans", "validation_status", "validation_status TEXT")
+            _ensure_column(conn, "patrol_scans", "validation_note", "validation_note TEXT")
+            _ensure_column(conn, "patrol_scans", "created_at", "created_at TEXT")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_patrol_scans_tour_ts ON patrol_scans(tour_id, timestamp)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_patrol_scans_validation ON patrol_scans(validation_status)"
+            )
         if _table_exists(conn, "clients"):
             _ensure_column(conn, "clients", "is_active", "is_active INTEGER DEFAULT 1")
             _ensure_column(conn, "clients", "legal_name", "legal_name TEXT")
@@ -6580,6 +7632,1132 @@ def _within_site_radius(lat: float, lng: float, site: sqlite3.Row | dict | None)
     a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
     return (r * c) <= radius_m
+
+
+def _parse_db_timestamp(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    raw = str(value).strip()
+    if not raw:
+        return None
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            return datetime.strptime(raw, fmt)
+        except ValueError:
+            continue
+    try:
+        return datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+
+
+def _distance_meters(lat_a: float, lng_a: float, lat_b: float, lng_b: float) -> float:
+    r = 6371000
+    phi1 = math.radians(lat_a)
+    phi2 = math.radians(lat_b)
+    dphi = math.radians(lat_b - lat_a)
+    dlambda = math.radians(lng_b - lng_a)
+    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return r * c
+
+
+def _patrol_security_flags(route: dict | sqlite3.Row | None) -> dict:
+    strict_mode = int(_row_get(route, "strict_mode", 0) or 0) == 1
+    require_selfie = strict_mode or int(_row_get(route, "require_selfie", 0) or 0) == 1
+    require_gps = strict_mode or int(_row_get(route, "require_gps", 1) or 0) == 1
+    min_interval = int(
+        _row_get(route, "min_scan_interval_seconds", PATROL_MIN_SCAN_INTERVAL_SECONDS)
+        or PATROL_MIN_SCAN_INTERVAL_SECONDS
+    )
+    if min_interval < 0:
+        min_interval = 0
+    return {
+        "strict_mode": strict_mode,
+        "require_selfie": require_selfie,
+        "require_gps": require_gps,
+        "min_scan_interval_seconds": min_interval,
+    }
+
+
+def _active_patrol_route(site_id: int | None, shift_id: int | None) -> dict | None:
+    if not site_id:
+        return None
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "patrol_routes"):
+            return None
+        if shift_id:
+            cur = conn.execute(
+                """
+                SELECT *
+                FROM patrol_routes
+                WHERE site_id = ?
+                  AND is_active = 1
+                  AND (shift_id IS NULL OR shift_id = ?)
+                ORDER BY
+                    CASE
+                        WHEN shift_id = ? THEN 0
+                        WHEN shift_id IS NULL THEN 1
+                        ELSE 2
+                    END,
+                    id DESC
+                LIMIT 1
+                """,
+                (site_id, shift_id, shift_id),
+            )
+        else:
+            cur = conn.execute(
+                """
+                SELECT *
+                FROM patrol_routes
+                WHERE site_id = ?
+                  AND is_active = 1
+                ORDER BY
+                    CASE WHEN shift_id IS NULL THEN 0 ELSE 1 END,
+                    id DESC
+                LIMIT 1
+                """,
+                (site_id,),
+            )
+        row = cur.fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def _patrol_route_by_id(route_id: int | None) -> dict | None:
+    if not route_id:
+        return None
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "patrol_routes"):
+            return None
+        row = conn.execute(
+            "SELECT * FROM patrol_routes WHERE id = ?",
+            (route_id,),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def _patrol_checkpoints(route_id: int | None) -> list[dict]:
+    if not route_id:
+        return []
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "patrol_checkpoints"):
+            return []
+        cur = conn.execute(
+            """
+            SELECT *
+            FROM patrol_checkpoints
+            WHERE route_id = ? AND is_active = 1
+            ORDER BY sequence_no ASC, id ASC
+            """,
+            (route_id,),
+        )
+        return [dict(row) for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def _patrol_checkpoint_match(
+    checkpoints: list[dict], method: str, scan_payload: str
+) -> dict | None:
+    payload = (scan_payload or "").strip()
+    if not payload:
+        return None
+    payload_lower = payload.lower()
+    for cp in checkpoints:
+        token = _row_get(cp, "qr_code", "") if method == "qr" else _row_get(cp, "nfc_tag", "")
+        token_str = (str(token).strip() if token is not None else "")
+        if token_str and token_str.lower() == payload_lower:
+            return cp
+        cp_id = int(_row_get(cp, "id", 0) or 0)
+        if cp_id and payload_lower in {f"cp:{cp_id}", f"checkpoint:{cp_id}", f"cp-{cp_id}"}:
+            return cp
+    return None
+
+
+def _patrol_latest_tour_for_today(
+    employee_email: str,
+    today: str,
+    route_id: int | None = None,
+) -> dict | None:
+    email = (employee_email or "").strip().lower()
+    if not email:
+        return None
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "patrol_tours"):
+            return None
+        params: list = [email, today]
+        clause = ""
+        if route_id:
+            clause = " AND route_id = ?"
+            params.append(route_id)
+        cur = conn.execute(
+            f"""
+            SELECT *
+            FROM patrol_tours
+            WHERE lower(employee_email) = ?
+              AND date = ?
+              {clause}
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            tuple(params),
+        )
+        row = cur.fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def _patrol_tour_by_id(tour_id: int) -> dict | None:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "patrol_tours"):
+            return None
+        cur = conn.execute("SELECT * FROM patrol_tours WHERE id = ?", (tour_id,))
+        row = cur.fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def _patrol_tour_scans(tour_id: int) -> list[dict]:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "patrol_scans"):
+            return []
+        cur = conn.execute(
+            """
+            SELECT *
+            FROM patrol_scans
+            WHERE tour_id = ?
+            ORDER BY id ASC
+            """,
+            (tour_id,),
+        )
+        return [dict(row) for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def _patrol_valid_scans(tour_id: int) -> list[dict]:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "patrol_scans"):
+            return []
+        cur = conn.execute(
+            """
+            SELECT *
+            FROM patrol_scans
+            WHERE tour_id = ?
+              AND validation_status = ?
+            ORDER BY id ASC
+            """,
+            (tour_id, PATROL_SCAN_VALID),
+        )
+        return [dict(row) for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def _patrol_last_valid_scan(tour_id: int) -> dict | None:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "patrol_scans"):
+            return None
+        cur = conn.execute(
+            """
+            SELECT *
+            FROM patrol_scans
+            WHERE tour_id = ?
+              AND validation_status = ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (tour_id, PATROL_SCAN_VALID),
+        )
+        row = cur.fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def _recent_patrol_tours(employee_email: str, limit: int = 6) -> list[dict]:
+    email = (employee_email or "").strip().lower()
+    if not email:
+        return []
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "patrol_tours"):
+            return []
+        if limit <= 0:
+            limit = 6
+        cur = conn.execute(
+            """
+            SELECT
+                id, route_id, employee_email, date, started_at, ended_at, status,
+                total_checkpoints, completed_checkpoints, updated_at
+            FROM patrol_tours
+            WHERE lower(employee_email) = ?
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (email, limit),
+        )
+        return [dict(row) for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def _create_patrol_tour(
+    *,
+    route: dict,
+    assignment: dict,
+    employee: dict | None,
+    user: User,
+    total_checkpoints: int,
+) -> dict:
+    now_ts = _now_ts()
+    flags = _patrol_security_flags(route)
+    conn = _db_connect()
+    try:
+        cur = conn.execute(
+            """
+            INSERT INTO patrol_tours (
+                route_id, assignment_id, employee_user_id, employee_id, employee_email,
+                site_id, client_id, shift_id, date, started_at, ended_at, status,
+                total_checkpoints, completed_checkpoints,
+                strict_mode, require_selfie, require_gps, min_scan_interval_seconds,
+                invalid_reasons_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                _row_get(route, "id"),
+                _row_get(assignment, "id"),
+                user.id,
+                _row_get(employee, "id"),
+                user.email,
+                _row_get(assignment, "site_id"),
+                _row_get(route, "client_id"),
+                _row_get(assignment, "shift_id"),
+                _today_key(),
+                now_ts,
+                None,
+                PATROL_STATUS_ONGOING,
+                total_checkpoints,
+                0,
+                1 if flags["strict_mode"] else 0,
+                1 if flags["require_selfie"] else 0,
+                1 if flags["require_gps"] else 0,
+                flags["min_scan_interval_seconds"],
+                None,
+                now_ts,
+                now_ts,
+            ),
+        )
+        tour_id = int(cur.lastrowid)
+    finally:
+        conn.commit()
+        conn.close()
+    return _patrol_tour_by_id(tour_id) or {"id": tour_id}
+
+
+def _append_patrol_invalid_reason(existing_json: str | None, reason: str) -> str:
+    clean_reason = (reason or "").strip()
+    reasons: list[str] = []
+    if existing_json:
+        try:
+            parsed = json.loads(existing_json)
+            if isinstance(parsed, list):
+                reasons = [str(item).strip() for item in parsed if str(item).strip()]
+        except json.JSONDecodeError:
+            reasons = []
+    if clean_reason and clean_reason not in reasons:
+        reasons.append(clean_reason)
+    return json.dumps(reasons, ensure_ascii=True)
+
+
+def _update_patrol_tour_state(
+    tour_id: int,
+    *,
+    status: str | None = None,
+    completed_checkpoints: int | None = None,
+    ended_at: str | None = None,
+    append_reason: str | None = None,
+) -> None:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "patrol_tours"):
+            return
+        row = conn.execute(
+            "SELECT id, invalid_reasons_json FROM patrol_tours WHERE id = ?",
+            (tour_id,),
+        ).fetchone()
+        if not row:
+            return
+        updates: list[str] = []
+        params: list = []
+        if status:
+            updates.append("status = ?")
+            params.append(status)
+        if completed_checkpoints is not None:
+            updates.append("completed_checkpoints = ?")
+            params.append(max(0, completed_checkpoints))
+        if ended_at is not None:
+            updates.append("ended_at = ?")
+            params.append(ended_at)
+        if append_reason:
+            merged = _append_patrol_invalid_reason(row["invalid_reasons_json"], append_reason)
+            updates.append("invalid_reasons_json = ?")
+            params.append(merged)
+        updates.append("updated_at = ?")
+        params.append(_now_ts())
+        params.append(tour_id)
+        conn.execute(
+            f"UPDATE patrol_tours SET {', '.join(updates)} WHERE id = ?",
+            tuple(params),
+        )
+    finally:
+        conn.commit()
+        conn.close()
+
+
+def _insert_patrol_scan(
+    *,
+    tour_id: int,
+    route_id: int,
+    employee_email: str,
+    checkpoint_id: int | None,
+    checkpoint_sequence: int | None,
+    expected_sequence: int | None,
+    is_expected_sequence: bool,
+    method: str,
+    scan_payload: str,
+    timestamp_value: str,
+    lat: float | None,
+    lng: float | None,
+    gps_distance_m: float | None,
+    gps_valid: bool,
+    selfie_path: str | None,
+    selfie_required: bool,
+    selfie_valid: bool,
+    interval_seconds: int | None,
+    validation_status: str,
+    validation_note: str | None,
+) -> int:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "patrol_scans"):
+            return 0
+        cur = conn.execute(
+            """
+            INSERT INTO patrol_scans (
+                tour_id, route_id, employee_email,
+                checkpoint_id, checkpoint_sequence, expected_sequence, is_expected_sequence,
+                method, scan_payload, timestamp,
+                lat, lng, gps_distance_m, gps_valid,
+                selfie_path, selfie_required, selfie_valid,
+                interval_seconds, validation_status, validation_note,
+                created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                tour_id,
+                route_id,
+                employee_email,
+                checkpoint_id,
+                checkpoint_sequence,
+                expected_sequence,
+                1 if is_expected_sequence else 0,
+                method,
+                scan_payload,
+                timestamp_value,
+                lat,
+                lng,
+                gps_distance_m,
+                1 if gps_valid else 0,
+                selfie_path,
+                1 if selfie_required else 0,
+                1 if selfie_valid else 0,
+                interval_seconds,
+                validation_status,
+                validation_note,
+                _now_ts(),
+            ),
+        )
+        return int(cur.lastrowid)
+    finally:
+        conn.commit()
+        conn.close()
+
+
+def _close_open_patrol_tours_on_checkout(employee_email: str, date_value: str) -> int:
+    email = (employee_email or "").strip().lower()
+    if not email:
+        return 0
+    now_ts = _now_ts()
+    closed_count = 0
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "patrol_tours"):
+            return 0
+        rows = conn.execute(
+            """
+            SELECT id, total_checkpoints, completed_checkpoints
+            FROM patrol_tours
+            WHERE lower(employee_email) = ?
+              AND date = ?
+              AND status = ?
+            """,
+            (email, date_value, PATROL_STATUS_ONGOING),
+        ).fetchall()
+        for row in rows:
+            total_cp = int(row["total_checkpoints"] or 0)
+            done_cp = int(row["completed_checkpoints"] or 0)
+            is_completed = total_cp > 0 and done_cp >= total_cp
+            if is_completed:
+                conn.execute(
+                    """
+                    UPDATE patrol_tours
+                    SET status = ?, ended_at = ?, updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (PATROL_STATUS_COMPLETED, now_ts, now_ts, row["id"]),
+                )
+            else:
+                merged = _append_patrol_invalid_reason(
+                    None,
+                    "checkout_before_tour_complete",
+                )
+                conn.execute(
+                    """
+                    UPDATE patrol_tours
+                    SET status = ?, ended_at = ?, invalid_reasons_json = ?, updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (PATROL_STATUS_INCOMPLETE, now_ts, merged, now_ts, row["id"]),
+                )
+            closed_count += 1
+        return closed_count
+    finally:
+        conn.commit()
+        conn.close()
+
+
+def _patrol_status_payload(user: User) -> dict:
+    today = _today_key()
+    employee = _employee_by_email(user.email, only_active=False)
+    assignment = _get_active_assignment(user.id)
+    site = _get_site_by_id(_row_get(assignment, "site_id")) if assignment else None
+    route = _active_patrol_route(_row_get(assignment, "site_id"), _row_get(assignment, "shift_id"))
+    checkpoints_full = _patrol_checkpoints(_row_get(route, "id")) if route else []
+    overflow_count = max(0, len(checkpoints_full) - PATROL_MAX_CHECKPOINTS)
+    checkpoints = checkpoints_full[:PATROL_MAX_CHECKPOINTS]
+
+    tour = _patrol_latest_tour_for_today(user.email, today, _row_get(route, "id")) if route else None
+    valid_scans = _patrol_valid_scans(int(_row_get(tour, "id", 0) or 0)) if tour else []
+    done_sequences: set[int] = set()
+    done_meta: dict[int, dict] = {}
+    for row in valid_scans:
+        seq = int(_row_get(row, "checkpoint_sequence", 0) or 0)
+        if seq <= 0:
+            continue
+        done_sequences.add(seq)
+        done_meta[seq] = row
+
+    total_checkpoint_count = len(checkpoints)
+    completed_count = len(done_sequences)
+    if tour:
+        completed_count = max(completed_count, int(_row_get(tour, "completed_checkpoints", 0) or 0))
+        total_checkpoint_count = int(_row_get(tour, "total_checkpoints", total_checkpoint_count) or total_checkpoint_count)
+    if total_checkpoint_count < 0:
+        total_checkpoint_count = 0
+
+    checkin_exists = _attendance_action_exists(user.email, today, "checkin")
+    checkout_exists = _attendance_action_exists(user.email, today, "checkout")
+
+    checkpoint_rows: list[dict] = []
+    next_sequence = completed_count + 1 if total_checkpoint_count > 0 else 1
+    for idx, cp in enumerate(checkpoints, start=1):
+        sequence_no = int(_row_get(cp, "sequence_no", idx) or idx)
+        if sequence_no in done_sequences:
+            cp_status = "done"
+        elif tour and _row_get(tour, "status") == PATROL_STATUS_ONGOING and sequence_no == next_sequence:
+            cp_status = "next"
+        else:
+            cp_status = "pending"
+        cp_payload = {
+            "id": int(_row_get(cp, "id", 0) or 0),
+            "sequence_no": sequence_no,
+            "name": _row_get(cp, "name", f"Checkpoint {sequence_no}") or f"Checkpoint {sequence_no}",
+            "status": cp_status,
+            "radius_meters": int(
+                _row_get(cp, "radius_meters", PATROL_DEFAULT_CHECKPOINT_RADIUS_METERS)
+                or PATROL_DEFAULT_CHECKPOINT_RADIUS_METERS
+            ),
+            "marker_type": "qr+nfc"
+            if (_row_get(cp, "qr_code") and _row_get(cp, "nfc_tag"))
+            else ("qr" if _row_get(cp, "qr_code") else ("nfc" if _row_get(cp, "nfc_tag") else "-")),
+            "scanned_at": _row_get(done_meta.get(sequence_no), "timestamp"),
+        }
+        checkpoint_rows.append(cp_payload)
+
+    flags = _patrol_security_flags(route)
+    tour_status = PATROL_STATUS_ONGOING
+    if tour:
+        tour_status = (_row_get(tour, "status", PATROL_STATUS_ONGOING) or PATROL_STATUS_ONGOING).strip().lower()
+    elif checkin_exists and checkout_exists:
+        tour_status = PATROL_STATUS_INCOMPLETE
+
+    can_start = bool(
+        employee
+        and assignment
+        and route
+        and total_checkpoint_count > 0
+        and overflow_count == 0
+        and checkin_exists
+        and not checkout_exists
+        and not tour
+    )
+    can_scan = bool(
+        tour
+        and tour_status == PATROL_STATUS_ONGOING
+        and checkin_exists
+        and not checkout_exists
+    )
+    progress_percent = 0
+    if total_checkpoint_count > 0:
+        progress_percent = int(round((completed_count / total_checkpoint_count) * 100))
+    if progress_percent > 100:
+        progress_percent = 100
+    if progress_percent < 0:
+        progress_percent = 0
+
+    route_payload = None
+    if route:
+        route_payload = {
+            "id": int(_row_get(route, "id", 0) or 0),
+            "name": _row_get(route, "name", "Guard Tour Route") or "Guard Tour Route",
+            "description": _row_get(route, "description", "") or "",
+            "site_id": _row_get(route, "site_id"),
+            "shift_id": _row_get(route, "shift_id"),
+            "strict_mode": flags["strict_mode"],
+            "require_selfie": flags["require_selfie"],
+            "require_gps": flags["require_gps"],
+            "min_scan_interval_seconds": flags["min_scan_interval_seconds"],
+            "max_checkpoints": PATROL_MAX_CHECKPOINTS,
+        }
+
+    recent_rows = _recent_patrol_tours(user.email, limit=5)
+    history = [
+        {
+            "id": int(_row_get(row, "id", 0) or 0),
+            "route_id": _row_get(row, "route_id"),
+            "date": _row_get(row, "date"),
+            "status": (_row_get(row, "status", "") or "").lower(),
+            "started_at": _row_get(row, "started_at"),
+            "ended_at": _row_get(row, "ended_at"),
+            "completed_checkpoints": int(_row_get(row, "completed_checkpoints", 0) or 0),
+            "total_checkpoints": int(_row_get(row, "total_checkpoints", 0) or 0),
+        }
+        for row in recent_rows
+    ]
+    invalid_reasons: list[str] = []
+    if tour:
+        raw_reasons = _row_get(tour, "invalid_reasons_json", "")
+        try:
+            parsed_reasons = json.loads(raw_reasons or "[]")
+            if isinstance(parsed_reasons, list):
+                invalid_reasons = [str(item) for item in parsed_reasons if str(item).strip()]
+        except json.JSONDecodeError:
+            invalid_reasons = []
+
+    return {
+        "status": tour_status,
+        "checkin_exists": checkin_exists,
+        "checkout_exists": checkout_exists,
+        "site_name": _row_get(site, "name"),
+        "assignment_id": _row_get(assignment, "id"),
+        "route": route_payload,
+        "tour": {
+            "id": int(_row_get(tour, "id", 0) or 0) if tour else None,
+            "status": tour_status,
+            "started_at": _row_get(tour, "started_at") if tour else None,
+            "ended_at": _row_get(tour, "ended_at") if tour else None,
+            "invalid_reasons": invalid_reasons,
+        },
+        "progress": {
+            "completed": completed_count,
+            "total": total_checkpoint_count,
+            "percent": progress_percent,
+            "label": f"{completed_count}/{total_checkpoint_count}",
+            "next_sequence": next_sequence if total_checkpoint_count > 0 else None,
+        },
+        "constraints": {
+            "max_checkpoints": PATROL_MAX_CHECKPOINTS,
+            "overflow_count": overflow_count,
+            "pro_upgrade_required": overflow_count > 0,
+            "pro_upgrade_message": (
+                "Rute melebihi 30 checkpoint. Upgrade ke PRO+ untuk melanjutkan."
+                if overflow_count > 0
+                else ""
+            ),
+            "strict_mode": flags["strict_mode"],
+            "require_selfie": flags["require_selfie"],
+            "require_gps": flags["require_gps"],
+            "min_scan_interval_seconds": flags["min_scan_interval_seconds"],
+        },
+        "allowed": {
+            "can_start": can_start,
+            "can_scan": can_scan,
+        },
+        "scan_modes": ["qr", "nfc"],
+        "checkpoints": checkpoint_rows,
+        "history": history,
+    }
+
+
+def _client_patrol_route_for_site(site_id: int, client_id: int) -> dict | None:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "patrol_routes"):
+            return None
+        row = conn.execute(
+            """
+            SELECT *
+            FROM patrol_routes
+            WHERE site_id = ?
+              AND (client_id IS NULL OR client_id = ?)
+            ORDER BY
+              CASE WHEN shift_id IS NULL THEN 0 ELSE 1 END,
+              CASE WHEN is_active = 1 THEN 0 ELSE 1 END,
+              id DESC
+            LIMIT 1
+            """,
+            (site_id, client_id),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def _client_patrol_ensure_route(
+    *,
+    site_id: int,
+    client_id: int,
+    name: str | None = None,
+    strict_mode: int | None = None,
+    require_selfie: int | None = None,
+    require_gps: int | None = None,
+    min_scan_interval_seconds: int | None = None,
+) -> dict:
+    now_ts = _now_ts()
+    route = _client_patrol_route_for_site(site_id, client_id)
+    route_name = (name or "").strip() or "Guard Tour Route"
+    strict_val = 1 if int(strict_mode or 0) == 1 else 0
+    require_selfie_val = 1 if int(require_selfie or 0) == 1 else 0
+    require_gps_val = 1 if int(require_gps if require_gps is not None else 1) == 1 else 0
+    interval_val = int(min_scan_interval_seconds or PATROL_MIN_SCAN_INTERVAL_SECONDS)
+    if interval_val < 0:
+        interval_val = 0
+    conn = _db_connect()
+    try:
+        if route:
+            conn.execute(
+                """
+                UPDATE patrol_routes
+                SET name = ?, strict_mode = ?, require_selfie = ?, require_gps = ?,
+                    min_scan_interval_seconds = ?, is_active = 1, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    route_name,
+                    strict_val,
+                    require_selfie_val,
+                    require_gps_val,
+                    interval_val,
+                    now_ts,
+                    route["id"],
+                ),
+            )
+            route_id = int(route["id"])
+        else:
+            cur = conn.execute(
+                """
+                INSERT INTO patrol_routes (
+                    client_id, site_id, shift_id, name, description,
+                    strict_mode, require_selfie, require_gps, min_scan_interval_seconds,
+                    is_active, created_at, updated_at
+                ) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+                """,
+                (
+                    client_id,
+                    site_id,
+                    route_name,
+                    "Route patroli aktif untuk client site.",
+                    strict_val,
+                    require_selfie_val,
+                    require_gps_val,
+                    interval_val,
+                    now_ts,
+                    now_ts,
+                ),
+            )
+            route_id = int(cur.lastrowid)
+    finally:
+        conn.commit()
+        conn.close()
+    refreshed = _patrol_route_by_id(route_id)
+    return refreshed or {"id": route_id, "name": route_name}
+
+
+def _client_patrol_checkpoint_rows(route_id: int, include_inactive: bool = False) -> list[dict]:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "patrol_checkpoints"):
+            return []
+        where_clause = "WHERE route_id = ?"
+        params: list = [route_id]
+        if not include_inactive:
+            where_clause += " AND is_active = 1"
+        cur = conn.execute(
+            f"""
+            SELECT *
+            FROM patrol_checkpoints
+            {where_clause}
+            ORDER BY sequence_no ASC, id ASC
+            """,
+            tuple(params),
+        )
+        return [dict(row) for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def _client_patrol_checkpoint_by_id(checkpoint_id: int) -> dict | None:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "patrol_checkpoints"):
+            return None
+        row = conn.execute(
+            "SELECT * FROM patrol_checkpoints WHERE id = ?",
+            (checkpoint_id,),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def _client_patrol_resequence(route_id: int) -> None:
+    checkpoints = _client_patrol_checkpoint_rows(route_id)
+    if not checkpoints:
+        return
+    conn = _db_connect()
+    try:
+        for idx, cp in enumerate(checkpoints, start=1):
+            conn.execute(
+                """
+                UPDATE patrol_checkpoints
+                SET sequence_no = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (idx, _now_ts(), cp["id"]),
+            )
+    finally:
+        conn.commit()
+        conn.close()
+
+
+def _client_patrol_employee_name_map(emails: set[str]) -> dict[str, str]:
+    normalized = sorted({(email or "").strip().lower() for email in emails if email})
+    if not normalized:
+        return {}
+    placeholders = ",".join("?" for _ in normalized)
+    conn = _db_connect()
+    try:
+        name_map: dict[str, str] = {}
+        if _table_exists(conn, "employees"):
+            cur = conn.execute(
+                f"""
+                SELECT lower(email) AS email_key, name
+                FROM employees
+                WHERE lower(email) IN ({placeholders})
+                """,
+                tuple(normalized),
+            )
+            for row in cur.fetchall():
+                if row["email_key"]:
+                    name_map[row["email_key"]] = (row["name"] or "").strip()
+        missing = [email for email in normalized if not name_map.get(email)]
+        if missing and _table_exists(conn, "users"):
+            placeholders_user = ",".join("?" for _ in missing)
+            cur = conn.execute(
+                f"""
+                SELECT lower(email) AS email_key, name
+                FROM users
+                WHERE lower(email) IN ({placeholders_user})
+                """,
+                tuple(missing),
+            )
+            for row in cur.fetchall():
+                if row["email_key"] and not name_map.get(row["email_key"]):
+                    name_map[row["email_key"]] = (row["name"] or "").strip()
+        return name_map
+    finally:
+        conn.close()
+
+
+def _client_patrol_monitoring_rows(site_id: int, date_value: str | None = None) -> dict:
+    today = date_value or _today_key()
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "patrol_tours"):
+            return {"rows": [], "counts": {"ongoing": 0, "completed": 0, "stopped": 0}}
+        cur = conn.execute(
+            """
+            SELECT
+                id, employee_user_id, employee_id, employee_email, date,
+                started_at, ended_at, status, total_checkpoints, completed_checkpoints
+            FROM patrol_tours
+            WHERE site_id = ? AND date = ?
+            ORDER BY id DESC
+            """,
+            (site_id, today),
+        )
+        raw_rows = [dict(row) for row in cur.fetchall()]
+    finally:
+        conn.close()
+    latest_by_employee: dict[str, dict] = {}
+    for row in raw_rows:
+        email_key = (row.get("employee_email") or "").strip().lower()
+        if not email_key:
+            continue
+        if email_key not in latest_by_employee:
+            latest_by_employee[email_key] = row
+    name_map = _client_patrol_employee_name_map(set(latest_by_employee.keys()))
+    rows: list[dict] = []
+    counts = {"ongoing": 0, "completed": 0, "stopped": 0}
+    for email_key, row in latest_by_employee.items():
+        status_raw = (row.get("status") or "").strip().lower()
+        if status_raw == PATROL_STATUS_ONGOING:
+            status_label = "Sedang berjalan"
+            counts["ongoing"] += 1
+        elif status_raw == PATROL_STATUS_COMPLETED:
+            status_label = "Selesai"
+            counts["completed"] += 1
+        else:
+            status_label = "Terhenti"
+            counts["stopped"] += 1
+        total_cp = int(row.get("total_checkpoints") or 0)
+        done_cp = int(row.get("completed_checkpoints") or 0)
+        if done_cp > total_cp:
+            done_cp = total_cp
+        rows.append(
+            {
+                "session_id": int(row.get("id") or 0),
+                "employee_email": row.get("employee_email") or "-",
+                "employee_name": name_map.get(email_key) or row.get("employee_email") or "-",
+                "status": status_raw or PATROL_STATUS_INCOMPLETE,
+                "status_label": status_label,
+                "progress_done": done_cp,
+                "progress_total": total_cp,
+                "progress_label": f"{done_cp}/{total_cp}",
+                "started_at": row.get("started_at"),
+                "ended_at": row.get("ended_at"),
+            }
+        )
+    rows.sort(key=lambda item: (item.get("employee_name") or "").lower())
+    return {"rows": rows, "counts": counts}
+
+
+def _client_patrol_recap_rows(site_id: int, limit: int = 50) -> list[dict]:
+    if limit <= 0:
+        limit = 50
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "patrol_tours"):
+            return []
+        cur = conn.execute(
+            """
+            SELECT
+                id, employee_user_id, employee_id, employee_email, date,
+                started_at, ended_at, status, total_checkpoints, completed_checkpoints
+            FROM patrol_tours
+            WHERE site_id = ?
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (site_id, limit),
+        )
+        rows = [dict(row) for row in cur.fetchall()]
+    finally:
+        conn.close()
+    name_map = _client_patrol_employee_name_map(
+        {(row.get("employee_email") or "").strip().lower() for row in rows}
+    )
+    recap: list[dict] = []
+    for row in rows:
+        email_key = (row.get("employee_email") or "").strip().lower()
+        total_cp = int(row.get("total_checkpoints") or 0)
+        done_cp = int(row.get("completed_checkpoints") or 0)
+        if done_cp > total_cp:
+            done_cp = total_cp
+        missed_cp = max(0, total_cp - done_cp)
+        recap.append(
+            {
+                "session_id": int(row.get("id") or 0),
+                "employee_id": int(row.get("employee_id") or 0) or int(row.get("employee_user_id") or 0) or None,
+                "employee_name": name_map.get(email_key) or row.get("employee_email") or "-",
+                "employee_email": row.get("employee_email") or "-",
+                "tanggal_patroli": row.get("date"),
+                "checkpoint_tercapai": done_cp,
+                "checkpoint_terlewat": missed_cp,
+                "waktu_mulai": row.get("started_at"),
+                "waktu_selesai": row.get("ended_at"),
+                "status": (row.get("status") or "").lower(),
+            }
+        )
+    return recap
+
+
+def _client_patrol_logs_for_site(site_id: int, limit: int = 600) -> list[dict]:
+    if limit <= 0:
+        limit = 600
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "patrol_scans") or not _table_exists(conn, "patrol_tours"):
+            return []
+        cur = conn.execute(
+            """
+            SELECT
+                s.id,
+                s.tour_id,
+                s.checkpoint_id,
+                s.timestamp,
+                s.validation_status
+            FROM patrol_scans s
+            JOIN patrol_tours t ON t.id = s.tour_id
+            WHERE t.site_id = ?
+            ORDER BY s.id DESC
+            LIMIT ?
+            """,
+            (site_id, limit),
+        )
+        rows = [dict(row) for row in cur.fetchall()]
+    finally:
+        conn.close()
+    rows.reverse()
+    logs: list[dict] = []
+    for row in rows:
+        status_value = "valid" if (row.get("validation_status") or "").lower() == PATROL_SCAN_VALID else "missed"
+        logs.append(
+            {
+                "log_id": int(row.get("id") or 0),
+                "session_id": int(row.get("tour_id") or 0),
+                "checkpoint_id": int(row.get("checkpoint_id") or 0) if row.get("checkpoint_id") else None,
+                "timestamp": row.get("timestamp"),
+                "status": status_value,
+            }
+        )
+    return logs
+
+
+def _client_patrol_dashboard_payload(
+    *,
+    client_id: int,
+    site_id: int,
+    can_manage: bool,
+) -> dict:
+    site_row = _get_site_by_id(site_id)
+    site = dict(site_row) if site_row else {}
+    route = _client_patrol_route_for_site(site_id, client_id)
+    checkpoints = _client_patrol_checkpoint_rows(int(route["id"])) if route else []
+    monitoring = _client_patrol_monitoring_rows(site_id)
+    recap_rows = _client_patrol_recap_rows(site_id, limit=60)
+    logs_rows = _client_patrol_logs_for_site(site_id, limit=800)
+    max_limit = PATROL_MAX_CHECKPOINTS
+    current_count = len(checkpoints)
+    over_limit = current_count > max_limit
+    return {
+        "permissions": {
+            "can_manage": bool(can_manage),
+        },
+        "setup": {
+            "route": {
+                "id": int(route["id"]) if route else None,
+                "name": (route.get("name") if route else "") or "Guard Tour Route",
+                "strict_mode": bool(int(route.get("strict_mode") or 0)) if route else False,
+                "require_selfie": bool(int(route.get("require_selfie") or 0)) if route else False,
+                "require_gps": bool(int(route.get("require_gps") or 1)) if route else True,
+                "min_scan_interval_seconds": int(
+                    route.get("min_scan_interval_seconds") or PATROL_MIN_SCAN_INTERVAL_SECONDS
+                )
+                if route
+                else PATROL_MIN_SCAN_INTERVAL_SECONDS,
+                "site_name": site.get("name") or "-",
+            },
+            "checkpoints": [
+                {
+                    "id": int(cp.get("id") or 0),
+                    "nama": cp.get("name") or "-",
+                    "urutan": int(cp.get("sequence_no") or 0),
+                    "qr_code": cp.get("qr_code") or "",
+                    "nfc_tag": cp.get("nfc_tag") or "",
+                    "latitude": cp.get("latitude"),
+                    "longitude": cp.get("longitude"),
+                    "radius_meters": int(cp.get("radius_meters") or PATROL_DEFAULT_CHECKPOINT_RADIUS_METERS),
+                }
+                for cp in checkpoints
+            ],
+            "checkpoint_count": current_count,
+            "checkpoint_limit": max_limit,
+            "limit_reached": current_count >= max_limit,
+            "upgrade_required": over_limit,
+            "upgrade_message": (
+                "Checkpoint melebihi 30 titik. Upgrade ke Pro+ untuk menambah kapasitas."
+                if over_limit
+                else ""
+            ),
+        },
+        "monitoring": monitoring,
+        "rekap": {
+            "rows": recap_rows,
+            "total": len(recap_rows),
+        },
+        "data_structure": {
+            "checkpoints": [
+                {
+                    "id": int(cp.get("id") or 0),
+                    "nama": cp.get("name") or "",
+                    "urutan": int(cp.get("sequence_no") or 0),
+                }
+                for cp in checkpoints
+            ],
+            "patrol_sessions": [
+                {
+                    "employee_id": row.get("employee_id"),
+                    "waktu_mulai": row.get("waktu_mulai"),
+                    "waktu_selesai": row.get("waktu_selesai"),
+                }
+                for row in recap_rows
+            ],
+            "patrol_logs": [
+                {
+                    "checkpoint_id": log.get("checkpoint_id"),
+                    "timestamp": log.get("timestamp"),
+                    "status": log.get("status"),
+                }
+                for log in logs_rows
+            ],
+        },
+    }
 
 
 def _qr_secret_for_client(client_id: int | None) -> str:

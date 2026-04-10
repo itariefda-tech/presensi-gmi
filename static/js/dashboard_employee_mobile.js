@@ -35,7 +35,7 @@ const floatingNav = document.getElementById("floatingNav");
 const navHandle = document.getElementById("navHandle");
 
 const attMethod = document.getElementById("attMethod");
-const modeChips = Array.from(document.querySelectorAll(".chip"));
+const modeChips = Array.from(document.querySelectorAll("#attendanceModeChips .chip"));
 const btnLocation = document.getElementById("btnLocation");
 const latEl = document.getElementById("lat");
 const lonEl = document.getElementById("lon");
@@ -96,6 +96,35 @@ const reportFieldEls = {
   sakit: document.querySelector(".report-item[data-field='sakit'] strong"),
 };
 const dailyReportRows = document.getElementById("dailyReportRows");
+const patrolRouteLabel = document.getElementById("patrolRouteLabel");
+const patrolStatusBadge = document.getElementById("patrolStatusBadge");
+const patrolProgressText = document.getElementById("patrolProgressText");
+const patrolProgressPercent = document.getElementById("patrolProgressPercent");
+const patrolProgressBar = document.getElementById("patrolProgressBar");
+const patrolNextCheckpoint = document.getElementById("patrolNextCheckpoint");
+const patrolSecurityMode = document.getElementById("patrolSecurityMode");
+const patrolCheckpointList = document.getElementById("patrolCheckpointList");
+const patrolHistoryList = document.getElementById("patrolHistoryList");
+const patrolUpgradeHint = document.getElementById("patrolUpgradeHint");
+const patrolToast = document.getElementById("patrolToast");
+const btnPatrolStart = document.getElementById("btnPatrolStart");
+const btnPatrolRefresh = document.getElementById("btnPatrolRefresh");
+const btnPatrolScan = document.getElementById("btnPatrolScan");
+const btnPatrolNfc = document.getElementById("btnPatrolNfc");
+const btnPatrolSubmit = document.getElementById("btnPatrolSubmit");
+const btnPatrolLocation = document.getElementById("btnPatrolLocation");
+const patrolModeChips = Array.from(document.querySelectorAll(".patrol-mode-chip"));
+const patrolScanPanelQr = document.getElementById("patrolScanPanelQr");
+const patrolScanPanelNfc = document.getElementById("patrolScanPanelNfc");
+const patrolScanStatus = document.getElementById("patrolScanStatus");
+const patrolNfcStatus = document.getElementById("patrolNfcStatus");
+const patrolQrVideo = document.getElementById("patrolQrVideo");
+const patrolScanData = document.getElementById("patrolScanData");
+const patrolGpsStatus = document.getElementById("patrolGpsStatus");
+const patrolGpsCoords = document.getElementById("patrolGpsCoords");
+const patrolSelfieFile = document.getElementById("patrolSelfieFile");
+const patrolSelfiePreview = document.getElementById("patrolSelfiePreview");
+const patrolSelfieHint = document.getElementById("patrolSelfieHint");
 
 let qrStream = null;
 let qrDetector = null;
@@ -110,6 +139,18 @@ let locationActive = false;
 let hasLocation = false;
 let isOnline = navigator.onLine;
 let hasCheckedIn = lastActionBadge?.textContent === "IN";
+let patrolState = null;
+let patrolMode = "qr";
+let patrolQrStream = null;
+let patrolQrDetector = null;
+let patrolQrActive = false;
+let patrolQrLastValue = "";
+let patrolGpsLat = "";
+let patrolGpsLng = "";
+let patrolGpsAccuracy = "";
+let patrolGpsDeviceTime = "";
+let patrolToastTimer = null;
+let patrolAutoRefreshTimer = null;
 const attendanceModeStorage = {
   gps_selfie: "gmi_att_mode_gps_selfie",
   gps: "gmi_att_mode_gps",
@@ -502,6 +543,468 @@ async function loadDailyReport(){
   }
 }
 
+function showPatrolToast(type, message, opts = {}){
+  showToast(type, message, { target: patrolToast, ...opts });
+}
+
+function patrolStatusClass(status){
+  const value = (status || "").toLowerCase();
+  if (value === "completed") return "status-completed";
+  if (value === "invalid") return "status-invalid";
+  if (value === "incomplete") return "status-incomplete";
+  if (value === "ongoing") return "status-ongoing";
+  return "status-idle";
+}
+
+function patrolStatusLabel(status){
+  const value = (status || "").toLowerCase();
+  if (value === "completed") return "completed";
+  if (value === "invalid") return "invalid";
+  if (value === "incomplete") return "incomplete";
+  if (value === "ongoing") return "ongoing";
+  return "idle";
+}
+
+function formatPatrolDateTime(value){
+  if (!value) return "-";
+  const date = new Date(String(value).replace(" ", "T"));
+  if (Number.isNaN(date.getTime())) return value;
+  const dd = pad2(date.getDate());
+  const mm = pad2(date.getMonth() + 1);
+  const hh = pad2(date.getHours());
+  const mi = pad2(date.getMinutes());
+  return `${dd}/${mm} ${hh}:${mi}`;
+}
+
+function clearPatrolScanValue(){
+  if (patrolScanData) {
+    patrolScanData.value = "";
+  }
+}
+
+function setPatrolMode(mode){
+  patrolMode = mode === "nfc" ? "nfc" : "qr";
+  patrolModeChips.forEach((chip) => {
+    const active = chip.dataset.patrolMode === patrolMode;
+    chip.classList.toggle("active", active);
+    chip.setAttribute("aria-pressed", active ? "true" : "false");
+  });
+  patrolScanPanelQr?.classList.toggle("is-hidden", patrolMode !== "qr");
+  patrolScanPanelNfc?.classList.toggle("is-hidden", patrolMode !== "nfc");
+  if (patrolMode !== "qr") {
+    stopPatrolQrScan();
+  }
+}
+
+function updatePatrolGpsView(active){
+  if (patrolGpsStatus) {
+    patrolGpsStatus.textContent = active ? "GPS aktif" : "GPS tidak tersedia";
+  }
+  if (patrolGpsCoords) {
+    patrolGpsCoords.textContent =
+      patrolGpsLat && patrolGpsLng
+        ? `${patrolGpsLat}, ${patrolGpsLng}`
+        : "Koordinat belum tersedia.";
+  }
+}
+
+async function capturePatrolLocation(){
+  if (patrolGpsCoords) {
+    patrolGpsCoords.textContent = "Mengambil lokasi...";
+  }
+  const loc = await ensureLocation();
+  patrolGpsLat = loc.lat;
+  patrolGpsLng = loc.lon;
+  patrolGpsAccuracy = loc.accuracy || "";
+  patrolGpsDeviceTime = loc.deviceTime || new Date().toISOString();
+  updatePatrolGpsView(true);
+  return loc;
+}
+
+function renderPatrolCheckpointList(rows){
+  if (!patrolCheckpointList) return;
+  patrolCheckpointList.innerHTML = "";
+  if (!rows || !rows.length) {
+    const empty = document.createElement("div");
+    empty.className = "muted";
+    empty.textContent = "Belum ada data checkpoint.";
+    patrolCheckpointList.appendChild(empty);
+    return;
+  }
+  rows.forEach((row) => {
+    const item = document.createElement("article");
+    const status = (row.status || "pending").toLowerCase();
+    item.className = `patrol-checkpoint-item is-${status}`;
+
+    const seq = document.createElement("span");
+    seq.className = "patrol-checkpoint-seq";
+    seq.textContent = String(row.sequence_no || "-");
+
+    const body = document.createElement("div");
+    body.className = "patrol-checkpoint-body";
+
+    const name = document.createElement("div");
+    name.className = "patrol-checkpoint-name";
+    name.textContent = row.name || "-";
+
+    const meta = document.createElement("div");
+    meta.className = "patrol-checkpoint-meta";
+    const marker = row.marker_type ? `Marker: ${row.marker_type.toUpperCase()}` : "Marker: -";
+    const scanned = row.scanned_at ? ` • ${formatPatrolDateTime(row.scanned_at)}` : "";
+    meta.textContent = `${marker}${scanned}`;
+
+    body.append(name, meta);
+    item.append(seq, body);
+    patrolCheckpointList.appendChild(item);
+  });
+}
+
+function renderPatrolHistory(rows){
+  if (!patrolHistoryList) return;
+  patrolHistoryList.innerHTML = "";
+  if (!rows || !rows.length) {
+    const empty = document.createElement("div");
+    empty.className = "muted";
+    empty.textContent = "Belum ada riwayat guard tour.";
+    patrolHistoryList.appendChild(empty);
+    return;
+  }
+  rows.forEach((row) => {
+    const item = document.createElement("div");
+    item.className = "story-item";
+
+    const top = document.createElement("div");
+    top.className = "story-row";
+    const title = document.createElement("span");
+    title.textContent = `Route #${row.route_id || "-"}`;
+    const status = document.createElement("span");
+    status.className = `patrol-history-badge ${patrolStatusClass(row.status)}`;
+    status.textContent = patrolStatusLabel(row.status);
+    top.append(title, status);
+
+    const bottom = document.createElement("div");
+    bottom.className = "muted";
+    const progressLabel = `${row.completed_checkpoints || 0}/${row.total_checkpoints || 0}`;
+    bottom.textContent = `${row.date || "-"} • ${progressLabel} • ${formatPatrolDateTime(row.started_at)} - ${formatPatrolDateTime(row.ended_at)}`;
+
+    item.append(top, bottom);
+    patrolHistoryList.appendChild(item);
+  });
+}
+
+function renderPatrolState(data){
+  patrolState = data || null;
+  const route = data?.route || null;
+  const checkpoints = Array.isArray(data?.checkpoints) ? data.checkpoints : [];
+  const progress = data?.progress || {};
+  const constraints = data?.constraints || {};
+  const allowed = data?.allowed || {};
+  const status = patrolStatusLabel(data?.status);
+
+  if (patrolRouteLabel) {
+    patrolRouteLabel.textContent = route
+      ? `${route.name || "Route"}${data?.site_name ? ` • ${data.site_name}` : ""}`
+      : "Belum ada rute aktif.";
+  }
+  if (patrolStatusBadge) {
+    patrolStatusBadge.textContent = status;
+    patrolStatusBadge.className = `patrol-status-badge ${patrolStatusClass(status)}`;
+  }
+  if (patrolProgressText) {
+    patrolProgressText.textContent = `${progress.completed || 0}/${progress.total || 0} checkpoint`;
+  }
+  if (patrolProgressPercent) {
+    patrolProgressPercent.textContent = `${progress.percent || 0}%`;
+  }
+  if (patrolProgressBar) {
+    patrolProgressBar.style.width = `${progress.percent || 0}%`;
+  }
+  if (patrolSecurityMode) {
+    patrolSecurityMode.textContent = constraints.strict_mode
+      ? "Strict (GPS + Selfie)"
+      : "Standard";
+  }
+  if (patrolSelfieHint) {
+    patrolSelfieHint.textContent = constraints.require_selfie
+      ? "Strict mode aktif: selfie wajib di setiap checkpoint."
+      : "Selfie opsional, menjadi wajib saat strict mode aktif.";
+  }
+
+  let nextText = "-";
+  const nextCp = checkpoints.find((cp) => (cp.status || "").toLowerCase() === "next");
+  if (nextCp) {
+    nextText = `#${nextCp.sequence_no || "-"} ${nextCp.name || "-"}`;
+  } else if (status === "completed") {
+    nextText = "Semua checkpoint selesai";
+  }
+  if (patrolNextCheckpoint) {
+    patrolNextCheckpoint.textContent = nextText;
+  }
+
+  if (btnPatrolStart) {
+    btnPatrolStart.disabled = !Boolean(allowed.can_start);
+  }
+  if (btnPatrolSubmit) {
+    btnPatrolSubmit.disabled = !Boolean(allowed.can_scan);
+  }
+  if (btnPatrolScan) {
+    btnPatrolScan.disabled = !Boolean(allowed.can_scan) || patrolMode !== "qr";
+  }
+  if (btnPatrolNfc) {
+    btnPatrolNfc.disabled = !Boolean(allowed.can_scan) || patrolMode !== "nfc";
+  }
+  if (!allowed.can_scan) {
+    stopPatrolQrScan();
+  }
+
+  if (patrolUpgradeHint) {
+    patrolUpgradeHint.textContent = constraints.pro_upgrade_required
+      ? (constraints.pro_upgrade_message || "Rute melebihi 30 checkpoint. Upgrade ke PRO+.")
+      : "Batas standar rute adalah 30 checkpoint. Jika lebih, gunakan versi PRO+.";
+  }
+
+  renderPatrolCheckpointList(checkpoints);
+  renderPatrolHistory(data?.history || []);
+}
+
+async function loadPatrolStatus(opts = {}){
+  if (!patrolRouteLabel) return;
+  const silent = Boolean(opts.silent);
+  const result = await safeFetch("/api/patrol/status");
+  if (!result.ok) {
+    if (!silent) {
+      showPatrolToast("error", result.message || "Gagal memuat status guard tour.");
+    }
+    return;
+  }
+  const payload = result.data?.data || null;
+  renderPatrolState(payload);
+}
+
+async function startPatrolTour(){
+  if (!btnPatrolStart) return;
+  btnPatrolStart.disabled = true;
+  const formData = new FormData();
+  appendCsrf(formData);
+  const result = await safeFetch("/api/patrol/start", {
+    method: "POST",
+    body: formData,
+  });
+  showPatrolToast(result.ok ? "success" : "error", result.message || "Selesai.");
+  if (result.data?.data) {
+    renderPatrolState(result.data.data);
+  } else {
+    await loadPatrolStatus({ silent: true });
+  }
+  btnPatrolStart.disabled = false;
+}
+
+async function startPatrolQrScan(){
+  if (patrolQrActive) {
+    stopPatrolQrScan();
+    if (patrolScanStatus) patrolScanStatus.textContent = "Scan dihentikan.";
+    return;
+  }
+  if (!("mediaDevices" in navigator) || !navigator.mediaDevices.getUserMedia) {
+    if (patrolScanStatus) patrolScanStatus.textContent = "Kamera tidak tersedia.";
+    return;
+  }
+  if (!("BarcodeDetector" in window)) {
+    if (patrolScanStatus) patrolScanStatus.textContent = "Browser tidak mendukung scan QR.";
+    return;
+  }
+  try {
+    patrolQrDetector = new BarcodeDetector({ formats: ["qr_code", "code_128", "code_39"] });
+    if (patrolScanStatus) patrolScanStatus.textContent = "Memulai kamera...";
+    patrolQrStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+    if (patrolQrVideo) {
+      patrolQrVideo.srcObject = patrolQrStream;
+      patrolQrVideo.style.display = "block";
+      await patrolQrVideo.play();
+    }
+    patrolQrActive = true;
+    patrolQrLoop();
+  } catch (err) {
+    if (patrolScanStatus) patrolScanStatus.textContent = "Gagal akses kamera.";
+    stopPatrolQrScan();
+  }
+}
+
+async function patrolQrLoop(){
+  if (!patrolQrActive || !patrolQrDetector || !patrolQrVideo) return;
+  try {
+    const barcodes = await patrolQrDetector.detect(patrolQrVideo);
+    if (barcodes.length) {
+      const rawValue = (barcodes[0].rawValue || "").trim();
+      if (rawValue && rawValue !== patrolQrLastValue) {
+        patrolQrLastValue = rawValue;
+        if (patrolScanData) patrolScanData.value = rawValue;
+        if (patrolScanStatus) patrolScanStatus.textContent = "Checkpoint terdeteksi.";
+        stopPatrolQrScan();
+        return;
+      }
+    }
+  } catch (err) {
+    if (patrolScanStatus) patrolScanStatus.textContent = "Gagal scan QR.";
+  }
+  requestAnimationFrame(patrolQrLoop);
+}
+
+function stopPatrolQrScan(){
+  patrolQrActive = false;
+  patrolQrLastValue = "";
+  if (patrolQrStream) {
+    patrolQrStream.getTracks().forEach((track) => track.stop());
+    patrolQrStream = null;
+  }
+}
+
+async function startPatrolNfcScan(){
+  if (!patrolNfcStatus) return;
+  if (!("NDEFReader" in window)) {
+    patrolNfcStatus.textContent = "Device ini belum mendukung Web NFC. Gunakan mode QR.";
+    return;
+  }
+  try {
+    const ndef = new NDEFReader();
+    await ndef.scan();
+    patrolNfcStatus.textContent = "Dekatkan device ke NFC tag checkpoint...";
+    ndef.onreading = (event) => {
+      let payload = event.serialNumber || "";
+      if (!payload && event.message?.records?.length) {
+        const firstRecord = event.message.records[0];
+        if (firstRecord.recordType === "text") {
+          const decoder = new TextDecoder(firstRecord.encoding || "utf-8");
+          payload = decoder.decode(firstRecord.data);
+        }
+      }
+      payload = (payload || "").trim();
+      if (payload) {
+        if (patrolScanData) patrolScanData.value = payload;
+        patrolNfcStatus.textContent = "NFC checkpoint terdeteksi.";
+      }
+    };
+    ndef.onreadingerror = () => {
+      patrolNfcStatus.textContent = "Tag terbaca tetapi data NFC tidak valid.";
+    };
+  } catch (err) {
+    patrolNfcStatus.textContent = "Scan NFC dibatalkan atau gagal diakses.";
+  }
+}
+
+async function submitPatrolCheckpoint(){
+  if (!patrolState?.tour?.id) {
+    showPatrolToast("error", "Mulai guard tour terlebih dahulu.");
+    return;
+  }
+  if (!patrolState?.allowed?.can_scan) {
+    showPatrolToast("error", "Guard tour tidak dapat di-scan saat ini.");
+    return;
+  }
+  const scanValue = (patrolScanData?.value || "").trim();
+  if (!scanValue) {
+    showPatrolToast("error", "Lakukan scan checkpoint terlebih dahulu.");
+    return;
+  }
+  if (patrolState?.constraints?.require_gps) {
+    try {
+      await capturePatrolLocation();
+    } catch (err) {
+      showPatrolToast("error", "GPS wajib aktif untuk validasi checkpoint.");
+      return;
+    }
+  }
+
+  const formData = new FormData();
+  appendCsrf(formData);
+  formData.append("tour_id", String(patrolState.tour.id));
+  formData.append("method", patrolMode);
+  formData.append("scan_data", scanValue);
+  if (patrolGpsLat && patrolGpsLng) {
+    formData.append("lat", patrolGpsLat);
+    formData.append("lng", patrolGpsLng);
+    formData.append("accuracy", patrolGpsAccuracy || "");
+    formData.append("device_time", patrolGpsDeviceTime || new Date().toISOString());
+  }
+  const selfie = patrolSelfieFile?.files?.[0];
+  if (selfie) {
+    formData.append("selfie", selfie);
+  }
+
+  if (btnPatrolSubmit) btnPatrolSubmit.disabled = true;
+  const result = await safeFetch("/api/patrol/scan", {
+    method: "POST",
+    body: formData,
+  });
+  showPatrolToast(result.ok ? "success" : "error", result.message || "Scan selesai.");
+  if (result.data?.data) {
+    renderPatrolState(result.data.data);
+  } else {
+    await loadPatrolStatus({ silent: true });
+  }
+  if (result.ok) {
+    clearPatrolScanValue();
+    if (patrolSelfieFile) patrolSelfieFile.value = "";
+    if (patrolSelfiePreview) {
+      patrolSelfiePreview.src = "";
+      patrolSelfiePreview.style.display = "none";
+    }
+  }
+  if (btnPatrolSubmit) btnPatrolSubmit.disabled = false;
+}
+
+function initPatrolSelfie(){
+  patrolSelfieFile?.addEventListener("change", (event) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      if (patrolSelfiePreview) {
+        patrolSelfiePreview.src = "";
+        patrolSelfiePreview.style.display = "none";
+      }
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (patrolSelfiePreview) {
+        patrolSelfiePreview.src = reader.result || "";
+        patrolSelfiePreview.style.display = "block";
+      }
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function initPatrol(){
+  if (!patrolRouteLabel) return;
+  setPatrolMode("qr");
+  patrolModeChips.forEach((chip) => {
+    chip.addEventListener("click", () => {
+      setPatrolMode(chip.dataset.patrolMode || "qr");
+    });
+  });
+  btnPatrolRefresh?.addEventListener("click", () => loadPatrolStatus());
+  btnPatrolStart?.addEventListener("click", () => startPatrolTour());
+  btnPatrolScan?.addEventListener("click", () => startPatrolQrScan());
+  btnPatrolNfc?.addEventListener("click", () => startPatrolNfcScan());
+  btnPatrolSubmit?.addEventListener("click", () => submitPatrolCheckpoint());
+  btnPatrolLocation?.addEventListener("click", async () => {
+    try {
+      await capturePatrolLocation();
+    } catch (err) {
+      updatePatrolGpsView(false);
+      showPatrolToast("error", "Gagal mendapatkan lokasi checkpoint.");
+    }
+  });
+  initPatrolSelfie();
+  loadPatrolStatus({ silent: true });
+  if (patrolAutoRefreshTimer) window.clearInterval(patrolAutoRefreshTimer);
+  patrolAutoRefreshTimer = window.setInterval(() => {
+    if (!document.hidden) {
+      loadPatrolStatus({ silent: true });
+    }
+  }, 25000);
+}
+
 function go(index){
   const max = 3;
   swipeIndex = Math.max(0, Math.min(max, index));
@@ -515,6 +1018,9 @@ function go(index){
   if (swipeIndex !== 1) {
     closeLeaveSheet();
     closeLeaveDetail();
+  }
+  if (swipeIndex === 3) {
+    loadPatrolStatus({ silent: true });
   }
 }
 
@@ -1270,7 +1776,7 @@ function setMethod(value){
     chip.classList.toggle("active", isActive);
     chip.setAttribute("aria-pressed", isActive ? "true" : "false");
   });
-  const chipsContainer = document.querySelector(".mode-chips");
+  const chipsContainer = document.getElementById("attendanceModeChips");
   if (chipsContainer) {
     chipsContainer.dataset.activeMode = value;
   }
@@ -1452,6 +1958,7 @@ document.addEventListener("DOMContentLoaded", () => {
   loadLeaveStory();
   loadMonthlySummary();
   loadDailyReport();
+  initPatrol();
 
   go(0);
   refreshLocationKpi();
@@ -1467,10 +1974,14 @@ window.addEventListener("resize", () => {
 });
 window.addEventListener("online", updateOnlineStatus);
 window.addEventListener("offline", updateOnlineStatus);
-window.addEventListener("pagehide", stopScan);
+window.addEventListener("pagehide", () => {
+  stopScan();
+  stopPatrolQrScan();
+});
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
     stopScan();
+    stopPatrolQrScan();
     if (clockTimer) window.clearInterval(clockTimer);
   } else {
     startClock();

@@ -790,32 +790,172 @@
         </section>
 
         <section class="swipe-pane" data-pane="4" aria-label="Patroli">
-          <article class="panel" id="patrol">
-            <div class="panel-head">
-              <div>
-                <h3>Report Patroli</h3>
-                <div class="panel-sub">Demo data sementara.</div>
+          <section
+            class="patrol-admin-pane"
+            id="patrolAdminPane"
+            data-can-manage="{{ 1 if can_manage_patrol else 0 }}"
+          >
+            <article class="panel patrol-hero-panel">
+              <div class="panel-head patrol-hero-head">
+                <div>
+                  <h3>Guard Tour Control Center</h3>
+                  <div class="panel-sub">Setup checkpoint berurutan, monitor patroli aktif, dan rekap sesi patroli pegawai.</div>
+                </div>
+                <button class="btn ghost patrol-refresh-btn" type="button" id="patrolRefreshBtn">Refresh</button>
               </div>
-              <span class="panel-badge muted">Demo</span>
-            </div>
-            <div class="patrol-list">
-              <div class="patrol-item">
-                <div class="patrol-title">Patroli Pagi - {{ site.name or "Site" }}</div>
-                <div class="patrol-meta">08:10 • 12 titik</div>
-                <span class="patrol-status ok">Selesai</span>
+              <div class="patrol-hero-grid">
+                <div class="patrol-hero-card">
+                  <div class="patrol-hero-label">Checkpoint Aktif</div>
+                  <div class="patrol-hero-value" id="patrolHeroCheckpointCount">0/30</div>
+                  <div class="patrol-hero-meta" id="patrolHeroRouteName">Guard Tour Route</div>
+                </div>
+                <div class="patrol-hero-card">
+                  <div class="patrol-hero-label">Sedang Berjalan</div>
+                  <div class="patrol-hero-value" id="patrolHeroOngoing">0</div>
+                  <div class="patrol-hero-meta">Sesi aktif hari ini</div>
+                </div>
+                <div class="patrol-hero-card">
+                  <div class="patrol-hero-label">Selesai</div>
+                  <div class="patrol-hero-value" id="patrolHeroCompleted">0</div>
+                  <div class="patrol-hero-meta">Sesi selesai hari ini</div>
+                </div>
+                <div class="patrol-hero-card">
+                  <div class="patrol-hero-label">Terhenti</div>
+                  <div class="patrol-hero-value" id="patrolHeroStopped">0</div>
+                  <div class="patrol-hero-meta">Sesi incomplete/invalid</div>
+                </div>
               </div>
-              <div class="patrol-item">
-                <div class="patrol-title">Patroli Siang - {{ site.name or "Site" }}</div>
-                <div class="patrol-meta">13:00 • 9 titik</div>
-                <span class="patrol-status progress">Berjalan</span>
+              <div class="patrol-live-meta">
+                <span class="status-pill muted">Live Monitor</span>
+                <span id="patrolLiveTimestamp">Belum sinkron</span>
               </div>
-              <div class="patrol-item">
-                <div class="patrol-title">Patroli Malam - {{ site.name or "Site" }}</div>
-                <div class="patrol-meta">19:30 • 10 titik</div>
-                <span class="patrol-status hold">Terjadwal</span>
+            </article>
+
+            <article class="panel patrol-setup-panel" id="patrol-setup">
+              <div class="panel-head">
+                <div>
+                  <h3>Setup Patroli</h3>
+                  <div class="panel-sub">Maksimal 30 checkpoint untuk versi ini. Jika melebihi limit tampilkan upgrade Pro+.</div>
+                </div>
+                <span class="panel-badge" id="patrolCheckpointBadge">0/30</span>
               </div>
-            </div>
-          </article>
+
+              {% if can_manage_patrol %}
+              <form class="site-form patrol-route-form" id="patrolRouteForm">
+                <div class="form-grid">
+                  <div class="form-row full">
+                    <label class="label" for="patrol-route-name">Nama Rute</label>
+                    <input class="input" id="patrol-route-name" name="route_name" type="text" placeholder="Contoh: Rute Gedung Utama" required />
+                  </div>
+                  <div class="form-row">
+                    <label class="label" for="patrol-min-interval">Minimal Interval Scan (detik)</label>
+                    <input class="input" id="patrol-min-interval" name="min_scan_interval_seconds" type="number" min="0" max="3600" />
+                  </div>
+                  <div class="form-row">
+                    <label class="label">Mode Keamanan</label>
+                    <div class="patrol-toggle-stack">
+                      <label class="toggle-line">
+                        <input type="checkbox" id="patrol-route-strict" name="strict_mode" value="1" />
+                        Strict sequence validation
+                      </label>
+                      <label class="toggle-line">
+                        <input type="checkbox" id="patrol-route-selfie" name="require_selfie" value="1" />
+                        Wajib selfie per checkpoint
+                      </label>
+                      <label class="toggle-line">
+                        <input type="checkbox" id="patrol-route-gps" name="require_gps" value="1" checked />
+                        Wajib GPS valid
+                      </label>
+                    </div>
+                  </div>
+                </div>
+                <div class="form-actions">
+                  <button class="btn primary" type="submit">Simpan Setup</button>
+                </div>
+              </form>
+
+              <form class="site-form patrol-checkpoint-form" id="patrolCheckpointForm">
+                <div class="form-grid">
+                  <div class="form-row full">
+                    <label class="label" for="patrol-checkpoint-name">Nama Checkpoint</label>
+                    <input class="input" id="patrol-checkpoint-name" name="name" type="text" placeholder="Contoh: Gerbang Utama" required />
+                  </div>
+                  <div class="form-row">
+                    <label class="label" for="patrol-checkpoint-qr">QR / Barcode ID</label>
+                    <input class="input" id="patrol-checkpoint-qr" name="qr_code" type="text" placeholder="Opsional" />
+                  </div>
+                  <div class="form-row">
+                    <label class="label" for="patrol-checkpoint-nfc">NFC Tag</label>
+                    <input class="input" id="patrol-checkpoint-nfc" name="nfc_tag" type="text" placeholder="Opsional" />
+                  </div>
+                  <div class="form-row">
+                    <label class="label" for="patrol-checkpoint-lat">Latitude</label>
+                    <input class="input" id="patrol-checkpoint-lat" name="latitude" type="text" placeholder="-6.200000" />
+                  </div>
+                  <div class="form-row">
+                    <label class="label" for="patrol-checkpoint-lng">Longitude</label>
+                    <input class="input" id="patrol-checkpoint-lng" name="longitude" type="text" placeholder="106.816666" />
+                  </div>
+                  <div class="form-row">
+                    <label class="label" for="patrol-checkpoint-radius">Radius (meter)</label>
+                    <input class="input" id="patrol-checkpoint-radius" name="radius_meters" type="number" min="1" placeholder="35" />
+                  </div>
+                </div>
+                <div class="form-actions">
+                  <button class="btn primary" type="submit" id="patrolCheckpointSubmitBtn">Tambah Checkpoint</button>
+                </div>
+              </form>
+              {% else %}
+              <div class="panel-sub">Pengelolaan setup patroli hanya tersedia untuk Client Admin.</div>
+              {% endif %}
+
+              <div class="patrol-limit-message" id="patrolLimitMessage"></div>
+              <div class="patrol-feedback" id="patrolFeedbackMessage"></div>
+              <div class="patrol-checkpoint-board">
+                <div class="patrol-board-head">
+                  <h4>Checkpoint Berurutan</h4>
+                  <div class="panel-sub">Drag & drop untuk mengubah urutan patroli.</div>
+                </div>
+                <div class="patrol-checkpoint-list" id="patrolCheckpointList" aria-live="polite"></div>
+                <div class="empty-state patrol-empty-state" id="patrolCheckpointEmpty">Belum ada checkpoint. Tambahkan checkpoint pertama untuk memulai route.</div>
+              </div>
+            </article>
+
+            <article class="panel patrol-monitor-panel" id="patrol-monitor">
+              <div class="panel-head">
+                <div>
+                  <h3>Monitoring Real-Time</h3>
+                  <div class="panel-sub">Daftar pegawai yang sedang patroli beserta progres checkpoint.</div>
+                </div>
+                <span class="panel-badge muted">Simple Live</span>
+              </div>
+              <div class="patrol-monitor-list" id="patrolMonitoringList"></div>
+              <div class="empty-state patrol-empty-state" id="patrolMonitoringEmpty">Belum ada sesi patroli aktif untuk hari ini.</div>
+            </article>
+
+            <article class="panel patrol-recap-panel" id="patrol-recap">
+              <div class="panel-head">
+                <div>
+                  <h3>Rekap Patroli</h3>
+                  <div class="panel-sub">Output ringkas: pegawai, tanggal, checkpoint tercapai/terlewat, serta waktu mulai-selesai.</div>
+                </div>
+                <span class="panel-badge muted" id="patrolRecapTotal">0 sesi</span>
+              </div>
+              <div class="patrol-recap-list" id="patrolRecapList"></div>
+              <div class="empty-state patrol-empty-state" id="patrolRecapEmpty">Belum ada data rekap patroli.</div>
+            </article>
+
+            <article class="panel patrol-structure-panel" id="patrol-structure">
+              <div class="panel-head">
+                <div>
+                  <h3>Data Structure Snapshot</h3>
+                  <div class="panel-sub">Fondasi backend untuk analisa lanjutan (siap dipakai dashboard admin utama).</div>
+                </div>
+                <span class="panel-badge muted">JSON</span>
+              </div>
+              <pre class="patrol-structure-preview" id="patrolStructurePreview">{}</pre>
+            </article>
+          </section>
         </section>
 
         <section class="swipe-pane" data-pane="5" aria-label="Payroll">
