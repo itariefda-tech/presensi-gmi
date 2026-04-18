@@ -1,4 +1,0 @@
-ingress:
-  - hostname: app.gajiku.net
-    service: http://npm:80
-  - service: "http_status:404"

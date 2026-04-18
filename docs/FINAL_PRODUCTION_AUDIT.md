@@ -23,18 +23,4 @@
 - [ ] `ENABLE_SEED_DATA` default masih `True` dan `SEED_USERS` memuat `hrd@gmi.com` dengan password `hrd123`. Lokasi: `app.py:1493-1525`. Severity: blocker. Dampak: setiap deployment otomatis memunculkan akun admin dengan kredensial publik tanpa kontrol, memudahkan akses tidak sah jika variabel tidak diganti. Rekomendasi perbaikan: ubah default `ENABLE_SEED_DATA` ke `False`, jangan hardcode password, dan hanya masukkan seed lewat `SEED_USERS_JSON` yang di-override secara eksplisit untuk staging/testing.
 
 ## 8. Runbook Operasional
-- [ ] Runbook deployment masih mengandalkan langkah build/run container dengan seed dan jaringan hosting yang disebutkan dalam dokumentasi lama. Lokasi: `deploy.sh`, `docs/push_deploy.md`, `templates/README.md`. Severity: low. Dampak: bila operator lupa override seed atau tidak menyambungkan container ke `hosting_web`, service tidak akan terhubung ke reverse proxy dan akun default tetap aktif. Rekomendasi perbaikan: perkuat runbook dengan daftar env yang wajib di-override (mis. `ENABLE_SEED_DATA=0` atau `SEED_USERS_JSON` khusus) dan pastikan langkah network tercatat.
-
-Runbook steps:
-1. Dari root repo: `docker build -t presensi-app .`.
-2. Jalankan container (sesuaikan seed jika tidak hendak pakai credential standar):
-   ```
-   docker run -d \
-     --name presensi-app \
-     -e ENABLE_SEED_DATA=1 \
-     -e SEED_USERS_JSON='[{"email":"hrd@gmi.com","name":"HR Superadmin","role":"hr_superadmin","password":"hrd123"}]' \
-     -p 5050:5050 \
-     presensi-app
-   ```
-3. Setelah berjalan, sambungkan ke network `hosting_web` agar reverse proxy/Cloudflare bisa mengakses: `docker network connect hosting_web presensi-app`.
-4. Login pertama dengan `hrd@gmi.com / hrd123`, lalu segera ubah password melalui menu profil.
+- [x] Referensi runbook deployment lama yang mengasumsikan stack hosting sebelumnya dan contoh konfigurasi lawas sudah dibersihkan dari dokumentasi repo setelah migrasi ke VPS. Lokasi terdampak: `docs/push_deploy.md`, `docs/Acuan/*`. Severity historis: low. Dampak sebelumnya: operator bisa mengikuti instruksi deploy yang tidak lagi dipakai dan menyimpulkan topologi server yang salah. Tindak lanjut: pertahankan satu runbook VPS yang netral, dan simpan detail reverse proxy/tunnel hanya pada stack aktif di server.
