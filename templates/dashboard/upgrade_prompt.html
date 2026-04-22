@@ -1,0 +1,318 @@
+{% extends "dashboard/base.html" %}
+{% set active = "upgrade" %}
+{% set heading = "Upgrade Required" %}
+{% set subtitle = feature %}
+
+{% block body %}
+<div class="card">
+  <div class="card-header">
+    <h3>Upgrade ke HRIS PRO</h3>
+  </div>
+  <div class="card-body">
+    <div class="upgrade-illustration">
+      <div class="upgrade-icon">
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M12 2L2 7v10c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-10-5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+          <path d="M9 12l2 2 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+    </div>
+    
+    <div class="upgrade-content">
+      <div class="upgrade-feature">
+        <h4>{{ feature }}</h4>
+        <p class="upgrade-message">{{ message }}</p>
+      </div>
+      
+      <div class="upgrade-benefits">
+        <h5>Dengan HRIS PRO Anda dapat:</h5>
+        <ul class="benefits-list">
+          <li>
+            <div class="benefit-icon">QR</div>
+            <div>
+              <strong>QR Attendance</strong>
+              <span>Scanning QR code untuk check-in/out</span>
+            </div>
+          </li>
+          <li>
+            <div class="benefit-icon">Manual</div>
+            <div>
+              <strong>Manual Attendance</strong>
+              <span>Pengajuan manual attendance dengan approval</span>
+            </div>
+          </li>
+          <li>
+            <div class="benefit-icon">Report</div>
+            <div>
+              <strong>Advanced Reporting</strong>
+              <span>Export data dan laporan yang lebih lengkap</span>
+            </div>
+          </li>
+          <li>
+            <div class="benefit-icon">Payroll</div>
+            <div>
+              <strong>Payroll Basic</strong>
+              <span>Perhitungan gaji otomatis</span>
+            </div>
+          </li>
+        </ul>
+      </div>
+      
+      <div class="upgrade-plans">
+        <h5>Pilih Paket Anda:</h5>
+        <div class="plans-grid">
+          <div class="plan-card current">
+            <div class="plan-header">
+              <h6>Basic</h6>
+              <span class="plan-price">Gratis</span>
+            </div>
+            <ul class="plan-features">
+              <li>GPS Attendance</li>
+              <li>Leave Request</li>
+              <li>Approval Center</li>
+              <li>Basic Reporting</li>
+            </ul>
+          </div>
+          
+          <div class="plan-card recommended">
+            <div class="plan-badge">Recommended</div>
+            <div class="plan-header">
+              <h6>PRO</h6>
+              <span class="plan-price">Rp 50K/bulan</span>
+            </div>
+            <ul class="plan-features">
+              <li>Semua fitur Basic</li>
+              <li>QR Attendance</li>
+              <li>Manual Attendance</li>
+              <li>Advanced Reporting</li>
+              <li>Payroll Basic</li>
+            </ul>
+            <button class="btn primary">Upgrade ke PRO</button>
+          </div>
+          
+          <div class="plan-card">
+            <div class="plan-header">
+              <h6>Enterprise</h6>
+              <span class="plan-price">Custom</span>
+            </div>
+            <ul class="plan-features">
+              <li>Semua fitur PRO</li>
+              <li>Multi Client</li>
+              <li>Patrol System</li>
+              <li>API Access</li>
+              <li>Priority Support</li>
+            </ul>
+            <button class="btn secondary">Hubungi Sales</button>
+          </div>
+        </div>
+      </div>
+      
+      <div class="upgrade-actions">
+        <button class="btn secondary" onclick="history.back()">Kembali</button>
+        <button class="btn primary" onclick="window.open('mailto:sales@hris-pro.com?subject=Upgrade Request - {{ feature }}')">
+          Hubungi Sales
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+.upgrade-illustration {
+  text-align: center;
+  margin-bottom: 2rem;
+}
+
+.upgrade-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 80px;
+  height: 80px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 50%;
+  color: white;
+  margin-bottom: 1rem;
+}
+
+.upgrade-icon svg {
+  width: 40px;
+  height: 40px;
+}
+
+.upgrade-content {
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+.upgrade-feature h4 {
+  color: #333;
+  margin-bottom: 0.5rem;
+}
+
+.upgrade-message {
+  color: #666;
+  font-size: 1.1rem;
+  margin-bottom: 2rem;
+  padding: 1rem;
+  background: #f8f9fa;
+  border-radius: 8px;
+  border-left: 4px solid #667eea;
+}
+
+.upgrade-benefits h5 {
+  color: #333;
+  margin-bottom: 1rem;
+}
+
+.benefits-list {
+  list-style: none;
+  padding: 0;
+  margin-bottom: 2rem;
+}
+
+.benefits-list li {
+  display: flex;
+  align-items: flex-start;
+  margin-bottom: 1rem;
+  padding: 1rem;
+  background: #f8f9fa;
+  border-radius: 8px;
+}
+
+.benefit-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  background: #667eea;
+  color: white;
+  border-radius: 8px;
+  font-weight: bold;
+  font-size: 0.8rem;
+  margin-right: 1rem;
+  flex-shrink: 0;
+}
+
+.benefits-list li div:nth-child(2) {
+  flex: 1;
+}
+
+.benefits-list li strong {
+  display: block;
+  color: #333;
+  margin-bottom: 0.25rem;
+}
+
+.benefits-list li span {
+  color: #666;
+  font-size: 0.9rem;
+}
+
+.upgrade-plans h5 {
+  color: #333;
+  margin-bottom: 1rem;
+}
+
+.plans-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+
+.plan-card {
+  border: 2px solid #e9ecef;
+  border-radius: 12px;
+  padding: 1.5rem;
+  text-align: center;
+  position: relative;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.plan-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+
+.plan-card.current {
+  border-color: #6c757d;
+}
+
+.plan-card.recommended {
+  border-color: #667eea;
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(118, 75, 162, 0.05) 100%);
+}
+
+.plan-badge {
+  position: absolute;
+  top: -10px;
+  right: 10px;
+  background: #667eea;
+  color: white;
+  padding: 0.25rem 0.75rem;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: bold;
+}
+
+.plan-header h6 {
+  color: #333;
+  margin-bottom: 0.5rem;
+  font-size: 1.2rem;
+}
+
+.plan-price {
+  display: block;
+  color: #667eea;
+  font-size: 1.5rem;
+  font-weight: bold;
+  margin-bottom: 1rem;
+}
+
+.plan-features {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 1.5rem 0;
+  text-align: left;
+}
+
+.plan-features li {
+  padding: 0.5rem 0;
+  color: #666;
+  font-size: 0.9rem;
+}
+
+.plan-features li::before {
+  content: "Check";
+  display: inline-block;
+  color: #28a745;
+  font-weight: bold;
+  margin-right: 0.5rem;
+}
+
+.upgrade-actions {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 768px) {
+  .plans-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .benefits-list li {
+    flex-direction: column;
+    text-align: center;
+  }
+  
+  .benefit-icon {
+    margin-right: 0;
+    margin-bottom: 1rem;
+  }
+}
+</style>
+{% endblock %}

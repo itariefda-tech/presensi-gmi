@@ -12,7 +12,7 @@
       } catch (e) {}
     })();
   </script>
-  <title>{{ title or "Dashboard Admin" }}</title>
+  <title>{{ title or "HRIS PRO - Dashboard" }}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}" />
 </head>
 <body data-dashboard-home="{{ url_for('admin.overview') }}">
@@ -22,7 +22,7 @@
       <div class="brand">
         <div class="brand-mark">
           <div class="dot" aria-hidden="true"></div>
-          <div class="brand-title">GMI Admin</div>
+          <div class="brand-title">HRIS PRO</div>
         </div>
         <button class="btn secondary collapse-btn" type="button" id="btnToggleSidebar" aria-label="Toggle sidebar">
           <svg class="collapse-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -33,11 +33,11 @@
       </div>
       <nav class="nav">
         {% if permissions.get("view_overview") %}
-        <a href="{{ url_for('admin.overview') }}" class="{% if active == 'overview' %}active{% endif %}" title="Overview">
+        <a href="{{ url_for('admin.overview') }}" class="{% if active == 'overview' %}active{% endif %}" title="Dashboard">
           <span class="nav-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none"><path d="M4 12 12 5l8 7v7a2 2 0 0 1-2 2h-3v-5H9v5H6a2 2 0 0 1-2-2v-7Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
           </span>
-          <span class="nav-label">Overview</span>
+          <span class="nav-label">Dashboard</span>
         </a>
         {% endif %}
         {% if permissions.get("manage_clients_view") %}
@@ -80,11 +80,11 @@
           <span class="nav-label">Policies</span>
         </a>
         {% endif %}
-        <a href="{{ url_for('admin.qr_page') }}" class="{% if active == 'qr' %}active{% endif %}" title="QR Absensi">
+        <a href="{{ url_for('admin.qr_page') }}" class="{% if active == 'qr' %}active{% endif %}" title="QR Attendance">
           <span class="nav-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none"><path d="M4 4h6v6H4V4Zm10 0h6v6h-6V4ZM4 14h6v6H4v-6Zm10 4h2m4-4v6h-6v-6h6Z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
           </span>
-          <span class="nav-label">QR Absensi</span>
+          <span class="nav-label">QR Attendance</span>
         </a>
         {% if permissions.get("view_attendance") %}
         <a href="{{ url_for('admin.attendance') }}" class="{% if active == 'attendance' %}active{% endif %}" title="Attendance">
@@ -93,13 +93,21 @@
           </span>
           <span class="nav-label">Attendance</span>
         </a>
+        {% if permissions.get("view_leave") or user.role == "hr_superadmin" %}
+        <a href="#" class="{% if active == 'leave' %}active{% endif %}" title="Leave">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M7 12h10m-5-7v14m-7-7h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          </span>
+          <span class="nav-label">Leave</span>
+        </a>
+        {% endif %}
         {% endif %}
         {% if user.role == "hr_superadmin" %}
         <a href="{{ url_for('admin.manual_attendance_admin') }}" class="{% if active == 'manual_admin' %}active{% endif %}" title="Manual Requests">
           <span class="nav-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none"><path d="M7 5h7l3 3v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M14 5v3h3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
           </span>
-          <span class="nav-label">Manual Requests</span>
+          <span class="nav-label">Attendance MR</span>
         </a>
         {% endif %}
         {% if user.role != "hr_superadmin" %}
@@ -107,7 +115,7 @@
           <span class="nav-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none"><path d="M4 6h9M4 10h9M4 14h6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="m14 14 5-5 2 2-5 5-3 1 1-3Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
           </span>
-          <span class="nav-label">Manual Attendance</span>
+          <span class="nav-label">Manual Attendance Request</span>
         </a>
         {% endif %}
         {% if permissions.get("approve_requests") %}
@@ -115,7 +123,7 @@
           <span class="nav-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </span>
-          <span class="nav-label">Approvals</span>
+          <span class="nav-label">Approval Center</span>
         </a>
         {% endif %}
         {% if permissions.get("manage_settings_codes") or permissions.get("manage_settings_password") %}

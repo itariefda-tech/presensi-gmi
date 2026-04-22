@@ -1,0 +1,739 @@
+{% extends "dashboard/base.html" %}
+{% set active = "reports" %}
+{% set heading = "Reports" %}
+{% set subtitle = "Attendance and performance reports" %}
+
+{% block body %}
+<div class="card">
+  <div class="card-header">
+    <div class="card-header-actions">
+      <h3>Reports Dashboard</h3>
+      <div class="header-actions">
+        <select id="clientSelect" class="input">
+          <option value="">All Clients</option>
+        </select>
+        <input type="date" id="startDate" class="input" placeholder="Start Date">
+        <input type="date" id="endDate" class="input" placeholder="End Date">
+        <button class="btn primary" id="btnGenerateReports">Generate</button>
+      </div>
+    </div>
+  </div>
+  
+  <div class="card-body">
+    <div id="reportsAlert" class="alert info" style="display:none;"></div>
+    
+    <!-- Summary Cards -->
+    <div class="summary-cards" id="summaryCards">
+      <div class="summary-card">
+        <div class="summary-icon">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" fill="#28a745"/>
+          </svg>
+        </div>
+        <div class="summary-content">
+          <div class="summary-value" id="totalEmployees">0</div>
+          <div class="summary-label">Total Employees</div>
+        </div>
+      </div>
+      
+      <div class="summary-card">
+        <div class="summary-icon">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M9 11H7v2h2v-2zm4 0h-2v2h2v-2zm4 0h-2v2h2v-2zm2-7h-1V2h-2v2H8V2H6v2H5c-1.11 0-1.99.9-1.99 2L3 20c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V9h14v11z" fill="#007bff"/>
+          </svg>
+        </div>
+        <div class="summary-content">
+          <div class="summary-value" id="totalDays">0</div>
+          <div class="summary-label">Working Days</div>
+        </div>
+      </div>
+      
+      <div class="summary-card">
+        <div class="summary-icon">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm.31-8.86c-1.77-.45-2.34-.94-2.34-1.67 0-.84.79-1.43 2.1-1.43 1.38 0 1.9.66 1.94 1.64h1.71c-.05-1.34-.87-2.57-2.49-2.97V5H10.9v1.69c-1.52.32-2.72 1.3-2.72 2.81 0 2.03 1.53 2.54 3.09 2.97 1.61.43 2.33.99 2.33 1.79 0 .8-.62 1.48-2.1 1.48-1.62 0-2.35-.73-2.45-1.85h-1.74c.1 1.7 1.36 2.66 2.79 3.02V19h2.34v-1.73c1.52-.29 2.72-1.16 2.73-2.77-.01-2.2-1.9-2.96-3.35-3.36z" fill="#ffc107"/>
+          </svg>
+        </div>
+        <div class="summary-content">
+          <div class="summary-value" id="attendanceRate">0%</div>
+          <div class="summary-label">Attendance Rate</div>
+        </div>
+      </div>
+      
+      <div class="summary-card">
+        <div class="summary-icon">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z" fill="#dc3545"/>
+          </svg>
+        </div>
+        <div class="summary-content">
+          <div class="summary-value" id="lateRate">0%</div>
+          <div class="summary-label">Late Rate</div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Report Tabs -->
+    <div class="report-tabs">
+      <button class="tab-btn active" data-tab="attendance">Attendance Report</button>
+      <button class="tab-btn" data-tab="late">Late Report</button>
+      <button class="tab-btn" data-tab="absent">Absent Report</button>
+    </div>
+    
+    <!-- Attendance Report Tab -->
+    <div class="tab-panel active" id="tab-attendance">
+      <div class="table-header">
+        <h4>Daily Attendance</h4>
+        <div class="table-actions">
+          <button class="btn small secondary" id="btnExportAttendance">Export CSV</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="table" aria-label="Attendance report">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Employee</th>
+              <th>Email</th>
+              <th>Check-in Time</th>
+              <th>Status</th>
+              <th>Method</th>
+            </tr>
+          </thead>
+          <tbody id="attendanceRows">
+            <tr>
+              <td colspan="6" class="muted">
+                <span class="spinner" aria-hidden="true"></span>
+                Select date range to generate report...
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    
+    <!-- Late Report Tab -->
+    <div class="tab-panel" id="tab-late">
+      <div class="table-header">
+        <h4>Late Attendance</h4>
+        <div class="table-actions">
+          <button class="btn small secondary" id="btnExportLate">Export CSV</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="table" aria-label="Late report">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Employee</th>
+              <th>Email</th>
+              <th>Check-in Time</th>
+              <th>Late Category</th>
+              <th>Method</th>
+              <th>Site</th>
+            </tr>
+          </thead>
+          <tbody id="lateRows">
+            <tr>
+              <td colspan="7" class="muted">
+                <span class="spinner" aria-hidden="true"></span>
+                Select date range to generate report...
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    
+    <!-- Absent Report Tab -->
+    <div class="tab-panel" id="tab-absent">
+      <div class="table-header">
+        <h4>Absent Report</h4>
+        <div class="table-actions">
+          <button class="btn small secondary" id="btnExportAbsent">Export CSV</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="table" aria-label="Absent report">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Employee</th>
+              <th>Email</th>
+              <th>Status</th>
+              <th>Reason</th>
+            </tr>
+          </thead>
+          <tbody id="absentRows">
+            <tr>
+              <td colspan="5" class="muted">
+                <span class="spinner" aria-hidden="true"></span>
+                Select date range to generate report...
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+.card-header-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.header-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.summary-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+
+.summary-card {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  padding: 1.5rem;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+  transition: transform 0.2s;
+}
+
+.summary-card:hover {
+  transform: translateY(-2px);
+}
+
+.summary-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 50px;
+  height: 50px;
+  background: rgba(255,255,255,0.2);
+  border-radius: 50%;
+}
+
+.summary-icon svg {
+  width: 24px;
+  height: 24px;
+  fill: white;
+}
+
+.summary-content {
+  flex: 1;
+}
+
+.summary-value {
+  font-size: 2rem;
+  font-weight: bold;
+  line-height: 1;
+  margin-bottom: 0.25rem;
+}
+
+.summary-label {
+  font-size: 0.9rem;
+  opacity: 0.9;
+}
+
+.report-tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 2rem;
+  border-bottom: 2px solid #e9ecef;
+}
+
+.tab-btn {
+  background: none;
+  border: none;
+  padding: 1rem 1.5rem;
+  cursor: pointer;
+  border-bottom: 3px solid transparent;
+  transition: all 0.2s;
+  font-weight: 500;
+  color: #666;
+}
+
+.tab-btn:hover {
+  color: #333;
+  background: rgba(102, 126, 234, 0.1);
+}
+
+.tab-btn.active {
+  color: #667eea;
+  border-bottom-color: #667eea;
+  background: rgba(102, 126, 234, 0.05);
+}
+
+.tab-panel {
+  display: none;
+}
+
+.tab-panel.active {
+  display: block;
+}
+
+.table-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.table-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.status-badge {
+  padding: 0.25rem 0.75rem;
+  border-radius: 12px;
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+.status-on-time {
+  background: #d4edda;
+  color: #155724;
+}
+
+.status-late {
+  background: #fff3cd;
+  color: #856404;
+}
+
+.status-absent {
+  background: #f8d7da;
+  color: #721c24;
+}
+
+.status-on-leave {
+  background: #d1ecf1;
+  color: #0c5460;
+}
+
+.late-category {
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+.late-15 {
+  background: #fff3cd;
+  color: #856404;
+}
+
+.late-30 {
+  background: #ffeaa7;
+  color: #856404;
+}
+
+.late-60 {
+  background: #f8d7da;
+  color: #721c24;
+}
+
+@media (max-width: 768px) {
+  .card-header-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  
+  .header-actions {
+    justify-content: stretch;
+  }
+  
+  .header-actions input,
+  .header-actions button,
+  .header-actions select {
+    flex: 1;
+  }
+  
+  .summary-cards {
+    grid-template-columns: 1fr;
+  }
+  
+  .report-tabs {
+    flex-wrap: wrap;
+  }
+  
+  .tab-btn {
+    flex: 1;
+    min-width: 120px;
+  }
+  
+  .table-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 1rem;
+  }
+}
+</style>
+
+<script src="{{ url_for('static', filename='js/dashboard_admin.js') }}"></script>
+<script>
+(function() {
+  let currentReports = {
+    attendance: [],
+    late: [],
+    absent: []
+  };
+  
+  // Initialize date inputs
+  function initializeDateInputs() {
+    const now = new Date();
+    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    
+    document.getElementById('startDate').value = firstDay.toISOString().split('T')[0];
+    document.getElementById('endDate').value = lastDay.toISOString().split('T')[0];
+  }
+  
+  // Load clients
+  function loadClients() {
+    const clientSelect = document.getElementById('clientSelect');
+    
+    fetch('/api/clients')
+      .then(r => r.json())
+      .then(response => {
+        if (response.ok) {
+          response.data.forEach(client => {
+            const option = new Option(client.name, client.id);
+            clientSelect.add(option);
+          });
+        }
+      })
+      .catch(() => {
+        console.error('Failed to load clients');
+      });
+  }
+  
+  // Generate all reports
+  function generateReports() {
+    const startDate = document.getElementById('startDate').value;
+    const endDate = document.getElementById('endDate').value;
+    const clientId = document.getElementById('clientSelect').value;
+    
+    if (!startDate || !endDate) {
+      showAlert('Please select start and end dates', 'warning');
+      return;
+    }
+    
+    if (new Date(startDate) > new Date(endDate)) {
+      showAlert('Start date must be before end date', 'warning');
+      return;
+    }
+    
+    // Show loading
+    showLoading();
+    
+    // Generate reports in parallel
+    Promise.all([
+      generateAttendanceReport(startDate, endDate, clientId),
+      generateLateReport(startDate, endDate, clientId),
+      generateAbsentReport(startDate, endDate, clientId),
+      generateSummaryReport(startDate, endDate, clientId)
+    ]).then(() => {
+      hideLoading();
+      showAlert('Reports generated successfully', 'success');
+    }).catch(() => {
+      hideLoading();
+      showAlert('Failed to generate reports', 'error');
+    });
+  }
+  
+  // Generate attendance report
+  function generateAttendanceReport(startDate, endDate, clientId) {
+    const params = new URLSearchParams({
+      start_date: startDate,
+      end_date: endDate
+    });
+    
+    if (clientId) params.append('client_id', clientId);
+    
+    return fetch(`/api/reports/attendance?${params}`)
+      .then(r => r.json())
+      .then(response => {
+        if (response.ok) {
+          currentReports.attendance = response.data;
+          renderAttendanceTable(response.data);
+        } else {
+          throw new Error(response.message || 'Failed to load attendance report');
+        }
+      });
+  }
+  
+  // Generate late report
+  function generateLateReport(startDate, endDate, clientId) {
+    const params = new URLSearchParams({
+      start_date: startDate,
+      end_date: endDate
+    });
+    
+    if (clientId) params.append('client_id', clientId);
+    
+    return fetch(`/api/reports/late?${params}`)
+      .then(r => r.json())
+      .then(response => {
+        if (response.ok) {
+          currentReports.late = response.data;
+          renderLateTable(response.data);
+        } else {
+          throw new Error(response.message || 'Failed to load late report');
+        }
+      });
+  }
+  
+  // Generate absent report
+  function generateAbsentReport(startDate, endDate, clientId) {
+    const params = new URLSearchParams({
+      start_date: startDate,
+      end_date: endDate
+    });
+    
+    if (clientId) params.append('client_id', clientId);
+    
+    return fetch(`/api/reports/absent?${params}`)
+      .then(r => r.json())
+      .then(response => {
+        if (response.ok) {
+          currentReports.absent = response.data;
+          renderAbsentTable(response.data);
+        } else {
+          throw new Error(response.message || 'Failed to load absent report');
+        }
+      });
+  }
+  
+  // Generate summary report
+  function generateSummaryReport(startDate, endDate, clientId) {
+    const params = new URLSearchParams({
+      start_date: startDate,
+      end_date: endDate
+    });
+    
+    if (clientId) params.append('client_id', clientId);
+    
+    return fetch(`/api/reports/summary?${params}`)
+      .then(r => r.json())
+      .then(response => {
+        if (response.ok) {
+          updateSummaryCards(response.data);
+        } else {
+          throw new Error(response.message || 'Failed to load summary report');
+        }
+      });
+  }
+  
+  // Render attendance table
+  function renderAttendanceTable(data) {
+    const tbody = document.getElementById('attendanceRows');
+    
+    if (!data || data.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6" class="muted">No attendance records found</td></tr>';
+      return;
+    }
+    
+    tbody.innerHTML = data.map(record => `
+      <tr>
+        <td>${formatDate(record.date)}</td>
+        <td>${record.employee_name || '-'}</td>
+        <td>${record.employee_email}</td>
+        <td>${record.checkin_time}</td>
+        <td><span class="status-badge ${record.status === 'ON_TIME' ? 'status-on-time' : 'status-late'}">${record.status}</span></td>
+        <td>${record.method || '-'}</td>
+      </tr>
+    `).join('');
+  }
+  
+  // Render late table
+  function renderLateTable(data) {
+    const tbody = document.getElementById('lateRows');
+    
+    if (!data || data.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="7" class="muted">No late records found</td></tr>';
+      return;
+    }
+    
+    tbody.innerHTML = data.map(record => `
+      <tr>
+        <td>${formatDate(record.date)}</td>
+        <td>${record.employee_name || '-'}</td>
+        <td>${record.employee_email}</td>
+        <td>${record.checkin_time}</td>
+        <td><span class="late-category ${getLateCategoryClass(record.late_category)}">${formatLateCategory(record.late_category)}</span></td>
+        <td>${record.method || '-'}</td>
+        <td>${record.site_name || '-'}</td>
+      </tr>
+    `).join('');
+  }
+  
+  // Render absent table
+  function renderAbsentTable(data) {
+    const tbody = document.getElementById('absentRows');
+    
+    if (!data || data.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="5" class="muted">No absent records found</td></tr>';
+      return;
+    }
+    
+    tbody.innerHTML = data.map(record => `
+      <tr>
+        <td>${formatDate(record.date)}</td>
+        <td>${record.employee_name || '-'}</td>
+        <td>${record.employee_email}</td>
+        <td><span class="status-badge ${record.status === 'ON_LEAVE' ? 'status-on-leave' : 'status-absent'}">${record.status.replace('_', ' ')}</span></td>
+        <td>${record.status === 'ON_LEAVE' ? 'Approved leave' : 'No check-in recorded'}</td>
+      </tr>
+    `).join('');
+  }
+  
+  // Update summary cards
+  function updateSummaryCards(data) {
+    document.getElementById('totalEmployees').textContent = data.total_employees || 0;
+    document.getElementById('totalDays').textContent = data.total_days || 0;
+    document.getElementById('attendanceRate').textContent = `${(data.attendance_rate || 0).toFixed(1)}%`;
+    document.getElementById('lateRate').textContent = `${(data.late_rate || 0).toFixed(1)}%`;
+  }
+  
+  // Export functions
+  function exportAttendanceCSV() {
+    if (currentReports.attendance.length === 0) {
+      showAlert('No data to export', 'warning');
+      return;
+    }
+    exportToCSV(currentReports.attendance, 'attendance_report.csv', ['Date', 'Employee', 'Email', 'Check-in Time', 'Status', 'Method']);
+  }
+  
+  function exportLateCSV() {
+    if (currentReports.late.length === 0) {
+      showAlert('No data to export', 'warning');
+      return;
+    }
+    exportToCSV(currentReports.late, 'late_report.csv', ['Date', 'Employee', 'Email', 'Check-in Time', 'Late Category', 'Method', 'Site']);
+  }
+  
+  function exportAbsentCSV() {
+    if (currentReports.absent.length === 0) {
+      showAlert('No data to export', 'warning');
+      return;
+    }
+    exportToCSV(currentReports.absent, 'absent_report.csv', ['Date', 'Employee', 'Email', 'Status', 'Reason']);
+  }
+  
+  // Utility functions
+  function formatDate(dateStr) {
+    if (!dateStr) return '-';
+    const date = new Date(dateStr);
+    return date.toLocaleDateString('id-ID');
+  }
+  
+  function formatLateCategory(category) {
+    const mapping = {
+      'LATE_15': '15 min late',
+      'LATE_30': '30 min late',
+      'LATE_60': '60+ min late',
+      'ON_TIME': 'On time'
+    };
+    return mapping[category] || category;
+  }
+  
+  function getLateCategoryClass(category) {
+    const mapping = {
+      'LATE_15': 'late-15',
+      'LATE_30': 'late-30',
+      'LATE_60': 'late-60'
+    };
+    return mapping[category] || '';
+  }
+  
+  function exportToCSV(data, filename, headers) {
+    const csvContent = [
+      headers.join(','),
+      ...data.map(record => headers.map(header => {
+        const key = header.toLowerCase().replace(/[^a-z0-9]/g, '_');
+        return record[key] || record[header] || '';
+      }).join(','))
+    ].join('\n');
+    
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    window.URL.revokeObjectURL(url);
+  }
+  
+  function showAlert(message, type = 'info') {
+    const alert = document.getElementById('reportsAlert');
+    alert.textContent = message;
+    alert.className = `alert ${type}`;
+    alert.style.display = 'block';
+    
+    setTimeout(() => {
+      alert.style.display = 'none';
+    }, 5000);
+  }
+  
+  function showLoading() {
+    // Show loading spinners in tables
+    document.getElementById('attendanceRows').innerHTML = '<tr><td colspan="6" class="muted"><span class="spinner"></span> Loading...</td></tr>';
+    document.getElementById('lateRows').innerHTML = '<tr><td colspan="7" class="muted"><span class="spinner"></span> Loading...</td></tr>';
+    document.getElementById('absentRows').innerHTML = '<tr><td colspan="5" class="muted"><span class="spinner"></span> Loading...</td></tr>';
+  }
+  
+  function hideLoading() {
+    // Loading will be replaced by actual data when reports are rendered
+  }
+  
+  // Event listeners
+  document.addEventListener('DOMContentLoaded', () => {
+    initializeDateInputs();
+    loadClients();
+    
+    // Tab switching
+    const tabBtns = document.querySelectorAll('.tab-btn');
+    const tabPanels = document.querySelectorAll('.tab-panel');
+    
+    tabBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const targetTab = btn.dataset.tab;
+        
+        // Update active states
+        tabBtns.forEach(b => b.classList.remove('active'));
+        tabPanels.forEach(p => p.classList.remove('active'));
+        
+        btn.classList.add('active');
+        document.getElementById(`tab-${targetTab}`).classList.add('active');
+      });
+    });
+    
+    // Generate reports button
+    document.getElementById('btnGenerateReports').addEventListener('click', generateReports);
+    
+    // Export buttons
+    document.getElementById('btnExportAttendance').addEventListener('click', exportAttendanceCSV);
+    document.getElementById('btnExportLate').addEventListener('click', exportLateCSV);
+    document.getElementById('btnExportAbsent').addEventListener('click', exportAbsentCSV);
+    
+    // Auto-generate on load
+    generateReports();
+  });
+})();
+</script>
+{% endblock %}

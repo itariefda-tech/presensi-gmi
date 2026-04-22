@@ -1,16 +1,47 @@
 {% extends "dashboard/base.html" %}
 {% set active = "approvals" %}
-{% set heading = "Approvals" %}
-{% set subtitle = "Approve leave requests" %}
+{% set heading = "Approval Center" %}
+{% set subtitle = "Manage manual attendance and leave requests" %}
 
 {% block body %}
 <div class="card">
   <div class="tabs">
-    <button class="tab-btn active" data-tab="leave">Leave Requests</button>
+    <button class="tab-btn active" data-tab="attendance">Attendance</button>
+    <button class="tab-btn" data-tab="leave">Leave</button>
   </div>
 
-  <div class="tab-panel active" id="tab-leave">
-    <div id="approvalAlert" class="alert info" style="display:none;"></div>
+  <!-- Attendance Tab -->
+  <div class="tab-panel active" id="tab-attendance">
+    <div id="attendanceAlert" class="alert info" style="display:none;"></div>
+    <div class="table-wrap">
+      <table class="table" aria-label="Manual attendance pending">
+        <thead>
+          <tr>
+            <th>Diajukan</th>
+            <th>Pegawai</th>
+            <th>Tanggal</th>
+            <th>Waktu</th>
+            <th>Aksi</th>
+            <th>Alasan</th>
+            <th>Status</th>
+            {% if can_approve_manual %}<th>Approve</th>{% endif %}
+          </tr>
+        </thead>
+        <tbody id="attendanceRows" data-can-approve-manual="{{ '1' if can_approve_manual else '0' }}" data-limit="200">
+          <tr>
+            <td colspan="{% if can_approve_manual %}8{% else %}7{% endif %}" class="muted">
+              <span class="spinner" aria-hidden="true"></span>
+              Memuat data...
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Leave Tab -->
+  <div class="tab-panel" id="tab-leave">
+    <div id="leaveAlert" class="alert info" style="display:none;"></div>
     <div class="table-wrap">
       <table class="table" aria-label="Leave pending">
         <thead>
@@ -21,7 +52,7 @@
             <th>Tanggal</th>
             <th>Alasan</th>
             <th>Status</th>
-            {% if can_approve_leave %}<th>Aksi</th>{% endif %}
+            {% if can_approve_leave %}<th>Approve</th>{% endif %}
           </tr>
         </thead>
         <tbody id="leaveRows" data-can-approve-leave="{{ '1' if can_approve_leave else '0' }}" data-limit="200">
@@ -36,6 +67,226 @@
     </div>
   </div>
 
+</div>
+
+<!-- Approval Modal -->
+<div class="modal" id="approvalModal" aria-hidden="true">
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="approvalTitle">
+    <div class="modal-title" id="approvalTitle">Konfirmasi Approval</div>
+    <div class="modal-body">
+      <p id="approvalMessage">Apakah Anda yakin ingin menyetujui request ini?</p>
+      <div class="field-group">
+        <label for="approvalNote">Catatan (opsional untuk approve, wajib untuk reject)</label>
+        <textarea id="approvalNote" class="input" rows="3" placeholder="Tambahkan catatan..."></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <div class="btn-row">
+        <button class="btn secondary" type="button" id="btnApprovalCancel">Batal</button>
+        <button class="btn danger" type="button" id="btnApprovalReject">Reject</button>
+        <button class="btn primary" type="button" id="btnApprovalApprove">Approve</button>
+      </div>
+    </div>
   </div>
-  <script src="{{ url_for('static', filename='js/dashboard_admin.js') }}"></script>
+</div>
+
+<script src="{{ url_for('static', filename='js/dashboard_admin.js') }}"></script>
+<script>
+(function() {
+  // Tab switching
+  const tabBtns = document.querySelectorAll('.tab-btn');
+  const tabPanels = document.querySelectorAll('.tab-panel');
+  
+  tabBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const targetTab = btn.dataset.tab;
+      
+      // Update active states
+      tabBtns.forEach(b => b.classList.remove('active'));
+      tabPanels.forEach(p => p.classList.remove('active'));
+      
+      btn.classList.add('active');
+      document.getElementById(`tab-${targetTab}`).classList.add('active');
+      
+      // Load data for the active tab
+      if (targetTab === 'attendance') {
+        loadAttendanceData();
+      } else if (targetTab === 'leave') {
+        loadLeaveData();
+      }
+    });
+  });
+  
+  // Load initial data
+  loadAttendanceData();
+  
+  // Functions
+  function loadAttendanceData() {
+    const tbody = document.getElementById('attendanceRows');
+    const canApprove = tbody.dataset.canApproveManual === '1';
+    
+    fetch('/api/attendance/pending')
+      .then(r => r.json())
+      .then(response => {
+        if (response.ok) {
+          renderAttendanceTable(response.data, tbody, canApprove);
+        } else {
+          showError(tbody, 'Gagal memuat data');
+        }
+      })
+      .catch(() => showError(tbody, 'Gagal memuat data'));
+  }
+  
+  function loadLeaveData() {
+    const tbody = document.getElementById('leaveRows');
+    const canApprove = tbody.dataset.canApproveLeave === '1';
+    
+    fetch('/api/leave/pending')
+      .then(r => r.json())
+      .then(response => {
+        if (response.ok) {
+          renderLeaveTable(response.data, tbody, canApprove);
+        } else {
+          showError(tbody, 'Gagal memuat data');
+        }
+      })
+      .catch(() => showError(tbody, 'Gagal memuat data'));
+  }
+  
+  function renderAttendanceTable(data, tbody, canApprove) {
+    if (!data || data.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="8" class="muted">Tidak ada pending manual attendance.</td></tr>';
+      return;
+    }
+    
+    tbody.innerHTML = data.map(item => `
+      <tr>
+        <td>${formatDateTime(item.created_at)}</td>
+        <td>${item.employee_name}<br><small class="muted">${item.employee_email}</small></td>
+        <td>${formatDate(item.date)}</td>
+        <td>${item.time}</td>
+        <td>${item.action}</td>
+        <td>${item.reason || '-'}</td>
+        <td><span class="badge pending">${item.status}</span></td>
+        ${canApprove ? `<td><button class="btn small primary" onclick="showApprovalModal('attendance', ${item.id}, '${item.employee_name}')">Approve</button></td>` : ''}
+      </tr>
+    `).join('');
+  }
+  
+  function renderLeaveTable(data, tbody, canApprove) {
+    if (!data || data.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6" class="muted">Tidak ada pending leave requests.</td></tr>';
+      return;
+    }
+    
+    tbody.innerHTML = data.map(item => `
+      <tr>
+        <td>${formatDateTime(item.created_at)}</td>
+        <td>${item.employee_email}</td>
+        <td><span class="badge">${item.type}</span></td>
+        <td>${formatDateRange(item.date_from, item.date_to)}</td>
+        <td>${item.reason}</td>
+        <td><span class="badge pending">${item.status}</span></td>
+        ${canApprove ? `<td><button class="btn small primary" onclick="showApprovalModal('leave', ${item.id}, '${item.employee_email}')">Approve</button></td>` : ''}
+      </tr>
+    `).join('');
+  }
+  
+  function showError(tbody, message) {
+    tbody.innerHTML = `<tr><td colspan="8" class="muted">${message}</td></tr>`;
+  }
+  
+  function formatDateTime(dateStr) {
+    if (!dateStr) return '-';
+    const date = new Date(dateStr);
+    return date.toLocaleString('id-ID');
+  }
+  
+  function formatDate(dateStr) {
+    if (!dateStr) return '-';
+    const date = new Date(dateStr);
+    return date.toLocaleDateString('id-ID');
+  }
+  
+  function formatDateRange(fromDate, toDate) {
+    if (fromDate === toDate) {
+      return formatDate(fromDate);
+    }
+    return `${formatDate(fromDate)} - ${formatDate(toDate)}`;
+  }
+  
+  // Modal functions
+  window.showApprovalModal = function(type, id, employeeName) {
+    const modal = document.getElementById('approvalModal');
+    const title = document.getElementById('approvalTitle');
+    const message = document.getElementById('approvalMessage');
+    const noteField = document.getElementById('approvalNote');
+    
+    title.textContent = `Approval - ${type === 'attendance' ? 'Manual Attendance' : 'Leave Request'}`;
+    message.textContent = `Approve/Reject request dari ${employeeName}?`;
+    noteField.value = '';
+    
+    modal.dataset.type = type;
+    modal.dataset.id = id;
+    modal.setAttribute('aria-hidden', 'false');
+    modal.classList.add('show');
+  };
+  
+  // Modal close
+  document.getElementById('btnApprovalCancel').addEventListener('click', () => {
+    const modal = document.getElementById('approvalModal');
+    modal.setAttribute('aria-hidden', 'true');
+    modal.classList.remove('show');
+  });
+  
+  // Approval actions
+  document.getElementById('btnApprovalApprove').addEventListener('click', () => {
+    processApproval('approve');
+  });
+  
+  document.getElementById('btnApprovalReject').addEventListener('click', () => {
+    processApproval('reject');
+  });
+  
+  function processApproval(action) {
+    const modal = document.getElementById('approvalModal');
+    const type = modal.dataset.type;
+    const id = modal.dataset.id;
+    const note = document.getElementById('approvalNote').value;
+    
+    if (action === 'reject' && !note.trim()) {
+      alert('Alasan penolakan wajib diisi.');
+      return;
+    }
+    
+    const endpoint = type === 'attendance' ? '/api/attendance/approve' : '/api/leave/approve';
+    const payload = { id: parseInt(id), action, note: note.trim() || null };
+    
+    fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+    .then(r => r.json())
+    .then(response => {
+      if (response.ok) {
+        alert(response.message);
+        modal.setAttribute('aria-hidden', 'true');
+        modal.classList.remove('show');
+        
+        // Reload current tab
+        const activeTab = document.querySelector('.tab-btn.active').dataset.tab;
+        if (activeTab === 'attendance') {
+          loadAttendanceData();
+        } else {
+          loadLeaveData();
+        }
+      } else {
+        alert(response.message || 'Gagal memproses approval');
+      }
+    })
+    .catch(() => alert('Terjadi kesalahan saat memproses approval'));
+  }
+})();
+</script>
 {% endblock %}

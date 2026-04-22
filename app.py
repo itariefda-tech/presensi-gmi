@@ -1565,6 +1565,13 @@ def create_app() -> Flask:
         user = _current_user()
         if not user or not _can_submit_manual(user):
             return abort(403)
+        
+        # Check tier access - manual attendance requires PRO
+        if not _is_pro(user):
+            return render_template("dashboard/upgrade_prompt.html", 
+                                  user=user, 
+                                  feature="Manual Attendance",
+                                  message="Manual attendance hanya tersedia untuk HRIS PRO dan Enterprise.")
         employees = _employees()
         error = None
         success = None
@@ -1984,6 +1991,27 @@ def create_app() -> Flask:
             return jsonify(ok=False, message=message), 400
         return jsonify(ok=True, message="Manual attendance disetujui."), 200
 
+    @app.route("/api/approval/pending", methods=["GET"])
+    def approval_pending():
+        user = _current_user()
+        if not user or not (_can_approve_leave(user) or _can_approve_manual(user)):
+            return _json_forbidden()
+        
+        # Get manual attendance pending
+        manual_items = []
+        if _can_approve_manual(user):
+            manual_items = _fetch_manual_requests("pending", user)
+        
+        # Get leave requests pending
+        leave_items = []
+        if _can_approve_leave(user):
+            leave_items = _list_leave_pending(user)
+        
+        return jsonify(ok=True, data={
+            "manual_attendance": manual_items,
+            "leave_requests": leave_items
+        }), 200
+
     @app.route("/api/patrol/status", methods=["GET"])
     def patrol_status():
         user = _current_user()
@@ -1992,6 +2020,180 @@ def create_app() -> Flask:
             return forbidden
         data = _patrol_status_payload(user)
         return jsonify(ok=True, data=data), 200
+
+    @app.route("/api/payroll/generate", methods=["POST"])
+    def payroll_generate():
+        user = _current_user()
+        if not user or not _is_pro(user):
+            return _json_forbidden()
+        
+        data = _get_json()
+        period = (data.get("period") or "").strip()
+        employee_email = (data.get("employee_email") or "").strip()
+        salary_base = data.get("salary_base")
+        
+        if not period:
+            return jsonify(ok=False, message="Period wajib diisi (format: YYYY-MM)."), 400
+        if not employee_email:
+            return jsonify(ok=False, message="Employee email wajib diisi."), 400
+        if salary_base is None or salary_base <= 0:
+            return jsonify(ok=False, message="Salary base wajib diisi dan harus > 0."), 400
+        
+        try:
+            salary_base = float(salary_base)
+        except (TypeError, ValueError):
+            return jsonify(ok=False, message="Salary base tidak valid."), 400
+        
+        try:
+            payroll_id = _create_payroll_record(employee_email, period, salary_base)
+            payroll_record = _get_payroll_by_employee_period(employee_email, period)
+            return jsonify(ok=True, message="Payroll berhasil dibuat.", data=payroll_record), 200
+        except ValueError as err:
+            return jsonify(ok=False, message=str(err)), 400
+        except Exception:
+            return jsonify(ok=False, message="Gagal membuat payroll."), 500
+    
+    @app.route("/api/payroll/list", methods=["GET"])
+    def payroll_list():
+        user = _current_user()
+        if not user or not _is_pro(user):
+            return _json_forbidden()
+        
+        period = request.args.get("period", "").strip()
+        if not period:
+            # Default to current period
+            now = datetime.now()
+            period = f"{now.year:04d}-{now.month:02d}"
+        
+        payroll_list = _list_payroll_by_period(period)
+        return jsonify(ok=True, data=payroll_list), 200
+    
+    @app.route("/api/payroll/my", methods=["GET"])
+    def payroll_my():
+        user = _current_user()
+        if not user or not _is_pro(user):
+            return _json_forbidden()
+        
+        period = request.args.get("period", "").strip()
+        if not period:
+            # Default to current period
+            now = datetime.now()
+            period = f"{now.year:04d}-{now.month:02d}"
+        
+        payroll_record = _get_payroll_by_employee_period(user.email, period)
+        return jsonify(ok=True, data=payroll_record or {}), 200
+    
+    @app.route("/api/reports/attendance", methods=["GET"])
+    def reports_attendance():
+        user = _current_user()
+        if not user or not _is_pro(user):
+            return _json_forbidden()
+        
+        start_date = request.args.get("start_date", "").strip()
+        end_date = request.args.get("end_date", "").strip()
+        client_id = request.args.get("client_id")
+        
+        if not start_date or not end_date:
+            # Default to current month
+            now = datetime.now()
+            start_date = f"{now.year:04d}-{now.month:02d}-01"
+            end_date = f"{now.year:04d}-{now.month:02d}-31"
+        
+        try:
+            if client_id:
+                client_id = int(client_id)
+        except (TypeError, ValueError):
+            client_id = None
+        
+        try:
+            report_data = _generate_attendance_report(start_date, end_date, client_id)
+            return jsonify(ok=True, data=report_data), 200
+        except Exception:
+            return jsonify(ok=False, message="Failed to generate attendance report"), 500
+    
+    @app.route("/api/reports/late", methods=["GET"])
+    def reports_late():
+        user = _current_user()
+        if not user or not _is_pro(user):
+            return _json_forbidden()
+        
+        start_date = request.args.get("start_date", "").strip()
+        end_date = request.args.get("end_date", "").strip()
+        client_id = request.args.get("client_id")
+        
+        if not start_date or not end_date:
+            # Default to current month
+            now = datetime.now()
+            start_date = f"{now.year:04d}-{now.month:02d}-01"
+            end_date = f"{now.year:04d}-{now.month:02d}-31"
+        
+        try:
+            if client_id:
+                client_id = int(client_id)
+        except (TypeError, ValueError):
+            client_id = None
+        
+        try:
+            report_data = _generate_late_report(start_date, end_date, client_id)
+            return jsonify(ok=True, data=report_data), 200
+        except Exception:
+            return jsonify(ok=False, message="Failed to generate late report"), 500
+    
+    @app.route("/api/reports/absent", methods=["GET"])
+    def reports_absent():
+        user = _current_user()
+        if not user or not _is_pro(user):
+            return _json_forbidden()
+        
+        start_date = request.args.get("start_date", "").strip()
+        end_date = request.args.get("end_date", "").strip()
+        client_id = request.args.get("client_id")
+        
+        if not start_date or not end_date:
+            # Default to current month
+            now = datetime.now()
+            start_date = f"{now.year:04d}-{now.month:02d}-01"
+            end_date = f"{now.year:04d}-{now.month:02d}-31"
+        
+        try:
+            if client_id:
+                client_id = int(client_id)
+        except (TypeError, ValueError):
+            client_id = None
+        
+        try:
+            report_data = _generate_absent_report(start_date, end_date, client_id)
+            return jsonify(ok=True, data=report_data), 200
+        except Exception:
+            return jsonify(ok=False, message="Failed to generate absent report"), 500
+    
+    @app.route("/api/reports/summary", methods=["GET"])
+    def reports_summary():
+        user = _current_user()
+        if not user or not _is_pro(user):
+            return _json_forbidden()
+        
+        start_date = request.args.get("start_date", "").strip()
+        end_date = request.args.get("end_date", "").strip()
+        client_id = request.args.get("client_id")
+        
+        if not start_date or not end_date:
+            # Default to current month
+            now = datetime.now()
+            start_date = f"{now.year:04d}-{now.month:02d}-01"
+            end_date = f"{now.year:04d}-{now.month:02d}-31"
+        
+        try:
+            if client_id:
+                client_id = int(client_id)
+        except (TypeError, ValueError):
+            client_id = None
+        
+        try:
+            summary_data = _generate_summary_report(start_date, end_date, client_id)
+            return jsonify(ok=True, data=summary_data), 200
+        except Exception:
+            return jsonify(ok=False, message="Failed to generate summary report"), 500
 
     @app.route("/api/patrol/start", methods=["POST"])
     def patrol_start():
@@ -6110,7 +6312,8 @@ def _init_db() -> None:
                 must_change_password INTEGER DEFAULT 0,
                 selfie_path TEXT,
                 client_id INTEGER,
-                site_id INTEGER
+                site_id INTEGER,
+                tier TEXT DEFAULT 'basic'
             )
             """
         )
@@ -6118,6 +6321,12 @@ def _init_db() -> None:
             conn.execute(
                 "UPDATE users SET role = 'hr_superadmin' WHERE role = 'superadmin'"
             )
+            # Add tier field if not exists and set default for existing users
+            try:
+                conn.execute("ALTER TABLE users ADD COLUMN tier TEXT DEFAULT 'basic'")
+                conn.execute("UPDATE users SET tier = 'basic' WHERE tier IS NULL")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS clients (
@@ -6532,6 +6741,37 @@ def _init_db() -> None:
         )
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_manual_attendance_created_by ON manual_attendance_requests(created_by_user_id)"
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS payroll (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                employee_id INTEGER NOT NULL,
+                employee_email TEXT NOT NULL,
+                period TEXT NOT NULL,
+                salary_base REAL NOT NULL DEFAULT 0,
+                attendance_days INTEGER DEFAULT 0,
+                late_days INTEGER DEFAULT 0,
+                absent_days INTEGER DEFAULT 0,
+                leave_days INTEGER DEFAULT 0,
+                potongan_telat REAL DEFAULT 0,
+                potongan_absen REAL DEFAULT 0,
+                potongan_lain REAL DEFAULT 0,
+                tunjangan REAL DEFAULT 0,
+                total_gaji REAL NOT NULL DEFAULT 0,
+                status TEXT DEFAULT 'draft',
+                created_at TEXT NOT NULL,
+                updated_at TEXT,
+                FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE,
+                UNIQUE(employee_id, period)
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_payroll_employee_period ON payroll(employee_id, period)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_payroll_period ON payroll(period)"
         )
 
         if not _table_exists(conn, "attendance"):
@@ -7054,6 +7294,20 @@ def _can_approve_manual(user: User) -> bool:
     return user.role in APPROVER_ROLES
 
 
+def _is_pro(user: User) -> bool:
+    """Check if user has PRO tier access"""
+    if not user or not hasattr(user, 'tier'):
+        return False
+    return user.tier in {'pro', 'enterprise'}
+
+
+def _is_enterprise(user: User) -> bool:
+    """Check if user has ENTERPRISE tier access"""
+    if not user or not hasattr(user, 'tier'):
+        return False
+    return user.tier == 'enterprise'
+
+
 def _get_supervisor_site_ids(user_id: int) -> set[int]:
     conn = _db_connect()
     try:
@@ -7318,6 +7572,406 @@ def _list_leave_active_for_date(today: str) -> list[dict]:
         rows = [dict(row) for row in cur.fetchall()]
         _perf_log("list_leave_active_for_date", start, f"rows={len(rows)}")
         return rows
+    finally:
+        conn.close()
+
+
+def _calculate_attendance_summary(employee_email: str, period: str) -> dict:
+    """Calculate attendance summary for an employee in a period"""
+    start = time.perf_counter()
+    conn = _db_connect()
+    try:
+        # Parse period (YYYY-MM format)
+        if len(period) != 7 or period[4] != '-':
+            return {"attendance_days": 0, "late_days": 0, "absent_days": 0, "leave_days": 0}
+        
+        year, month = period.split('-')
+        start_date = f"{year}-{month}-01"
+        end_date = f"{year}-{month}-31"
+        
+        # Get attendance summary
+        cur = conn.execute(
+            """
+            SELECT 
+                COUNT(CASE WHEN action = 'IN' THEN 1 END) as checkin_count,
+                COUNT(CASE WHEN action = 'OUT' THEN 1 END) as checkout_count,
+                COUNT(CASE WHEN time > '08:00:00' AND action = 'IN' THEN 1 END) as late_count
+            FROM attendance 
+            WHERE employee_email = ? 
+              AND date >= ? 
+              AND date <= ?
+            """,
+            (employee_email, start_date, end_date)
+        )
+        attendance_data = dict(cur.fetchone() or {})
+        
+        # Get leave days
+        cur = conn.execute(
+            """
+            SELECT SUM(CASE 
+                WHEN date_from >= ? AND date_to <= ? THEN 
+                    (julianday(date_to) - julianday(date_from) + 1)
+                WHEN date_from >= ? AND date_to > ? THEN 
+                    (julianday(?) - julianday(date_from) + 1)
+                WHEN date_from < ? AND date_to <= ? THEN 
+                    (julianday(date_to) - julianday(?) + 1)
+                ELSE 0 
+            END) as leave_days
+            FROM leave_requests
+            WHERE employee_email = ?
+              AND status = 'approved'
+              AND date_from <= ?
+              AND date_to >= ?
+            """,
+            (start_date, end_date, start_date, end_date, end_date, start_date, end_date, start_date, employee_email, end_date, start_date)
+        )
+        leave_data = dict(cur.fetchone() or {})
+        
+        # Calculate working days (approx 22 days per month)
+        working_days = 22
+        attendance_days = min(attendance_data.get('checkin_count', 0), working_days)
+        late_days = attendance_data.get('late_count', 0)
+        leave_days = int(leave_data.get('leave_days', 0) or 0)
+        absent_days = working_days - attendance_days - leave_days
+        if absent_days < 0:
+            absent_days = 0
+        
+        result = {
+            "attendance_days": attendance_days,
+            "late_days": late_days,
+            "absent_days": absent_days,
+            "leave_days": leave_days
+        }
+        
+        _perf_log("calculate_attendance_summary", start, f"employee={employee_email}, period={period}")
+        return result
+    finally:
+        conn.close()
+
+
+def _calculate_payroll(employee_email: str, period: str, salary_base: float, 
+                       potongan_telat_rate: float = 50000, 
+                       potongan_absen_rate: float = 100000) -> dict:
+    """Calculate payroll for an employee"""
+    attendance_summary = _calculate_attendance_summary(employee_email, period)
+    
+    attendance_days = attendance_summary["attendance_days"]
+    late_days = attendance_summary["late_days"]
+    absent_days = attendance_summary["absent_days"]
+    leave_days = attendance_summary["leave_days"]
+    
+    # Calculate deductions
+    potongan_telat = late_days * potongan_telat_rate
+    potongan_absen = absent_days * potongan_absen_rate
+    
+    # Calculate daily rate
+    working_days = 22
+    daily_rate = salary_base / working_days
+    
+    # Calculate base pay (only for attendance days)
+    base_pay = attendance_days * daily_rate
+    
+    # Total salary
+    total_gaji = base_pay - potongan_telat - potongan_absen
+    
+    return {
+        "salary_base": salary_base,
+        "attendance_days": attendance_days,
+        "late_days": late_days,
+        "absent_days": absent_days,
+        "leave_days": leave_days,
+        "potongan_telat": potongan_telat,
+        "potongan_absen": potongan_absen,
+        "potongan_lain": 0,
+        "tunjangan": 0,
+        "total_gaji": max(0, total_gaji),  # Ensure non-negative
+        "daily_rate": daily_rate
+    }
+
+
+def _create_payroll_record(employee_email: str, period: str, salary_base: float) -> int:
+    """Create payroll record for an employee"""
+    conn = _db_connect()
+    try:
+        # Get employee info
+        employee = _employee_by_email(employee_email)
+        if not employee:
+            raise ValueError(f"Employee {employee_email} not found")
+        
+        # Calculate payroll
+        payroll_data = _calculate_payroll(employee_email, period, salary_base)
+        
+        # Insert or update payroll record
+        cur = conn.execute(
+            """
+            INSERT OR REPLACE INTO payroll (
+                employee_id, employee_email, period, salary_base, attendance_days,
+                late_days, absent_days, leave_days, potongan_telat, potongan_absen,
+                potongan_lain, tunjangan, total_gaji, status, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                employee.get('id'),
+                employee_email,
+                period,
+                payroll_data['salary_base'],
+                payroll_data['attendance_days'],
+                payroll_data['late_days'],
+                payroll_data['absent_days'],
+                payroll_data['leave_days'],
+                payroll_data['potongan_telat'],
+                payroll_data['potongan_absen'],
+                payroll_data['potongan_lain'],
+                payroll_data['tunjangan'],
+                payroll_data['total_gaji'],
+                'draft',
+                _now_ts(),
+                _now_ts()
+            )
+        )
+        return int(cur.lastrowid)
+    finally:
+        conn.commit()
+        conn.close()
+
+
+def _list_payroll_by_period(period: str) -> list[dict]:
+    """List all payroll records for a period"""
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "payroll"):
+            return []
+        cur = conn.execute(
+            """
+            SELECT p.*, e.name as employee_name
+            FROM payroll p
+            LEFT JOIN employees e ON p.employee_id = e.id
+            WHERE p.period = ?
+            ORDER BY e.name
+            """,
+            (period,)
+        )
+        return [dict(row) for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def _get_payroll_by_employee_period(employee_email: str, period: str) -> dict | None:
+    """Get payroll record for specific employee and period"""
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "payroll"):
+            return None
+        cur = conn.execute(
+            """
+            SELECT p.*, e.name as employee_name
+            FROM payroll p
+            LEFT JOIN employees e ON p.employee_id = e.id
+            WHERE p.employee_email = ? AND p.period = ?
+            """,
+            (employee_email, period)
+        )
+        row = cur.fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def _generate_attendance_report(start_date: str, end_date: str, client_id: int | None = None) -> list[dict]:
+    """Generate daily attendance report"""
+    start = time.perf_counter()
+    conn = _db_connect()
+    try:
+        query = """
+            SELECT 
+                a.date,
+                a.employee_email,
+                e.name as employee_name,
+                a.time as checkin_time,
+                CASE WHEN a.time > '08:00:00' THEN 'LATE' ELSE 'ON_TIME' END as status,
+                a.method,
+                a.action
+            FROM attendance a
+            LEFT JOIN employees e ON a.employee_email = e.email
+            WHERE a.date >= ? AND a.date <= ? AND a.action = 'IN'
+        """
+        params = [start_date, end_date]
+        
+        if client_id:
+            query += " AND e.client_id = ?"
+            params.append(client_id)
+        
+        query += " ORDER BY a.date, e.name"
+        
+        cur = conn.execute(query, params)
+        return [dict(row) for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def _generate_late_report(start_date: str, end_date: str, client_id: int | None = None) -> list[dict]:
+    """Generate late attendance report"""
+    start = time.perf_counter()
+    conn = _db_connect()
+    try:
+        query = """
+            SELECT 
+                a.date,
+                a.employee_email,
+                e.name as employee_name,
+                a.time as checkin_time,
+                (CASE 
+                    WHEN a.time > '08:00:00' AND a.time <= '08:30:00' THEN 'LATE_15'
+                    WHEN a.time > '08:30:00' AND a.time <= '09:00:00' THEN 'LATE_30'
+                    WHEN a.time > '09:00:00' THEN 'LATE_60'
+                    ELSE 'ON_TIME'
+                END) as late_category,
+                a.method,
+                s.name as site_name
+            FROM attendance a
+            LEFT JOIN employees e ON a.employee_email = e.email
+            LEFT JOIN sites s ON a.site_id = s.id
+            WHERE a.date >= ? AND a.date <= ? 
+              AND a.action = 'IN' 
+              AND a.time > '08:00:00'
+        """
+        params = [start_date, end_date]
+        
+        if client_id:
+            query += " AND e.client_id = ?"
+            params.append(client_id)
+        
+        query += " ORDER BY a.date DESC, a.time"
+        
+        cur = conn.execute(query, params)
+        return [dict(row) for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def _generate_absent_report(start_date: str, end_date: str, client_id: int | None = None) -> list[dict]:
+    """Generate absent report (employees with no check-in)"""
+    start = time.perf_counter()
+    conn = _db_connect()
+    try:
+        # Get all active employees
+        employee_query = "SELECT email, name, client_id FROM employees WHERE is_active = 1"
+        params = []
+        if client_id:
+            employee_query += " AND client_id = ?"
+            params.append(client_id)
+        
+        cur = conn.execute(employee_query, params)
+        employees = [dict(row) for row in cur.fetchall()]
+        
+        # Get attendance records for the date range
+        attendance_query = """
+            SELECT DISTINCT employee_email, date 
+            FROM attendance 
+            WHERE date >= ? AND date <= ? AND action = 'IN'
+        """
+        attendance_params = [start_date, end_date]
+        cur = conn.execute(attendance_query, attendance_params)
+        attendance_records = {f"{row['employee_email']}_{row['date']}" for row in cur.fetchall()}
+        
+        # Generate date range
+        start_dt = datetime.strptime(start_date, '%Y-%m-%d')
+        end_dt = datetime.strptime(end_date, '%Y-%m-%d')
+        date_range = []
+        current_dt = start_dt
+        while current_dt <= end_dt:
+            # Skip weekends (optional)
+            if current_dt.weekday() < 5:  # Monday-Friday
+                date_range.append(current_dt.strftime('%Y-%m-%d'))
+            current_dt += timedelta(days=1)
+        
+        # Find absences
+        absent_records = []
+        for employee in employees:
+            for date in date_range:
+                attendance_key = f"{employee['email']}_{date}"
+                if attendance_key not in attendance_records:
+                    # Check if on leave
+                    cur = conn.execute(
+                        "SELECT 1 FROM leave_requests WHERE employee_email = ? AND date_from <= ? AND date_to >= ? AND status = 'approved'",
+                        (employee['email'], date, date)
+                    )
+                    on_leave = cur.fetchone() is not None
+                    
+                    absent_records.append({
+                        'date': date,
+                        'employee_email': employee['email'],
+                        'employee_name': employee['name'],
+                        'status': 'ON_LEAVE' if on_leave else 'ABSENT',
+                        'client_id': employee['client_id']
+                    })
+        
+        return absent_records
+    finally:
+        conn.close()
+
+
+def _generate_summary_report(start_date: str, end_date: str, client_id: int | None = None) -> dict:
+    """Generate summary statistics report"""
+    start = time.perf_counter()
+    conn = _db_connect()
+    try:
+        # Get basic stats
+        attendance_query = """
+            SELECT 
+                COUNT(DISTINCT employee_email) as total_employees,
+                COUNT(*) as total_checkins,
+                COUNT(CASE WHEN time > '08:00:00' THEN 1 END) as total_late,
+                COUNT(DISTINCT date) as total_days
+            FROM attendance a
+            LEFT JOIN employees e ON a.employee_email = e.email
+            WHERE a.date >= ? AND a.date <= ? AND a.action = 'IN'
+        """
+        params = [start_date, end_date]
+        if client_id:
+            attendance_query += " AND e.client_id = ?"
+            params.append(client_id)
+        
+        cur = conn.execute(attendance_query, params)
+        stats = dict(cur.fetchone() or {})
+        
+        # Get leave stats
+        leave_query = """
+            SELECT COUNT(*) as total_leave_days
+            FROM leave_requests lr
+            LEFT JOIN employees e ON lr.employee_email = e.email
+            WHERE lr.date_from <= ? AND lr.date_to >= ? 
+              AND lr.status = 'approved'
+        """
+        leave_params = [end_date, start_date]
+        if client_id:
+            leave_query += " AND e.client_id = ?"
+            leave_params.append(client_id)
+        
+        cur = conn.execute(leave_query, leave_params)
+        leave_stats = dict(cur.fetchone() or {})
+        
+        # Calculate absent days
+        total_employees = stats.get('total_employees', 0)
+        total_days = stats.get('total_days', 0)
+        expected_attendance = total_employees * total_days
+        actual_attendance = stats.get('total_checkins', 0)
+        leave_days = leave_stats.get('total_leave_days', 0) or 0
+        absent_days = expected_attendance - actual_attendance - leave_days
+        if absent_days < 0:
+            absent_days = 0
+        
+        return {
+            'period': f"{start_date} to {end_date}",
+            'total_employees': total_employees,
+            'total_days': total_days,
+            'total_checkins': actual_attendance,
+            'total_late': stats.get('total_late', 0),
+            'total_leave': leave_days,
+            'total_absent': absent_days,
+            'attendance_rate': (actual_attendance / expected_attendance * 100) if expected_attendance > 0 else 0,
+            'late_rate': (stats.get('total_late', 0) / actual_attendance * 100) if actual_attendance > 0 else 0
+        }
     finally:
         conn.close()
 
@@ -9352,6 +10006,14 @@ def admin_bp() -> Blueprint:
     @bp.route("/qr", methods=["GET"])
     def qr_page():
         user = _current_user()
+        
+        # Check tier access - QR attendance requires PRO
+        if not _is_pro(user):
+            return render_template("dashboard/upgrade_prompt.html", 
+                                  user=user, 
+                                  feature="QR Attendance",
+                                  message="QR attendance hanya tersedia untuk HRIS PRO dan Enterprise.")
+        
         client_scope = _client_admin_client_id(user)
         if client_scope:
             client_row = _get_client_by_id(client_scope)

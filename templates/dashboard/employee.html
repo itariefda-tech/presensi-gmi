@@ -73,7 +73,7 @@
 
     <div class="swipe-viewport">
       <div class="swipe-track" id="swipeTrack">
-        <section class="swipe-pane" data-pane="0" aria-label="Presensi">
+        <section class="swipe-pane" data-pane="0" aria-label="Attendance">
           <div class="card mobile-card presence-card">
             <div class="decor-circles presence-decor" aria-hidden="true">
               <span class="circle c1"></span>
@@ -153,7 +153,7 @@
                 </div>
               </div>
               <span class="presence-status-badge is-ready" id="presenceStatusTitle" role="status" aria-live="polite">
-                Siap Absen
+                Siap Attendance
               </span>
               <span class="network-alert" id="netStatusAlert" aria-live="assertive"></span>
             </div>
@@ -215,8 +215,8 @@
                   <li>Status data/internet harus &quot;online&quot;</li>
                   <li>Klik Get Location sampai keluar kordinat map</li>
                   <li>Foto Selfie</li>
-                  <li>Pastikan status menjadi &quot;Siap Abesen&quot;</li>
-                  <li>Jika sudah Siap Absen klik Masuk/Pulang</li>
+                  <li>Pastikan status menjadi &quot;Siap Attendance&quot;</li>
+                  <li>Jika sudah Siap Attendance klik Masuk/Pulang</li>
                 </ol>
               </div>
               <button class="btn primary full" id="btnHelpClose" type="button">Tutup</button>
@@ -252,7 +252,7 @@
               <button class="leave-action-btn" data-type="sakit" type="button">
                 <span class="action-icon" aria-hidden="true">
                   <svg viewBox="0 0 24 24" role="img" aria-hidden="true">
-                    <path d="M11 4h2v16h-2zM4 11h16v2H4z"/>
+                    <path d="M11 4h2v16h-2zM10 10h4v10h-4zM14 6h4v14h-4z"/>
                   </svg>
                 </span>
                 <span>Sakit</span>
@@ -426,7 +426,7 @@
                   <button class="btn btn-location icon-only" id="btnPatrolLocation" type="button" aria-label="Refresh GPS">
                     <span class="btn-location-icon" aria-hidden="true">
                       <svg viewBox="0 0 24 24" fill="none">
-                        <path d="M12 2C8.13 2 5 5.13 5 9c0 4.45 4 10 7 13 3-3 7-8.55 7-13 0-3.87-3.13-7-7-7zm0 18c-1.48-1.79-5-7.25-5-11 0-2.76 2.24-5 5-5s5 2.24 5 5c0 3.75-3.52 9.21-5 11z" fill="currentColor"/>
+                        <path d="M12 4l5 2.25v5.75c0 3.5-2.3 6.9-5 8-2.7-1.1-5-4.5-5-8V6.25L12 4z" fill="currentColor"/>
                       </svg>
                     </span>
                   </button>
@@ -490,7 +490,7 @@
             <path d="M12 2c-2.79 0-5 2.21-5 5 0 4.42 5 11 5 11s5-6.58 5-11c0-2.79-2.21-5-5-5zm0 7c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z" fill="currentColor"/>
           </svg>
         </span>
-        <span class="nav-label">Presensi</span>
+        <span class="nav-label">Attendance</span>
       </button>
       <button class="nav-btn" data-tab="1" type="button">
         <span class="nav-icon" aria-hidden="true">

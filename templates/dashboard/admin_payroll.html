@@ -1,0 +1,597 @@
+{% extends "dashboard/base.html" %}
+{% set active = "payroll" %}
+{% set heading = "Payroll Management" %}
+{% set subtitle = "Generate and manage employee payroll" %}
+
+{% block body %}
+<div class="card">
+  <div class="card-header">
+    <div class="card-header-actions">
+      <h3>Payroll Management</h3>
+      <div class="header-actions">
+        <select id="periodSelect" class="input">
+          <option value="">Select Period</option>
+        </select>
+        <button class="btn primary" id="btnLoadPayroll">Load Payroll</button>
+        <button class="btn secondary" id="btnGeneratePayroll">Generate New</button>
+      </div>
+    </div>
+  </div>
+  
+  <div class="card-body">
+    <div id="payrollAlert" class="alert info" style="display:none;"></div>
+    
+    <!-- Generate Payroll Form -->
+    <div id="generateForm" class="form-section" style="display:none;">
+      <h4>Generate Payroll</h4>
+      <form id="payrollGenerateForm" class="form-grid">
+        <div class="field-group">
+          <label for="employeeEmail">Employee Email</label>
+          <select id="employeeEmail" class="input" required>
+            <option value="">Select Employee</option>
+          </select>
+        </div>
+        <div class="field-group">
+          <label for="period">Period</label>
+          <input type="text" id="period" class="input" placeholder="YYYY-MM" required>
+        </div>
+        <div class="field-group">
+          <label for="salaryBase">Base Salary</label>
+          <input type="number" id="salaryBase" class="input" placeholder="5000000" min="0" required>
+        </div>
+        <div class="field-group">
+          <label for="potonganTelat">Late Deduction Rate</label>
+          <input type="number" id="potonganTelat" class="input" placeholder="50000" min="0" value="50000">
+        </div>
+        <div class="field-group">
+          <label for="potonganAbsen">Absent Deduction Rate</label>
+          <input type="number" id="potonganAbsen" class="input" placeholder="100000" min="0" value="100000">
+        </div>
+        <div class="btn-row">
+          <button type="submit" class="btn primary">Generate Payroll</button>
+          <button type="button" class="btn secondary" id="btnCancelGenerate">Cancel</button>
+        </div>
+      </form>
+    </div>
+    
+    <!-- Payroll Table -->
+    <div id="payrollTable" class="table-section">
+      <div class="table-header">
+        <h4>Payroll Records</h4>
+        <div class="table-actions">
+          <button class="btn small secondary" id="btnExportExcel">Export Excel</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="table" aria-label="Payroll records">
+          <thead>
+            <tr>
+              <th>Employee</th>
+              <th>Period</th>
+              <th>Base Salary</th>
+              <th>Attendance Days</th>
+              <th>Late Days</th>
+              <th>Absent Days</th>
+              <th>Leave Days</th>
+              <th>Late Deduction</th>
+              <th>Absent Deduction</th>
+              <th>Total Salary</th>
+              <th>Status</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="payrollRows">
+            <tr>
+              <td colspan="12" class="muted">
+                <span class="spinner" aria-hidden="true"></span>
+                Select period to load payroll data...
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Payroll Detail Modal -->
+<div class="modal" id="payrollDetailModal" aria-hidden="true">
+  <div class="modal-card modal-large" role="dialog" aria-modal="true" aria-labelledby="payrollDetailTitle">
+    <div class="modal-title" id="payrollDetailTitle">Payroll Detail</div>
+    <div class="modal-body">
+      <div class="payroll-detail-grid">
+        <div class="detail-section">
+          <h5>Employee Information</h5>
+          <div class="detail-grid">
+            <div class="detail-item">
+              <label>Name:</label>
+              <span id="detailEmployeeName">-</span>
+            </div>
+            <div class="detail-item">
+              <label>Email:</label>
+              <span id="detailEmployeeEmail">-</span>
+            </div>
+            <div class="detail-item">
+              <label>Period:</label>
+              <span id="detailPeriod">-</span>
+            </div>
+          </div>
+        </div>
+        
+        <div class="detail-section">
+          <h5>Attendance Summary</h5>
+          <div class="detail-grid">
+            <div class="detail-item">
+              <label>Attendance Days:</label>
+              <span id="detailAttendanceDays">-</span>
+            </div>
+            <div class="detail-item">
+              <label>Late Days:</label>
+              <span id="detailLateDays">-</span>
+            </div>
+            <div class="detail-item">
+              <label>Absent Days:</label>
+              <span id="detailAbsentDays">-</span>
+            </div>
+            <div class="detail-item">
+              <label>Leave Days:</label>
+              <span id="detailLeaveDays">-</span>
+            </div>
+          </div>
+        </div>
+        
+        <div class="detail-section">
+          <h5>Salary Calculation</h5>
+          <div class="salary-calculation">
+            <div class="calc-row">
+              <span>Base Salary:</span>
+              <span id="calcBaseSalary">-</span>
+            </div>
+            <div class="calc-row deduction">
+              <span>Late Deduction:</span>
+              <span id="calcLateDeduction">-</span>
+            </div>
+            <div class="calc-row deduction">
+              <span>Absent Deduction:</span>
+              <span id="calcAbsentDeduction">-</span>
+            </div>
+            <div class="calc-row deduction">
+              <span>Other Deductions:</span>
+              <span id="calcOtherDeductions">-</span>
+            </div>
+            <div class="calc-row">
+              <span>Allowances:</span>
+              <span id="calcAllowances">-</span>
+            </div>
+            <div class="calc-row total">
+              <span><strong>Total Salary:</strong></span>
+              <span id="calcTotalSalary"><strong>-</strong></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <div class="btn-row">
+        <button class="btn secondary" type="button" id="btnCloseDetail">Close</button>
+        <button class="btn primary" type="button" id="btnApprovePayroll">Approve</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+.form-section {
+  background: #f8f9fa;
+  padding: 1.5rem;
+  border-radius: 8px;
+  margin-bottom: 2rem;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 1rem;
+}
+
+.field-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.field-group label {
+  margin-bottom: 0.5rem;
+  font-weight: 500;
+  color: #333;
+}
+
+.card-header-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.header-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.table-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.table-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.modal-large {
+  max-width: 800px;
+}
+
+.payroll-detail-grid {
+  display: grid;
+  gap: 2rem;
+}
+
+.detail-section h5 {
+  color: #333;
+  margin-bottom: 1rem;
+  border-bottom: 2px solid #667eea;
+  padding-bottom: 0.5rem;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+}
+
+.detail-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.5rem 0;
+}
+
+.detail-item label {
+  font-weight: 500;
+  color: #666;
+}
+
+.salary-calculation {
+  background: #f8f9fa;
+  padding: 1rem;
+  border-radius: 8px;
+}
+
+.calc-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid #e9ecef;
+}
+
+.calc-row:last-child {
+  border-bottom: none;
+}
+
+.calc-row.deduction {
+  color: #dc3545;
+}
+
+.calc-row.total {
+  font-size: 1.2rem;
+  font-weight: bold;
+  color: #28a745;
+  border-top: 2px solid #28a745;
+  padding-top: 1rem;
+  margin-top: 0.5rem;
+}
+
+@media (max-width: 768px) {
+  .card-header-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  
+  .header-actions {
+    justify-content: stretch;
+  }
+  
+  .header-actions input,
+  .header-actions button {
+    flex: 1;
+  }
+  
+  .table-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 1rem;
+  }
+}
+</style>
+
+<script src="{{ url_for('static', filename='js/dashboard_admin.js') }}"></script>
+<script>
+(function() {
+  // Initialize period options
+  function initializePeriodOptions() {
+    const periodSelect = document.getElementById('periodSelect');
+    const periodInput = document.getElementById('period');
+    const now = new Date();
+    
+    // Generate last 6 months
+    for (let i = 0; i < 6; i++) {
+      const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const period = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+      const option = new Option(period, period);
+      periodSelect.add(option);
+    }
+    
+    // Set current period as default
+    const currentPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    periodSelect.value = currentPeriod;
+    periodInput.value = currentPeriod;
+  }
+  
+  // Load employees
+  function loadEmployees() {
+    const employeeSelect = document.getElementById('employeeEmail');
+    
+    fetch('/api/employees')
+      .then(r => r.json())
+      .then(response => {
+        if (response.ok) {
+          employeeSelect.innerHTML = '<option value="">Select Employee</option>';
+          response.data.forEach(emp => {
+            const option = new Option(`${emp.name} (${emp.email})`, emp.email);
+            employeeSelect.add(option);
+          });
+        }
+      })
+      .catch(() => {
+        console.error('Failed to load employees');
+      });
+  }
+  
+  // Load payroll data
+  function loadPayrollData() {
+    const period = document.getElementById('periodSelect').value;
+    if (!period) {
+      showAlert('Please select a period', 'warning');
+      return;
+    }
+    
+    const tbody = document.getElementById('payrollRows');
+    tbody.innerHTML = '<tr><td colspan="12" class="muted"><span class="spinner"></span> Loading payroll data...</td></tr>';
+    
+    fetch(`/api/payroll/list?period=${period}`)
+      .then(r => r.json())
+      .then(response => {
+        if (response.ok) {
+          renderPayrollTable(response.data);
+        } else {
+          tbody.innerHTML = '<tr><td colspan="12" class="muted">Failed to load payroll data</td></tr>';
+          showAlert(response.message || 'Failed to load payroll data', 'error');
+        }
+      })
+      .catch(() => {
+        tbody.innerHTML = '<tr><td colspan="12" class="muted">Error loading payroll data</td></tr>';
+        showAlert('Error loading payroll data', 'error');
+      });
+  }
+  
+  // Render payroll table
+  function renderPayrollTable(data) {
+    const tbody = document.getElementById('payrollRows');
+    
+    if (!data || data.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="12" class="muted">No payroll records found for this period</td></tr>';
+      return;
+    }
+    
+    tbody.innerHTML = data.map(record => `
+      <tr>
+        <td>${record.employee_name || record.employee_email}</td>
+        <td>${record.period}</td>
+        <td>Rp ${formatNumber(record.salary_base)}</td>
+        <td>${record.attendance_days}</td>
+        <td>${record.late_days}</td>
+        <td>${record.absent_days}</td>
+        <td>${record.leave_days}</td>
+        <td>Rp ${formatNumber(record.potongan_telat)}</td>
+        <td>Rp ${formatNumber(record.potongan_absen)}</td>
+        <td><strong>Rp ${formatNumber(record.total_gaji)}</strong></td>
+        <td><span class="badge ${record.status === 'approved' ? 'success' : 'pending'}">${record.status}</span></td>
+        <td>
+          <button class="btn small primary" onclick="showPayrollDetail(${record.id})">Detail</button>
+        </td>
+      </tr>
+    `).join('');
+  }
+  
+  // Show payroll detail
+  function showPayrollDetail(payrollId) {
+    // Find payroll record from current table
+    const period = document.getElementById('periodSelect').value;
+    
+    fetch(`/api/payroll/list?period=${period}`)
+      .then(r => r.json())
+      .then(response => {
+        if (response.ok) {
+          const record = response.data.find(p => p.id === payrollId);
+          if (record) {
+            populatePayrollDetail(record);
+            document.getElementById('payrollDetailModal').setAttribute('aria-hidden', 'false');
+            document.getElementById('payrollDetailModal').classList.add('show');
+          }
+        }
+      });
+  }
+  
+  // Populate payroll detail modal
+  function populatePayrollDetail(record) {
+    document.getElementById('detailEmployeeName').textContent = record.employee_name || '-';
+    document.getElementById('detailEmployeeEmail').textContent = record.employee_email;
+    document.getElementById('detailPeriod').textContent = record.period;
+    
+    document.getElementById('detailAttendanceDays').textContent = record.attendance_days;
+    document.getElementById('detailLateDays').textContent = record.late_days;
+    document.getElementById('detailAbsentDays').textContent = record.absent_days;
+    document.getElementById('detailLeaveDays').textContent = record.leave_days;
+    
+    document.getElementById('calcBaseSalary').textContent = `Rp ${formatNumber(record.salary_base)}`;
+    document.getElementById('calcLateDeduction').textContent = `Rp ${formatNumber(record.potongan_telat)}`;
+    document.getElementById('calcAbsentDeduction').textContent = `Rp ${formatNumber(record.potongan_absen)}`;
+    document.getElementById('calcOtherDeductions').textContent = `Rp ${formatNumber(record.potongan_lain || 0)}`;
+    document.getElementById('calcAllowances').textContent = `Rp ${formatNumber(record.tunjangan || 0)}`;
+    document.getElementById('calcTotalSalary').textContent = `Rp ${formatNumber(record.total_gaji)}`;
+  }
+  
+  // Generate payroll
+  function generatePayroll(formData) {
+    fetch('/api/payroll/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(formData)
+    })
+    .then(r => r.json())
+    .then(response => {
+      if (response.ok) {
+        showAlert(response.message, 'success');
+        document.getElementById('generateForm').style.display = 'none';
+        loadPayrollData(); // Reload table
+      } else {
+        showAlert(response.message || 'Failed to generate payroll', 'error');
+      }
+    })
+    .catch(() => {
+      showAlert('Error generating payroll', 'error');
+    });
+  }
+  
+  // Export to Excel
+  function exportToExcel() {
+    const period = document.getElementById('periodSelect').value;
+    if (!period) {
+      showAlert('Please select a period first', 'warning');
+      return;
+    }
+    
+    // Simple CSV export (can be enhanced with proper Excel library)
+    fetch(`/api/payroll/list?period=${period}`)
+      .then(r => r.json())
+      .then(response => {
+        if (response.ok && response.data.length > 0) {
+          exportToCSV(response.data, `payroll_${period}.csv`);
+        } else {
+          showAlert('No data to export', 'warning');
+        }
+      });
+  }
+  
+  // Export to CSV
+  function exportToCSV(data, filename) {
+    const headers = ['Employee', 'Period', 'Base Salary', 'Attendance Days', 'Late Days', 'Absent Days', 'Leave Days', 'Late Deduction', 'Absent Deduction', 'Total Salary', 'Status'];
+    const csvContent = [
+      headers.join(','),
+      ...data.map(record => [
+        record.employee_name || record.employee_email,
+        record.period,
+        record.salary_base,
+        record.attendance_days,
+        record.late_days,
+        record.absent_days,
+        record.leave_days,
+        record.potongan_telat,
+        record.potongan_absen,
+        record.total_gaji,
+        record.status
+      ].join(','))
+    ].join('\n');
+    
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    window.URL.revokeObjectURL(url);
+  }
+  
+  // Utility functions
+  function formatNumber(num) {
+    return new Intl.NumberFormat('id-ID').format(num);
+  }
+  
+  function showAlert(message, type = 'info') {
+    const alert = document.getElementById('payrollAlert');
+    alert.textContent = message;
+    alert.className = `alert ${type}`;
+    alert.style.display = 'block';
+    
+    setTimeout(() => {
+      alert.style.display = 'none';
+    }, 5000);
+  }
+  
+  // Event listeners
+  document.addEventListener('DOMContentLoaded', () => {
+    initializePeriodOptions();
+    loadEmployees();
+    
+    // Period select change
+    document.getElementById('periodSelect').addEventListener('change', (e) => {
+      document.getElementById('period').value = e.target.value;
+    });
+    
+    // Load payroll button
+    document.getElementById('btnLoadPayroll').addEventListener('click', loadPayrollData);
+    
+    // Generate payroll button
+    document.getElementById('btnGeneratePayroll').addEventListener('click', () => {
+      document.getElementById('generateForm').style.display = 'block';
+    });
+    
+    // Cancel generate button
+    document.getElementById('btnCancelGenerate').addEventListener('click', () => {
+      document.getElementById('generateForm').style.display = 'none';
+    });
+    
+    // Generate form submit
+    document.getElementById('payrollGenerateForm').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const formData = {
+        employee_email: document.getElementById('employeeEmail').value,
+        period: document.getElementById('period').value,
+        salary_base: parseFloat(document.getElementById('salaryBase').value),
+        potongan_telat_rate: parseFloat(document.getElementById('potonganTelat').value),
+        potongan_absen_rate: parseFloat(document.getElementById('potonganAbsen').value)
+      };
+      generatePayroll(formData);
+    });
+    
+    // Export button
+    document.getElementById('btnExportExcel').addEventListener('click', exportToExcel);
+    
+    // Modal close
+    document.getElementById('btnCloseDetail').addEventListener('click', () => {
+      document.getElementById('payrollDetailModal').setAttribute('aria-hidden', 'true');
+      document.getElementById('payrollDetailModal').classList.remove('show');
+    });
+    
+    // Approve payroll button (placeholder)
+    document.getElementById('btnApprovePayroll').addEventListener('click', () => {
+      showAlert('Payroll approval feature coming soon', 'info');
+    });
+  });
+})();
+</script>
+{% endblock %}
