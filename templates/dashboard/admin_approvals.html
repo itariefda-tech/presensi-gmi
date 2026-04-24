@@ -94,6 +94,7 @@
 <script>
 (function() {
   // Tab switching
+  const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
   const tabBtns = document.querySelectorAll('.tab-btn');
   const tabPanels = document.querySelectorAll('.tab-panel');
   
@@ -259,12 +260,17 @@
       return;
     }
     
-    const endpoint = type === 'attendance' ? '/api/attendance/approve' : '/api/leave/approve';
+    const endpoint = type === 'attendance'
+      ? (action === 'reject' ? '/api/attendance/reject' : '/api/attendance/approve')
+      : '/api/leave/approve';
     const payload = { id: parseInt(id), action, note: note.trim() || null };
     
     fetch(endpoint, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {})
+      },
       body: JSON.stringify(payload)
     })
     .then(r => r.json())

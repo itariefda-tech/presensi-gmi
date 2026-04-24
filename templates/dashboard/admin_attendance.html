@@ -51,11 +51,11 @@
   </article>
   <article class="card">
     <h4>Belum Checkout</h4>
-    <div class="value">--</div>
+      <div class="value">--</div>
   </article>
   <article class="card">
     <h4>Manual Pending</h4>
-    <div class="value">--</div>
+    <div class="value">{{ manual_pending_count }}</div>
   </article>
   <article class="card">
     <h4>Absen/Tidak Hadir</h4>
@@ -72,6 +72,7 @@
   </div>
   <form id="attendanceReportFilters" class="attendance-report-filters" method="get" action="{{ url_for('admin.attendance') }}">
     <input type="hidden" name="site_id" value="{{ selected_site.id }}" />
+    <input type="hidden" name="mr_status" value="{{ manual_status }}" />
     <div class="filter-col filter-name">
       <label for="attendanceReportSearch">Nama/e-mail</label>
       <input id="attendanceReportSearch" name="search" type="text" class="input" placeholder="Semua" value="{{ filter_search }}" autocomplete="off" />
@@ -149,6 +150,85 @@
   <div class="attendance-report-export">
     <div class="attendance-report-csv-note" id="attendanceReportCsvNote">Tekan tombol CSV untuk menarik data CSV.</div>
     <button class="btn secondary" type="button" id="attendanceReportCsvButton" data-csv-url="{{ url_for('admin.attendance_csv') }}">Tarik data CSV</button>
+  </div>
+</section>
+{% for msg in get_flashed_messages() %}
+<div class="alert info">{{ msg }}</div>
+{% endfor %}
+<section class="card" id="manual-attendance-requests">
+  <div class="card-header-actions" style="justify-content:space-between;">
+    <div>
+      <h4>Manual Attendance Requests</h4>
+      <div class="muted small attendance-report-subtitle">Pengajuan manual attendance untuk site terpilih.</div>
+    </div>
+  </div>
+  <div class="tabs">
+    <a class="tab-btn {% if manual_status == 'pending' %}active{% endif %}" href="{{ url_for('admin.attendance', site_id=selected_site.id, mr_status='pending') }}#manual-attendance-requests">Pending</a>
+    <a class="tab-btn {% if manual_status == 'approved' %}active{% endif %}" href="{{ url_for('admin.attendance', site_id=selected_site.id, mr_status='approved') }}#manual-attendance-requests">Approved</a>
+    <a class="tab-btn {% if manual_status == 'rejected' %}active{% endif %}" href="{{ url_for('admin.attendance', site_id=selected_site.id, mr_status='rejected') }}#manual-attendance-requests">Rejected</a>
+  </div>
+  <div class="table-wrap">
+    <table class="table" aria-label="Manual attendance requests">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Pegawai</th>
+          <th>Tanggal</th>
+          <th>Waktu</th>
+          <th>Tipe</th>
+          <th>Alasan</th>
+          <th>Diajukan Oleh</th>
+          <th>Diajukan</th>
+          <th>Status</th>
+          {% if manual_status == 'pending' and can_approve_manual %}<th>Aksi</th>{% endif %}
+        </tr>
+      </thead>
+      <tbody>
+        {% if not manual_items %}
+        <tr><td colspan="{% if manual_status == 'pending' and can_approve_manual %}10{% else %}9{% endif %}" class="muted">Belum ada manual attendance request untuk site ini.</td></tr>
+        {% endif %}
+        {% set manual_next_url = url_for('admin.attendance', site_id=selected_site.id, mr_status=manual_status) ~ '#manual-attendance-requests' %}
+        {% for r in manual_items %}
+        <tr>
+          <td>{{ r.id }}</td>
+          <td>
+            <div>{{ r.employee_name or r.employee_email }}</div>
+            <div class="muted">{{ r.employee_email }}</div>
+          </td>
+          <td>{{ r.date|ddmmyyyy }}</td>
+          <td>{{ r.time }}</td>
+          <td><span class="badge">{{ r.action }}</span></td>
+          <td>{{ r.reason }}</td>
+          <td>
+            <div>{{ r.created_by_email or r.created_by_user_id }}</div>
+            <div class="muted">{{ r.created_by_role|title }}</div>
+          </td>
+          <td>{{ r.created_at|display_datetime }}</td>
+          <td><span class="badge {{ r.status|lower }}">{{ r.status }}</span></td>
+          {% if manual_status == 'pending' and can_approve_manual %}
+          <td>
+            <div class="inline">
+              <form method="post" action="{{ url_for('admin.manual_attendance_approve', request_id=r.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                <input type="hidden" name="site_id" value="{{ selected_site.id }}" />
+                <input type="hidden" name="next" value="{{ manual_next_url }}" />
+                <input class="input" type="text" name="note" placeholder="Catatan (opsional)" />
+                <button class="btn primary" type="submit">Approve</button>
+              </form>
+              <form method="post" action="{{ url_for('admin.manual_attendance_reject', request_id=r.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                <input type="hidden" name="site_id" value="{{ selected_site.id }}" />
+                <input type="hidden" name="next" value="{{ manual_next_url }}" />
+                <input class="input" type="text" name="note" placeholder="Alasan tolak" required />
+                <button class="btn secondary" type="submit">Reject</button>
+              </form>
+            </div>
+          </td>
+          {% endif %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
   </div>
 </section>
     </div>

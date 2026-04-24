@@ -19,13 +19,22 @@
         <div class="hero-tabs" role="tablist" aria-label="Menu hero">
           <div class="hero-tabs-main" role="presentation">
             <button type="button" class="hero-tab active" data-hero-go="0">Fitur</button>
-            <button type="button" class="hero-tab" data-hero-go="2">Galeri</button>
+            <button type="button" class="hero-tab" data-hero-go="3">Galeri</button>
           </div>
-          <button type="button" class="hero-tab hero-tab-icon" data-hero-go="1" aria-label="Pengaturan" title="Pengaturan">
-            <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.11-.2-.36-.28-.57-.2l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.49c-.02-.22-.21-.5-.5-.5h-4c-.29 0-.48.28-.5.5l-.36 2.49c-.59.24-1.13.56-1.62.94l-2.39-.96c-.21-.08-.46 0-.57.2l-1.92 3.32c-.11.2-.06.46.12.61l2.03 1.58c-.04.31-.06.65-.06.94s.02.63.06.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.11.2.36.28.57.2l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.49c.02.22.21.5.5.5h4c.29 0 .48-.28.5-.5l.36-2.49c.59-.24 1.13-.56 1.62-.94l2.39.96c.21.08.46 0 .57-.2l1.92-3.32c.11-.2.06-.46-.12-.61l-2.03-1.58ZM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7Z" fill="currentColor" opacity=".85"/>
-            </svg>
-          </button>
+          <div class="hero-tabs-main" role="presentation">
+            <button type="button" class="hero-tab hero-tab-icon" data-hero-go="2" aria-label="Add-on" title="Add-on">
+              <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M4 7h10M18 7h2M4 17h2M10 17h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+                <circle cx="16" cy="7" r="2" stroke="currentColor" stroke-width="1.6"/>
+                <circle cx="8" cy="17" r="2" stroke="currentColor" stroke-width="1.6"/>
+              </svg>
+            </button>
+            <button type="button" class="hero-tab hero-tab-icon" data-hero-go="1" aria-label="Pengaturan" title="Pengaturan">
+              <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.11-.2-.36-.28-.57-.2l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.49c-.02-.22-.21-.5-.5-.5h-4c-.29 0-.48.28-.5.5l-.36 2.49c-.59.24-1.13.56-1.62.94l-2.39-.96c-.21-.08-.46 0-.57.2l-1.92 3.32c-.11.2-.06.46.12.61l2.03 1.58c-.04.31-.06.65-.06.94s.02.63.06.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.11.2.36.28.57.2l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.49c.02.22.21.5.5.5h4c.29 0 .48-.28.5-.5l.36-2.49c.59-.24 1.13-.56 1.62-.94l2.39.96c.21.08.46 0 .57-.2l1.92-3.32c.11-.2.06-.46-.12-.61l-2.03-1.58ZM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7Z" fill="currentColor" opacity=".85"/>
+              </svg>
+            </button>
+          </div>
         </div>
 
         <div class="hero-viewport">
@@ -109,6 +118,41 @@
                     <input type="checkbox" id="togglePagePatroli" checked />
                     <span>Halaman Patroli</span>
                   </label>
+                </div>
+              </div>
+            </section>
+            <section class="hero-pane" aria-label="Add-on Enterprise">
+              <div class="hero-controls" aria-label="Owner add-on">
+                <div class="hero-controls-header">
+                  <div class="hero-controls-title">Owner add-on</div>
+                </div>
+                <div class="hero-controls-body">
+                  <div class="hero-input">
+                    <input type="password" id="ownerAddonPassword" placeholder="Password owner" autocomplete="off" />
+                  </div>
+                  <button class="btn secondary" type="button" id="ownerAddonUnlock">Buka</button>
+                  <label class="check">
+                    <input type="checkbox" data-owner-addon="patrol" disabled />
+                    <span>Patrol Guard Tour</span>
+                  </label>
+                  <label class="check">
+                    <input type="checkbox" data-owner-addon="reporting_advanced" disabled />
+                    <span>Reporting advanced</span>
+                  </label>
+                  <label class="check">
+                    <input type="checkbox" data-owner-addon="api_access" disabled />
+                    <span>API access</span>
+                  </label>
+                  <label class="check">
+                    <input type="checkbox" data-owner-addon="payroll_plus" disabled />
+                    <span>Payroll plus</span>
+                  </label>
+                  <label class="check">
+                    <input type="checkbox" data-owner-addon="ai" disabled />
+                    <span>AI</span>
+                  </label>
+                  <button class="btn" type="button" id="ownerAddonSave" disabled>Simpan</button>
+                  <div class="toast" id="ownerAddonStatus" aria-live="polite"></div>
                 </div>
               </div>
             </section>

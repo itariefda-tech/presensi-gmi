@@ -41,11 +41,11 @@
         </a>
         {% endif %}
         {% if permissions.get("manage_clients_view") %}
-        <a href="{{ url_for('admin.clients') }}" class="{% if active == 'clients' %}active{% endif %}" title="Daftar Client">
+        <a href="{{ url_for('admin.clients') }}" class="{% if active == 'clients' %}active{% endif %}" title="Client">
           <span class="nav-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none"><path d="M4 7h16v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7Zm4-2h8v2H8V5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
           </span>
-          <span class="nav-label">Daftar Client</span>
+          <span class="nav-label">Client</span>
         </a>
         {% endif %}
         {% if permissions.get("manage_sites") %}
@@ -57,11 +57,11 @@
         </a>
         {% endif %}
         {% if permissions.get("manage_employees_view") %}
-        <a href="{{ url_for('admin.employees') }}" class="{% if active == 'employees' %}active{% endif %}" title="Daftar Pegawai">
+        <a href="{{ url_for('admin.employees') }}" class="{% if active == 'employees' %}active{% endif %}" title="Employee">
           <span class="nav-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none"><path d="M16 19c0-2.2-2.7-4-4-4s-4 1.8-4 4m8-10a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
           </span>
-          <span class="nav-label">Daftar Pegawai</span>
+          <span class="nav-label">Employee</span>
         </a>
         {% endif %}
         {% if permissions.get("manage_assignments") %}
@@ -93,21 +93,13 @@
           </span>
           <span class="nav-label">Attendance</span>
         </a>
-        {% if permissions.get("view_leave") or user.role == "hr_superadmin" %}
-        <a href="#" class="{% if active == 'leave' %}active{% endif %}" title="Leave">
-          <span class="nav-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none"><path d="M7 12h10m-5-7v14m-7-7h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-          </span>
-          <span class="nav-label">Leave</span>
-        </a>
         {% endif %}
-        {% endif %}
-        {% if user.role == "hr_superadmin" %}
-        <a href="{{ url_for('admin.manual_attendance_admin') }}" class="{% if active == 'manual_admin' %}active{% endif %}" title="Manual Requests">
+        {% if permissions.get("view_payroll") %}
+        <a href="{{ url_for('admin.payroll') }}" class="{% if active == 'payroll' %}active{% endif %}" title="Payroll">
           <span class="nav-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none"><path d="M7 5h7l3 3v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M14 5v3h3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+            <svg viewBox="0 0 24 24" fill="none"><path d="M6 4h12v16H6V4Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M9 8h6M9 12h6M9 16h3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
           </span>
-          <span class="nav-label">Attendance MR</span>
+          <span class="nav-label">Payroll</span>
         </a>
         {% endif %}
         {% if user.role != "hr_superadmin" %}
@@ -123,7 +115,7 @@
           <span class="nav-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </span>
-          <span class="nav-label">Approval Center</span>
+          <span class="nav-label">Aprroval</span>
         </a>
         {% endif %}
         {% if permissions.get("manage_settings_codes") or permissions.get("manage_settings_password") %}

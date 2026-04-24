@@ -258,7 +258,16 @@ syncHero();
 
 const heroTrack = document.getElementById("heroTrack");
 const heroTabs = Array.from(document.querySelectorAll("[data-hero-go]"));
-const heroPaneCount = heroTrack ? heroTrack.children.length : 0;
+const heroPanes = heroTrack ? Array.from(heroTrack.children) : [];
+const heroPaneCount = heroPanes.length;
+if (heroTrack && heroPaneCount){
+  heroTrack.style.width = `${heroPaneCount * 100}%`;
+  heroPanes.forEach(pane => {
+    const basis = `${100 / heroPaneCount}%`;
+    pane.style.width = basis;
+    pane.style.flex = `0 0 ${basis}`;
+  });
+}
 const heroGalleryMainImage = document.getElementById("heroGalleryMainImage");
 const heroGalleryData = document.getElementById("heroGalleryData");
 const heroGalleryFileInput = document.getElementById("heroGalleryFileInput");
@@ -266,12 +275,17 @@ const heroGalleryCameraInput = document.getElementById("heroGalleryCameraInput")
 const heroGalleryFileBtn = document.getElementById("heroGalleryFileBtn");
 const heroGalleryCameraBtn = document.getElementById("heroGalleryCameraBtn");
 const heroGalleryUploadStatus = document.getElementById("heroGalleryUploadStatus");
-const HERO_GALLERY_TAB_INDEX = 2;
+const HERO_GALLERY_TAB_INDEX = Math.max(0, heroPanes.findIndex(pane => pane.querySelector("#heroGalleryMainImage")));
 const HERO_GALLERY_AUTO_SLIDE_MS = 5000;
 let heroGalleryImages = [];
 let heroIndex = 0;
 let heroGalleryIndex = 0;
 let heroGalleryIntervalId = null;
+const ownerAddonPassword = document.getElementById("ownerAddonPassword");
+const ownerAddonUnlock = document.getElementById("ownerAddonUnlock");
+const ownerAddonSave = document.getElementById("ownerAddonSave");
+const ownerAddonStatus = document.getElementById("ownerAddonStatus");
+const ownerAddonToggles = Array.from(document.querySelectorAll("[data-owner-addon]"));
 
 if (heroGalleryData){
   try {
@@ -287,6 +301,118 @@ if (heroGalleryData){
 if (!heroGalleryImages.length && heroGalleryMainImage?.getAttribute("src")){
   heroGalleryImages = [heroGalleryMainImage.getAttribute("src")];
 }
+
+function setOwnerAddonStatus(message, state){
+  if (!ownerAddonStatus) return;
+  ownerAddonStatus.textContent = message || "";
+  if (state){
+    ownerAddonStatus.dataset.state = state;
+  } else {
+    delete ownerAddonStatus.dataset.state;
+  }
+}
+
+function setOwnerAddonUnlocked(unlocked){
+  ownerAddonToggles.forEach(toggle => {
+    toggle.disabled = !unlocked;
+  });
+  if (ownerAddonSave){
+    ownerAddonSave.disabled = !unlocked;
+  }
+}
+
+function setOwnerAddonValues(addons){
+  const active = new Set(Array.isArray(addons) ? addons : []);
+  ownerAddonToggles.forEach(toggle => {
+    toggle.checked = active.has(toggle.dataset.ownerAddon);
+  });
+}
+
+function selectedOwnerAddons(){
+  return ownerAddonToggles
+    .filter(toggle => toggle.checked)
+    .map(toggle => toggle.dataset.ownerAddon)
+    .filter(Boolean);
+}
+
+async function loadOwnerAddons(){
+  if (!ownerAddonToggles.length) return;
+  try {
+    const response = await fetch("/api/owner/addons");
+    const payload = await response.json().catch(() => ({}));
+    if (response.ok && payload.ok){
+      setOwnerAddonValues(payload.data?.addons || []);
+      setOwnerAddonUnlocked(Boolean(payload.data?.unlocked));
+    }
+  } catch (_err) {
+    setOwnerAddonStatus("Add-on belum dapat dimuat.", "error");
+  }
+}
+
+async function unlockOwnerAddons(){
+  if (!ownerAddonPassword) return;
+  const password = ownerAddonPassword.value.trim();
+  if (!password){
+    setOwnerAddonStatus("Password owner wajib diisi.", "error");
+    return;
+  }
+  setOwnerAddonStatus("Membuka akses...", "loading");
+  try {
+    const response = await fetch("/api/owner/addons/verify", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({password}),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.ok){
+      throw new Error(payload.message || "Akses owner gagal.");
+    }
+    setOwnerAddonValues(payload.data?.addons || []);
+    setOwnerAddonUnlocked(true);
+    ownerAddonPassword.value = "";
+    setOwnerAddonStatus(payload.message || "Akses owner aktif.", "success");
+  } catch (err){
+    const message = err instanceof Error ? err.message : "Akses owner gagal.";
+    setOwnerAddonUnlocked(false);
+    setOwnerAddonStatus(message, "error");
+  }
+}
+
+async function saveOwnerAddons(){
+  setOwnerAddonStatus("Menyimpan add-on...", "loading");
+  try {
+    const response = await fetch("/api/owner/addons", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({addons: selectedOwnerAddons()}),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.ok){
+      throw new Error(payload.message || "Add-on gagal disimpan.");
+    }
+    setOwnerAddonValues(payload.data?.addons || []);
+    setOwnerAddonStatus(payload.message || "Add-on tersimpan.", "success");
+  } catch (err){
+    const message = err instanceof Error ? err.message : "Add-on gagal disimpan.";
+    setOwnerAddonStatus(message, "error");
+  }
+}
+
+if (ownerAddonUnlock){
+  ownerAddonUnlock.addEventListener("click", unlockOwnerAddons);
+}
+if (ownerAddonPassword){
+  ownerAddonPassword.addEventListener("keydown", event => {
+    if (event.key === "Enter"){
+      event.preventDefault();
+      unlockOwnerAddons();
+    }
+  });
+}
+if (ownerAddonSave){
+  ownerAddonSave.addEventListener("click", saveOwnerAddons);
+}
+loadOwnerAddons();
 
 function renderHeroGalleryImage(){
   if (!heroGalleryMainImage) return;

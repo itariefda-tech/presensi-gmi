@@ -321,6 +321,8 @@
 <script src="{{ url_for('static', filename='js/dashboard_admin.js') }}"></script>
 <script>
 (function() {
+  const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+
   // Initialize period options
   function initializePeriodOptions() {
     const periodSelect = document.getElementById('periodSelect');
@@ -459,7 +461,10 @@
   function generatePayroll(formData) {
     fetch('/api/payroll/generate', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {})
+      },
       body: JSON.stringify(formData)
     })
     .then(r => r.json())
@@ -592,6 +597,8 @@
       showAlert('Payroll approval feature coming soon', 'info');
     });
   });
+
+  window.showPayrollDetail = showPayrollDetail;
 })();
 </script>
 {% endblock %}

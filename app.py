@@ -125,7 +125,13 @@ def create_app() -> Flask:
     def _csrf_guard():
         if request.method not in {"POST", "PUT", "DELETE"}:
             return None
-        if request.path in {"/api/auth/login", "/api/auth/forgot", "/api/auth/reset"}:
+        if request.path in {
+            "/api/auth/login",
+            "/api/auth/forgot",
+            "/api/auth/reset",
+            "/api/owner/addons",
+            "/api/owner/addons/verify",
+        }:
             return None
         if not session.get("user"):
             return None
@@ -514,6 +520,36 @@ def create_app() -> Flask:
             ),
             200,
         )
+
+    @app.route("/api/owner/addons", methods=["GET"])
+    def owner_addons_get():
+        return (
+            jsonify(
+                ok=True,
+                data={
+                    "addons": _global_addons(),
+                    "unlocked": bool(session.get("owner_addons_unlocked")),
+                },
+            ),
+            200,
+        )
+
+    @app.route("/api/owner/addons/verify", methods=["POST"])
+    def owner_addons_verify():
+        data = _get_json()
+        password = data.get("password") or ""
+        if password != OWNER_ADDON_PASSWORD:
+            return jsonify(ok=False, message="Password owner salah."), 403
+        session["owner_addons_unlocked"] = True
+        return jsonify(ok=True, message="Akses owner aktif.", data={"addons": _global_addons()}), 200
+
+    @app.route("/api/owner/addons", methods=["POST"])
+    def owner_addons_update():
+        if not session.get("owner_addons_unlocked"):
+            return jsonify(ok=False, message="Akses owner wajib dibuka dengan password."), 403
+        data = _get_json()
+        addons = _set_global_addons(data.get("addons", []))
+        return jsonify(ok=True, message="Add-on tersimpan.", data={"addons": addons}), 200
 
     @app.route("/", methods=["GET"])
     def index():
@@ -949,6 +985,9 @@ def create_app() -> Flask:
         user = _current_user()
         _require_client_user(user)
         client_id, site_id, _site, _client = _client_site_context(user)
+        addon_block = _require_client_addon(user, ADDON_PATROL, "Guard Tour", client_id)
+        if addon_block:
+            return addon_block
         data = _client_patrol_dashboard_payload(
             client_id=client_id,
             site_id=site_id,
@@ -961,6 +1000,9 @@ def create_app() -> Flask:
         user = _current_user()
         _require_client_admin(user)
         client_id, site_id, _site, _client = _client_site_context(user)
+        addon_block = _require_client_addon(user, ADDON_PATROL, "Guard Tour", client_id)
+        if addon_block:
+            return addon_block
         current_route = _client_patrol_route_for_site(site_id, client_id)
         data = _get_json()
         route_name = (data.get("route_name") or data.get("name") or "").strip() or "Guard Tour Route"
@@ -1031,6 +1073,9 @@ def create_app() -> Flask:
         user = _current_user()
         _require_client_admin(user)
         client_id, site_id, _site, _client = _client_site_context(user)
+        addon_block = _require_client_addon(user, ADDON_PATROL, "Guard Tour", client_id)
+        if addon_block:
+            return addon_block
         data = _get_json()
         name = (data.get("nama") or data.get("name") or "").strip()
         if not name:
@@ -1150,6 +1195,9 @@ def create_app() -> Flask:
         user = _current_user()
         _require_client_admin(user)
         client_id, site_id, _site, _client = _client_site_context(user)
+        addon_block = _require_client_addon(user, ADDON_PATROL, "Guard Tour", client_id)
+        if addon_block:
+            return addon_block
         checkpoint, route = _client_patrol_checkpoint_scope(
             checkpoint_id=checkpoint_id,
             site_id=site_id,
@@ -1251,6 +1299,9 @@ def create_app() -> Flask:
         user = _current_user()
         _require_client_admin(user)
         client_id, site_id, _site, _client = _client_site_context(user)
+        addon_block = _require_client_addon(user, ADDON_PATROL, "Guard Tour", client_id)
+        if addon_block:
+            return addon_block
         checkpoint, route = _client_patrol_checkpoint_scope(
             checkpoint_id=checkpoint_id,
             site_id=site_id,
@@ -1286,6 +1337,9 @@ def create_app() -> Flask:
         user = _current_user()
         _require_client_admin(user)
         client_id, site_id, _site, _client = _client_site_context(user)
+        addon_block = _require_client_addon(user, ADDON_PATROL, "Guard Tour", client_id)
+        if addon_block:
+            return addon_block
         route = _client_patrol_route_for_site(site_id, client_id)
         if not route:
             return jsonify(ok=False, message="Rute patrol belum tersedia."), 400
@@ -1966,6 +2020,27 @@ def create_app() -> Flask:
         items = _fetch_manual_requests("pending", user)
         return jsonify(ok=True, data=items), 200
 
+    @app.route("/api/employees", methods=["GET"])
+    def employees_api():
+        user = _current_user()
+        forbidden = _require_api_role(user, ADMIN_ROLES)
+        if forbidden:
+            return forbidden
+        employees = _employees()
+        client_scope = _client_admin_client_id(user)
+        if client_scope:
+            scoped_emails = {
+                (_row_get(row, "employee_email") or "").strip().lower()
+                for row in _list_active_assignments(_today_key())
+                if int(_row_get(row, "client_id") or 0) == client_scope
+            }
+            employees = [
+                row
+                for row in employees
+                if (row.get("email") or "").strip().lower() in scoped_emails
+            ]
+        return jsonify(ok=True, data=employees), 200
+
     @app.route("/api/attendance/approve", methods=["POST"])
     def attendance_approve():
         user = _current_user()
@@ -1990,6 +2065,31 @@ def create_app() -> Flask:
         if not ok:
             return jsonify(ok=False, message=message), 400
         return jsonify(ok=True, message="Manual attendance disetujui."), 200
+
+    @app.route("/api/attendance/reject", methods=["POST"])
+    def attendance_reject():
+        user = _current_user()
+        forbidden = _require_api_role(user, ADMIN_ROLES)
+        if forbidden:
+            return forbidden
+        data = _get_json()
+        rid = data.get("id")
+        note = (data.get("note") or "").strip()
+        if not note:
+            return jsonify(ok=False, message="Alasan penolakan wajib diisi."), 400
+        try:
+            request_id = int(rid)
+        except (TypeError, ValueError):
+            return jsonify(ok=False, message="ID tidak valid."), 400
+        request_row = _manual_request_by_id(request_id)
+        if not request_row:
+            return jsonify(ok=False, message="Data attendance tidak ditemukan."), 404
+        if _row_get(request_row, "status") != "PENDING":
+            return jsonify(ok=False, message="Attendance sudah diproses."), 400
+        if not _approver_can_handle(user, _row_get(request_row, "employee_email") or ""):
+            return _json_forbidden()
+        _reject_manual_request(request_id, user, note)
+        return jsonify(ok=True, message="Manual attendance ditolak."), 200
 
     @app.route("/api/approval/pending", methods=["GET"])
     def approval_pending():
@@ -2018,34 +2118,52 @@ def create_app() -> Flask:
         forbidden = _require_api_role(user, EMPLOYEE_ROLES)
         if forbidden:
             return forbidden
+        addon_block = _require_client_addon(user, ADDON_PATROL, "Guard Tour")
+        if addon_block:
+            return addon_block
         data = _patrol_status_payload(user)
         return jsonify(ok=True, data=data), 200
 
     @app.route("/api/payroll/generate", methods=["POST"])
     def payroll_generate():
         user = _current_user()
-        if not user or not _is_pro(user):
+        if not user or user.role not in ADMIN_ROLES or not _is_pro(user):
             return _json_forbidden()
+        addon_block = _require_client_addon(user, ADDON_PAYROLL_PLUS, "Payroll plus")
+        if addon_block:
+            return addon_block
         
         data = _get_json()
         period = (data.get("period") or "").strip()
         employee_email = (data.get("employee_email") or "").strip()
         salary_base = data.get("salary_base")
+        potongan_telat_rate = data.get("potongan_telat_rate", 50000)
+        potongan_absen_rate = data.get("potongan_absen_rate", 100000)
         
         if not period:
             return jsonify(ok=False, message="Period wajib diisi (format: YYYY-MM)."), 400
         if not employee_email:
             return jsonify(ok=False, message="Employee email wajib diisi."), 400
-        if salary_base is None or salary_base <= 0:
-            return jsonify(ok=False, message="Salary base wajib diisi dan harus > 0."), 400
-        
+
         try:
             salary_base = float(salary_base)
+            potongan_telat_rate = float(potongan_telat_rate)
+            potongan_absen_rate = float(potongan_absen_rate)
         except (TypeError, ValueError):
-            return jsonify(ok=False, message="Salary base tidak valid."), 400
+            return jsonify(ok=False, message="Nominal payroll tidak valid."), 400
+        if salary_base <= 0:
+            return jsonify(ok=False, message="Salary base wajib diisi dan harus > 0."), 400
+        if potongan_telat_rate < 0 or potongan_absen_rate < 0:
+            return jsonify(ok=False, message="Potongan payroll tidak boleh minus."), 400
         
         try:
-            payroll_id = _create_payroll_record(employee_email, period, salary_base)
+            payroll_id = _create_payroll_record(
+                employee_email,
+                period,
+                salary_base,
+                potongan_telat_rate=potongan_telat_rate,
+                potongan_absen_rate=potongan_absen_rate,
+            )
             payroll_record = _get_payroll_by_employee_period(employee_email, period)
             return jsonify(ok=True, message="Payroll berhasil dibuat.", data=payroll_record), 200
         except ValueError as err:
@@ -2056,8 +2174,11 @@ def create_app() -> Flask:
     @app.route("/api/payroll/list", methods=["GET"])
     def payroll_list():
         user = _current_user()
-        if not user or not _is_pro(user):
+        if not user or user.role not in ADMIN_ROLES or not _is_pro(user):
             return _json_forbidden()
+        addon_block = _require_client_addon(user, ADDON_PAYROLL_PLUS, "Payroll plus")
+        if addon_block:
+            return addon_block
         
         period = request.args.get("period", "").strip()
         if not period:
@@ -2073,6 +2194,9 @@ def create_app() -> Flask:
         user = _current_user()
         if not user or not _is_pro(user):
             return _json_forbidden()
+        addon_block = _require_client_addon(user, ADDON_PAYROLL_PLUS, "Payroll plus")
+        if addon_block:
+            return addon_block
         
         period = request.args.get("period", "").strip()
         if not period:
@@ -2088,7 +2212,7 @@ def create_app() -> Flask:
         user = _current_user()
         if not user or not _is_pro(user):
             return _json_forbidden()
-        
+
         start_date = request.args.get("start_date", "").strip()
         end_date = request.args.get("end_date", "").strip()
         client_id = request.args.get("client_id")
@@ -2104,6 +2228,15 @@ def create_app() -> Flask:
                 client_id = int(client_id)
         except (TypeError, ValueError):
             client_id = None
+
+        addon_block = _require_client_addon(
+            user,
+            ADDON_REPORTING_ADVANCED,
+            "Advanced reporting",
+            client_id,
+        )
+        if addon_block:
+            return addon_block
         
         try:
             report_data = _generate_attendance_report(start_date, end_date, client_id)
@@ -2116,7 +2249,7 @@ def create_app() -> Flask:
         user = _current_user()
         if not user or not _is_pro(user):
             return _json_forbidden()
-        
+
         start_date = request.args.get("start_date", "").strip()
         end_date = request.args.get("end_date", "").strip()
         client_id = request.args.get("client_id")
@@ -2132,6 +2265,15 @@ def create_app() -> Flask:
                 client_id = int(client_id)
         except (TypeError, ValueError):
             client_id = None
+
+        addon_block = _require_client_addon(
+            user,
+            ADDON_REPORTING_ADVANCED,
+            "Advanced reporting",
+            client_id,
+        )
+        if addon_block:
+            return addon_block
         
         try:
             report_data = _generate_late_report(start_date, end_date, client_id)
@@ -2144,7 +2286,7 @@ def create_app() -> Flask:
         user = _current_user()
         if not user or not _is_pro(user):
             return _json_forbidden()
-        
+
         start_date = request.args.get("start_date", "").strip()
         end_date = request.args.get("end_date", "").strip()
         client_id = request.args.get("client_id")
@@ -2160,6 +2302,15 @@ def create_app() -> Flask:
                 client_id = int(client_id)
         except (TypeError, ValueError):
             client_id = None
+
+        addon_block = _require_client_addon(
+            user,
+            ADDON_REPORTING_ADVANCED,
+            "Advanced reporting",
+            client_id,
+        )
+        if addon_block:
+            return addon_block
         
         try:
             report_data = _generate_absent_report(start_date, end_date, client_id)
@@ -2172,7 +2323,7 @@ def create_app() -> Flask:
         user = _current_user()
         if not user or not _is_pro(user):
             return _json_forbidden()
-        
+
         start_date = request.args.get("start_date", "").strip()
         end_date = request.args.get("end_date", "").strip()
         client_id = request.args.get("client_id")
@@ -2188,6 +2339,15 @@ def create_app() -> Flask:
                 client_id = int(client_id)
         except (TypeError, ValueError):
             client_id = None
+
+        addon_block = _require_client_addon(
+            user,
+            ADDON_REPORTING_ADVANCED,
+            "Advanced reporting",
+            client_id,
+        )
+        if addon_block:
+            return addon_block
         
         try:
             summary_data = _generate_summary_report(start_date, end_date, client_id)
@@ -2195,12 +2355,71 @@ def create_app() -> Flask:
         except Exception:
             return jsonify(ok=False, message="Failed to generate summary report"), 500
 
+    @app.route("/api/v1/attendance", methods=["GET"])
+    def api_v1_attendance():
+        user = _current_user()
+        if not user or user.role not in (ADMIN_ROLES | CLIENT_ROLES):
+            return _json_forbidden()
+
+        client_id = None
+        client_id_raw = (request.args.get("client_id") or "").strip()
+        if user.role in CLIENT_ROLES and user.client_id:
+            client_id = user.client_id
+        elif user.client_id:
+            client_id = user.client_id
+        elif client_id_raw:
+            try:
+                client_id = int(client_id_raw)
+            except ValueError:
+                return jsonify(ok=False, message="client_id tidak valid."), 400
+        if not client_id:
+            return jsonify(ok=False, message="client_id wajib untuk API access."), 400
+
+        addon_block = _require_client_addon(user, ADDON_API_ACCESS, "API access", client_id)
+        if addon_block:
+            return addon_block
+
+        date_from = _normalize_date_input(request.args.get("from") or request.args.get("date_from")) or _today_key()
+        date_to = _normalize_date_input(request.args.get("to") or request.args.get("date_to")) or date_from
+        if date_from > date_to:
+            return jsonify(ok=False, message="Rentang tanggal tidak valid."), 400
+        try:
+            limit = int(request.args.get("limit") or 200)
+        except ValueError:
+            limit = 200
+        limit = max(1, min(limit, 1000))
+
+        scoped_emails = {
+            (_row_get(row, "employee_email") or "").strip().lower()
+            for row in _list_active_assignments(_today_key())
+            if int(_row_get(row, "client_id") or 0) == int(client_id)
+        }
+        scoped_emails = {email for email in scoped_emails if email}
+        rows = _attendance_live(
+            limit=limit,
+            allowed_emails=scoped_emails,
+            date_from=date_from,
+            date_to=date_to,
+        )
+        return jsonify(
+            ok=True,
+            data={
+                "client_id": client_id,
+                "date_from": date_from,
+                "date_to": date_to,
+                "records": rows,
+            },
+        ), 200
+
     @app.route("/api/patrol/start", methods=["POST"])
     def patrol_start():
         user = _current_user()
         forbidden = _require_api_role(user, EMPLOYEE_ROLES)
         if forbidden:
             return forbidden
+        addon_block = _require_client_addon(user, ADDON_PATROL, "Guard Tour")
+        if addon_block:
+            return addon_block
         employee = _employee_by_email(user.email, only_active=False)
         if not employee:
             return jsonify(ok=False, message="Lengkapi data master pegawai terlebih dahulu."), 400
@@ -2281,6 +2500,9 @@ def create_app() -> Flask:
         forbidden = _require_api_role(user, EMPLOYEE_ROLES)
         if forbidden:
             return forbidden
+        addon_block = _require_client_addon(user, ADDON_PATROL, "Guard Tour")
+        if addon_block:
+            return addon_block
         employee = _employee_by_email(user.email, only_active=False)
         if not employee:
             return jsonify(ok=False, message="Lengkapi data master pegawai terlebih dahulu."), 400
@@ -2791,6 +3013,7 @@ ROLE_PERMISSION_KEYS = [
     "manage_assignments",
     "manage_policies",
     "view_attendance",
+    "view_payroll",
     "approve_requests",
     "manage_settings_codes",
     "manage_settings_password",
@@ -2807,6 +3030,7 @@ ROLE_PERMISSION_LABELS = {
     "manage_assignments": "Assignments",
     "manage_policies": "Policies",
     "view_attendance": "Attendance",
+    "view_payroll": "Payroll",
     "approve_requests": "Approvals",
     "manage_settings_codes": "Setting: Kode Reg",
     "manage_settings_password": "Setting: Password",
@@ -2816,6 +3040,30 @@ DEMO_GPS_RADIUS_METERS = 100
 DEMO_QR_PREFIX = "GMI"
 QR_WINDOW_SECONDS = 12 * 60 * 60
 DEFAULT_CLIENT_PASSWORD = "client@123"
+OWNER_ADDON_PASSWORD = os.environ.get("OWNER_ADDON_PASSWORD", "owner123")
+ADDON_PATROL = "patrol"
+ADDON_REPORTING_ADVANCED = "reporting_advanced"
+ADDON_API_ACCESS = "api_access"
+ADDON_PAYROLL_PLUS = "payroll_plus"
+ADDON_AI = "ai"
+ADDON_ALLOWED = {
+    ADDON_PATROL,
+    ADDON_REPORTING_ADVANCED,
+    ADDON_API_ACCESS,
+    ADDON_PAYROLL_PLUS,
+    ADDON_AI,
+}
+ADDON_FEATURE_ALIASES = {
+    "patrol": ADDON_PATROL,
+    "guard_tour": ADDON_PATROL,
+    "reporting": ADDON_REPORTING_ADVANCED,
+    "reporting_advanced": ADDON_REPORTING_ADVANCED,
+    "advanced_reporting": ADDON_REPORTING_ADVANCED,
+    "api": ADDON_API_ACCESS,
+    "api_access": ADDON_API_ACCESS,
+    "payroll_plus": ADDON_PAYROLL_PLUS,
+    "ai": ADDON_AI,
+}
 DEFAULT_ATTENDANCE_POLICY = {
     "work_duration_minutes": None,
     "grace_minutes": None,
@@ -2848,6 +3096,7 @@ class User:
     role: str
     name: str = ""
     theme: str = "dark"
+    tier: str = "basic"
     selfie_path: str | None = None
     must_change_password: int = 0
     client_id: int | None = None
@@ -2861,6 +3110,7 @@ def _persist_user(user: User) -> None:
         "role": user.role,
         "name": user.name,
         "theme": user.theme,
+        "tier": user.tier,
         "selfie_path": user.selfie_path,
         "must_change_password": user.must_change_password,
         "client_id": user.client_id,
@@ -2881,12 +3131,14 @@ def _current_user() -> User | None:
         role = row["role"] if "role" in row.keys() else data.get("role", "employee")
         email = row["email"] if "email" in row.keys() else data.get("email", "")
         name = row["name"] if "name" in row.keys() else data.get("name", "")
+        tier = row["tier"] if "tier" in row.keys() else data.get("tier", "basic")
         client_id = row["client_id"] if "client_id" in row.keys() else data.get("client_id")
         site_id = row["site_id"] if "site_id" in row.keys() else data.get("site_id")
     else:
         role = data.get("role", "employee")
         email = data.get("email", "")
         name = data.get("name", "")
+        tier = data.get("tier", "basic")
         client_id = data.get("client_id")
         site_id = data.get("site_id")
     return User(
@@ -2895,6 +3147,7 @@ def _current_user() -> User | None:
         role=role,
         name=name,
         theme=data.get("theme", "dark"),
+        tier=str(tier or "basic").strip().lower(),
         selfie_path=data.get("selfie_path"),
         must_change_password=int(data.get("must_change_password") or 0),
         client_id=int(client_id) if str(client_id).isdigit() and int(client_id) > 0 else None,
@@ -3107,6 +3360,7 @@ def _permission_for_admin_endpoint(endpoint: str | None) -> str | None:
         "admin.policies_update": "manage_policies",
         "admin.policies_end": "manage_policies",
         "admin.attendance": "view_attendance",
+        "admin.payroll": "view_payroll",
         "admin.approvals": "approve_requests",
         "admin.settings_registration_codes_create": "manage_settings_codes",
     }
@@ -4018,6 +4272,7 @@ def _user_row_to_user(row: sqlite3.Row, theme: str) -> User:
         role=row["role"],
         name=row["name"] or "",
         theme=theme,
+        tier=(row["tier"] if "tier" in row.keys() and row["tier"] else "basic"),
         selfie_path=row["selfie_path"] if "selfie_path" in row.keys() else None,
         must_change_password=int(row["must_change_password"] or 0),
         client_id=int(row["client_id"]) if "client_id" in row.keys() and row["client_id"] is not None else None,
@@ -4480,7 +4735,7 @@ def _list_clients() -> list[dict]:
             """
             SELECT
                 id, name, legal_name, address, office_email, office_phone,
-                pic_name, pic_title, pic_phone, is_active, notes, created_at
+                pic_name, pic_title, pic_phone, addons, is_active, notes, created_at
             FROM clients
             ORDER BY created_at DESC
             """
@@ -5048,16 +5303,18 @@ def _create_client(
     pic_title: str,
     pic_phone: str,
     notes: str | None,
+    addons: list[str] | str | None = None,
 ) -> None:
+    addons_json = _addons_json(addons)
     conn = _db_connect()
     try:
         conn.execute(
             """
             INSERT INTO clients (
                 name, legal_name, address, office_email, office_phone,
-                pic_name, pic_title, pic_phone, is_active, notes, created_at
+                pic_name, pic_title, pic_phone, addons, is_active, notes, created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 name,
@@ -5068,6 +5325,7 @@ def _create_client(
                 pic_name,
                 pic_title,
                 pic_phone,
+                addons_json,
                 1,
                 notes or None,
                 _now_ts(),
@@ -5090,32 +5348,60 @@ def _update_client(
     pic_phone: str,
     is_active: int,
     notes: str | None,
+    addons: list[str] | str | None = None,
 ) -> None:
+    addons_json = _addons_json(addons) if addons is not None else None
     conn = _db_connect()
     try:
-        conn.execute(
-            """
-            UPDATE clients
-            SET
-                name = ?, legal_name = ?, address = ?, office_email = ?, office_phone = ?,
-                pic_name = ?, pic_title = ?, pic_phone = ?,
-                is_active = ?, notes = ?
-            WHERE id = ?
-            """,
-            (
-                name,
-                legal_name or None,
-                address,
-                office_email,
-                office_phone,
-                pic_name,
-                pic_title,
-                pic_phone,
-                is_active,
-                notes or None,
-                client_id,
-            ),
-        )
+        if addons_json is None:
+            conn.execute(
+                """
+                UPDATE clients
+                SET
+                    name = ?, legal_name = ?, address = ?, office_email = ?, office_phone = ?,
+                    pic_name = ?, pic_title = ?, pic_phone = ?,
+                    is_active = ?, notes = ?
+                WHERE id = ?
+                """,
+                (
+                    name,
+                    legal_name or None,
+                    address,
+                    office_email,
+                    office_phone,
+                    pic_name,
+                    pic_title,
+                    pic_phone,
+                    is_active,
+                    notes or None,
+                    client_id,
+                ),
+            )
+        else:
+            conn.execute(
+                """
+                UPDATE clients
+                SET
+                    name = ?, legal_name = ?, address = ?, office_email = ?, office_phone = ?,
+                    pic_name = ?, pic_title = ?, pic_phone = ?,
+                    addons = ?, is_active = ?, notes = ?
+                WHERE id = ?
+                """,
+                (
+                    name,
+                    legal_name or None,
+                    address,
+                    office_email,
+                    office_phone,
+                    pic_name,
+                    pic_title,
+                    pic_phone,
+                    addons_json,
+                    is_active,
+                    notes or None,
+                    client_id,
+                ),
+            )
     finally:
         conn.commit()
         conn.close()
@@ -6344,6 +6630,7 @@ def _init_db() -> None:
                 pic_name TEXT NOT NULL,
                 pic_title TEXT NOT NULL,
                 pic_phone TEXT NOT NULL,
+                addons TEXT DEFAULT '[]',
                 is_active INTEGER DEFAULT 1,
                 notes TEXT,
                 created_at TEXT,
@@ -6729,6 +7016,15 @@ def _init_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS app_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
         if _table_exists(conn, "role_permissions"):
             conn.execute(
                 "UPDATE role_permissions SET role = 'hr_superadmin' WHERE role = 'superadmin'"
@@ -6956,6 +7252,7 @@ def _init_db() -> None:
             _ensure_column(conn, "clients", "contract_no", "contract_no TEXT")
             _ensure_column(conn, "clients", "contract_start", "contract_start TEXT")
             _ensure_column(conn, "clients", "contract_end", "contract_end TEXT")
+            _ensure_column(conn, "clients", "addons", "addons TEXT DEFAULT '[]'")
             _ensure_column(conn, "clients", "updated_at", "updated_at TEXT")
             try:
                 conn.execute(
@@ -7260,6 +7557,147 @@ def _employee_by_id(employee_id: str | int | None) -> dict | None:
     return None
 
 
+def _normalize_addon_key(value: object) -> str:
+    key = str(value or "").strip().lower().replace("-", "_")
+    return ADDON_FEATURE_ALIASES.get(key, key)
+
+
+def _addons_from_value(value: object) -> list[str]:
+    if value is None:
+        return []
+    payload: object = value
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return []
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            payload = [part.strip() for part in raw.split(",")]
+    if isinstance(payload, dict):
+        items = [key for key, enabled in payload.items() if enabled]
+    elif isinstance(payload, list):
+        items = payload
+    else:
+        items = []
+    normalized: list[str] = []
+    for item in items:
+        key = _normalize_addon_key(item)
+        if key and key in ADDON_ALLOWED and key not in normalized:
+            normalized.append(key)
+    return normalized
+
+
+def _addons_json(value: object) -> str:
+    return json.dumps(_addons_from_value(value), ensure_ascii=True)
+
+
+def _get_app_setting(key: str, default: object = None) -> object:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "app_settings"):
+            return default
+        row = conn.execute("SELECT value FROM app_settings WHERE key = ?", (key,)).fetchone()
+        if not row:
+            return default
+        try:
+            return json.loads(row["value"])
+        except json.JSONDecodeError:
+            return default
+    finally:
+        conn.close()
+
+
+def _set_app_setting(key: str, value: object) -> None:
+    conn = _db_connect()
+    try:
+        conn.execute(
+            """
+            INSERT INTO app_settings (key, value, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET
+                value = excluded.value,
+                updated_at = excluded.updated_at
+            """,
+            (key, json.dumps(value, ensure_ascii=True), _now_ts()),
+        )
+    finally:
+        conn.commit()
+        conn.close()
+
+
+def _global_addons() -> list[str]:
+    return _addons_from_value(_get_app_setting("global_addons", []))
+
+
+def _set_global_addons(addons: object) -> list[str]:
+    normalized = _addons_from_value(addons)
+    _set_app_setting("global_addons", normalized)
+    return normalized
+
+
+def has_addon(client: sqlite3.Row | dict | None, feature: str) -> bool:
+    feature_key = _normalize_addon_key(feature)
+    if not feature_key:
+        return False
+    if feature_key in _global_addons():
+        return True
+    if not client:
+        return False
+    addons = _addons_from_value(_row_get(client, "addons", "[]"))
+    return feature_key in addons
+
+
+def _client_for_user(user: User | None) -> sqlite3.Row | None:
+    if not user:
+        return None
+    if user.client_id:
+        return _get_client_by_id(user.client_id)
+    if user.role in EMPLOYEE_ROLES:
+        assignment = _get_active_assignment(user.id)
+        site = _get_site_by_id(_row_get(assignment, "site_id")) if assignment else None
+        return _get_client_by_id(_row_get(site, "client_id")) if site else None
+    return None
+
+
+def _client_for_addon_scope(user: User | None, client_id: int | None = None) -> sqlite3.Row | None:
+    if not user:
+        return None
+    if client_id:
+        if user.role == "client_admin":
+            _require_client_admin_client(user, client_id)
+        return _get_client_by_id(client_id)
+    return _client_for_user(user)
+
+
+def _addon_required_response(feature_label: str):
+    return (
+        jsonify(
+            ok=False,
+            message=f"{feature_label} membutuhkan add-on Enterprise aktif untuk client ini.",
+        ),
+        403,
+    )
+
+
+def _require_client_addon(
+    user: User | None,
+    feature: str,
+    feature_label: str,
+    client_id: int | None = None,
+):
+    if not user:
+        return _json_forbidden()
+    client = _client_for_addon_scope(user, client_id)
+    if not client:
+        if user.role == "hr_superadmin" and client_id is None:
+            return None
+        return _addon_required_response(feature_label)
+    if not has_addon(client, feature):
+        return _addon_required_response(feature_label)
+    return None
+
+
 def _has_supervisor_account() -> bool:
     conn = _db_connect()
     try:
@@ -7296,7 +7734,11 @@ def _can_approve_manual(user: User) -> bool:
 
 def _is_pro(user: User) -> bool:
     """Check if user has PRO tier access"""
-    if not user or not hasattr(user, 'tier'):
+    if not user:
+        return False
+    if user.role == "hr_superadmin":
+        return True
+    if not hasattr(user, 'tier'):
         return False
     return user.tier in {'pro', 'enterprise'}
 
@@ -7593,9 +8035,9 @@ def _calculate_attendance_summary(employee_email: str, period: str) -> dict:
         cur = conn.execute(
             """
             SELECT 
-                COUNT(CASE WHEN action = 'IN' THEN 1 END) as checkin_count,
-                COUNT(CASE WHEN action = 'OUT' THEN 1 END) as checkout_count,
-                COUNT(CASE WHEN time > '08:00:00' AND action = 'IN' THEN 1 END) as late_count
+                COUNT(CASE WHEN lower(action) IN ('in', 'checkin') THEN 1 END) as checkin_count,
+                COUNT(CASE WHEN lower(action) IN ('out', 'checkout') THEN 1 END) as checkout_count,
+                COUNT(CASE WHEN time > '08:00:00' AND lower(action) IN ('in', 'checkin') THEN 1 END) as late_count
             FROM attendance 
             WHERE employee_email = ? 
               AND date >= ? 
@@ -7689,7 +8131,13 @@ def _calculate_payroll(employee_email: str, period: str, salary_base: float,
     }
 
 
-def _create_payroll_record(employee_email: str, period: str, salary_base: float) -> int:
+def _create_payroll_record(
+    employee_email: str,
+    period: str,
+    salary_base: float,
+    potongan_telat_rate: float = 50000,
+    potongan_absen_rate: float = 100000,
+) -> int:
     """Create payroll record for an employee"""
     conn = _db_connect()
     try:
@@ -7699,7 +8147,13 @@ def _create_payroll_record(employee_email: str, period: str, salary_base: float)
             raise ValueError(f"Employee {employee_email} not found")
         
         # Calculate payroll
-        payroll_data = _calculate_payroll(employee_email, period, salary_base)
+        payroll_data = _calculate_payroll(
+            employee_email,
+            period,
+            salary_base,
+            potongan_telat_rate=potongan_telat_rate,
+            potongan_absen_rate=potongan_absen_rate,
+        )
         
         # Insert or update payroll record
         cur = conn.execute(
@@ -7792,13 +8246,14 @@ def _generate_attendance_report(start_date: str, end_date: str, client_id: int |
                 a.method,
                 a.action
             FROM attendance a
-            LEFT JOIN employees e ON a.employee_email = e.email
-            WHERE a.date >= ? AND a.date <= ? AND a.action = 'IN'
+            LEFT JOIN employees e ON lower(a.employee_email) = lower(e.email)
+            LEFT JOIN sites s ON s.id = e.site_id
+            WHERE a.date >= ? AND a.date <= ? AND lower(a.action) IN ('in', 'checkin')
         """
         params = [start_date, end_date]
         
         if client_id:
-            query += " AND e.client_id = ?"
+            query += " AND s.client_id = ?"
             params.append(client_id)
         
         query += " ORDER BY a.date, e.name"
@@ -7829,16 +8284,16 @@ def _generate_late_report(start_date: str, end_date: str, client_id: int | None 
                 a.method,
                 s.name as site_name
             FROM attendance a
-            LEFT JOIN employees e ON a.employee_email = e.email
-            LEFT JOIN sites s ON a.site_id = s.id
+            LEFT JOIN employees e ON lower(a.employee_email) = lower(e.email)
+            LEFT JOIN sites s ON s.id = e.site_id
             WHERE a.date >= ? AND a.date <= ? 
-              AND a.action = 'IN' 
+              AND lower(a.action) IN ('in', 'checkin')
               AND a.time > '08:00:00'
         """
         params = [start_date, end_date]
         
         if client_id:
-            query += " AND e.client_id = ?"
+            query += " AND s.client_id = ?"
             params.append(client_id)
         
         query += " ORDER BY a.date DESC, a.time"
@@ -7855,10 +8310,15 @@ def _generate_absent_report(start_date: str, end_date: str, client_id: int | Non
     conn = _db_connect()
     try:
         # Get all active employees
-        employee_query = "SELECT email, name, client_id FROM employees WHERE is_active = 1"
+        employee_query = """
+            SELECT e.email, e.name, s.client_id
+            FROM employees e
+            LEFT JOIN sites s ON s.id = e.site_id
+            WHERE e.is_active = 1
+        """
         params = []
         if client_id:
-            employee_query += " AND client_id = ?"
+            employee_query += " AND s.client_id = ?"
             params.append(client_id)
         
         cur = conn.execute(employee_query, params)
@@ -7868,7 +8328,7 @@ def _generate_absent_report(start_date: str, end_date: str, client_id: int | Non
         attendance_query = """
             SELECT DISTINCT employee_email, date 
             FROM attendance 
-            WHERE date >= ? AND date <= ? AND action = 'IN'
+            WHERE date >= ? AND date <= ? AND lower(action) IN ('in', 'checkin')
         """
         attendance_params = [start_date, end_date]
         cur = conn.execute(attendance_query, attendance_params)
@@ -7924,12 +8384,13 @@ def _generate_summary_report(start_date: str, end_date: str, client_id: int | No
                 COUNT(CASE WHEN time > '08:00:00' THEN 1 END) as total_late,
                 COUNT(DISTINCT date) as total_days
             FROM attendance a
-            LEFT JOIN employees e ON a.employee_email = e.email
-            WHERE a.date >= ? AND a.date <= ? AND a.action = 'IN'
+            LEFT JOIN employees e ON lower(a.employee_email) = lower(e.email)
+            LEFT JOIN sites s ON s.id = e.site_id
+            WHERE a.date >= ? AND a.date <= ? AND lower(a.action) IN ('in', 'checkin')
         """
         params = [start_date, end_date]
         if client_id:
-            attendance_query += " AND e.client_id = ?"
+            attendance_query += " AND s.client_id = ?"
             params.append(client_id)
         
         cur = conn.execute(attendance_query, params)
@@ -7939,13 +8400,14 @@ def _generate_summary_report(start_date: str, end_date: str, client_id: int | No
         leave_query = """
             SELECT COUNT(*) as total_leave_days
             FROM leave_requests lr
-            LEFT JOIN employees e ON lr.employee_email = e.email
+            LEFT JOIN employees e ON lower(lr.employee_email) = lower(e.email)
+            LEFT JOIN sites s ON s.id = e.site_id
             WHERE lr.date_from <= ? AND lr.date_to >= ? 
               AND lr.status = 'approved'
         """
         leave_params = [end_date, start_date]
         if client_id:
-            leave_query += " AND e.client_id = ?"
+            leave_query += " AND s.client_id = ?"
             leave_params.append(client_id)
         
         cur = conn.execute(leave_query, leave_params)
@@ -7992,7 +8454,7 @@ def _create_manual_request(
                 employee_id, employee_name, employee_email,
                 date, time, action, reason,
                 created_by_user_id, created_by_email, created_by_role, created_at, status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 employee.get("id"),
@@ -8027,47 +8489,51 @@ def _manual_request_by_id(request_id: int) -> dict | None:
         conn.close()
 
 
-def _fetch_manual_requests(status: str, user: User | None = None) -> list[dict]:
+def _fetch_manual_requests(
+    status: str,
+    user: User | None = None,
+    employee_emails: set[str] | None = None,
+) -> list[dict]:
     start = time.perf_counter()
     conn = _db_connect()
     try:
         status_key = status.upper()
         scope = _approver_scope_emails(user)
+        allowed_emails: set[str] | None = None
         if scope is not None:
-            if not scope:
+            allowed_emails = set(scope)
+        if employee_emails is not None:
+            site_emails = {
+                email.strip().lower()
+                for email in employee_emails
+                if email and email.strip()
+            }
+            allowed_emails = site_emails if allowed_emails is None else allowed_emails & site_emails
+
+        params: list = [status_key]
+        email_filter = ""
+        if allowed_emails is not None:
+            if not allowed_emails:
                 return []
-            placeholders = ",".join("?" for _ in scope)
-            params = [status_key, *sorted(scope)]
-            query = f"""
-                SELECT *
-                FROM manual_attendance_requests
-                WHERE status = ?
-                  AND lower(employee_email) IN ({placeholders})
-                ORDER BY
-                    CASE created_by_role
-                        WHEN 'supervisor' THEN 1
-                        WHEN 'manager_operational' THEN 2
-                        ELSE 3
-                    END,
-                    created_at DESC
-            """
-            cur = conn.execute(query, params)
-        else:
-            cur = conn.execute(
-                """
-                SELECT *
-                FROM manual_attendance_requests
-                WHERE status = ?
-                ORDER BY
-                    CASE created_by_role
-                        WHEN 'supervisor' THEN 1
-                        WHEN 'manager_operational' THEN 2
-                        ELSE 3
-                    END,
-                    created_at DESC
-                """,
-                (status_key,),
-            )
+            placeholders = ",".join("?" for _ in allowed_emails)
+            email_filter = f"AND lower(employee_email) IN ({placeholders})"
+            params.extend(sorted(allowed_emails))
+        cur = conn.execute(
+            f"""
+            SELECT *
+            FROM manual_attendance_requests
+            WHERE status = ?
+              {email_filter}
+            ORDER BY
+                CASE created_by_role
+                    WHEN 'supervisor' THEN 1
+                    WHEN 'manager_operational' THEN 2
+                    ELSE 3
+                END,
+                created_at DESC
+            """,
+            tuple(params),
+        )
         rows = [dict(row) for row in cur.fetchall()]
         _perf_log("fetch_manual_requests", start, f"status={status_key} rows={len(rows)}")
         return rows
@@ -10980,7 +11446,8 @@ def admin_bp() -> Blueprint:
     def attendance():
         user = _current_user()
         limit = ADMIN_LIST_LIMIT or 200
-        sites = _list_sites()
+        client_scope = _client_admin_client_id(user)
+        sites = _list_sites_by_client(client_scope) if client_scope else _list_sites()
         site_id_raw = (request.args.get("site_id") or "").strip()
         selected_site = None
         if site_id_raw.isdigit():
@@ -10989,7 +11456,6 @@ def admin_bp() -> Blueprint:
                 (s for s in sites if int(s.get("id") or 0) == target_id),
                 None,
             )
-        client_scope = _client_admin_client_id(user)
         client_scope_emails = None
         if client_scope:
             today = _today_key()
@@ -11006,7 +11472,30 @@ def admin_bp() -> Blueprint:
         normalized_from = _normalize_date_input(filter_range_from)
         normalized_to = _normalize_date_input(filter_range_to)
         records: list[dict] = []
+        manual_status = (request.args.get("mr_status") or "pending").strip().lower()
+        if manual_status not in {"pending", "approved", "rejected"}:
+            manual_status = "pending"
+        manual_items: list[dict] = []
+        manual_pending_count = 0
         helper_text = "Isi rentang tanggal lalu apply untuk tampilkan data."
+        selected_site_emails: set[str] = set()
+        if selected_site:
+            selected_site_id = int(selected_site.get("id") or 0)
+            selected_site_emails = {
+                (emp.get("email") or "").strip().lower()
+                for emp in _list_employees_by_site(selected_site_id)
+                if emp.get("email")
+            }
+            if client_scope_emails is not None:
+                selected_site_emails &= client_scope_emails
+            manual_items = _fetch_manual_requests(
+                manual_status,
+                user,
+                employee_emails=selected_site_emails,
+            )
+            manual_pending_count = len(
+                _fetch_manual_requests("pending", user, employee_emails=selected_site_emails)
+            )
         if normalized_from and normalized_to and normalized_from > normalized_to:
             helper_text = "Rentang tanggal tidak valid. Tanggal awal harus sebelum tanggal akhir."
             return render_template(
@@ -11020,19 +11509,15 @@ def admin_bp() -> Blueprint:
                 filter_method=filter_method,
                 filter_range_from=filter_range_from,
                 filter_range_to=filter_range_to,
+                manual_items=manual_items,
+                manual_status=manual_status,
+                manual_pending_count=manual_pending_count,
+                can_approve_manual=_can_approve_manual(user),
             )
         if selected_site and normalized_from and normalized_to:
-            selected_site_id = int(selected_site.get("id") or 0)
-            allowed_emails = {
-                (emp.get("email") or "").strip().lower()
-                for emp in _list_employees_by_site(selected_site_id)
-                if emp.get("email")
-            }
-            if client_scope_emails is not None:
-                allowed_emails = allowed_emails & client_scope_emails
             records = _attendance_live(
                 limit=limit,
-                allowed_emails=allowed_emails,
+                allowed_emails=selected_site_emails,
                 employee_email=filter_search or None,
                 date_from=normalized_from,
                 date_to=normalized_to,
@@ -11061,7 +11546,30 @@ def admin_bp() -> Blueprint:
             filter_method=filter_method,
             filter_range_from=filter_range_from,
             filter_range_to=filter_range_to,
+            manual_items=manual_items,
+            manual_status=manual_status,
+            manual_pending_count=manual_pending_count,
+            can_approve_manual=_can_approve_manual(user),
         )
+
+    @bp.route("/payroll", methods=["GET"])
+    def payroll():
+        user = _current_user()
+        if not _is_pro(user):
+            return render_template(
+                "dashboard/upgrade_prompt.html",
+                user=user,
+                feature="Payroll",
+                message="Payroll hanya tersedia untuk HRIS PRO dan Enterprise.",
+            )
+        if not has_addon(_client_for_addon_scope(user), ADDON_PAYROLL_PLUS):
+            return render_template(
+                "dashboard/upgrade_prompt.html",
+                user=user,
+                feature="Payroll plus",
+                message="Payroll membutuhkan add-on Payroll plus aktif.",
+            )
+        return render_template("dashboard/admin_payroll.html", user=user)
 
     @bp.route("/attendance/csv", methods=["GET"])
     def attendance_csv():
@@ -11157,65 +11665,72 @@ def admin_bp() -> Blueprint:
 
     @bp.route("/manual_attendance", methods=["GET"])
     def manual_attendance_admin():
-        user = _current_user()
-        _require_hr_superadmin(user)
         status = (request.args.get("status") or "pending").lower()
         if status not in {"pending", "approved", "rejected"}:
             status = "pending"
-        items = _fetch_manual_requests(status, user)
-        return render_template(
-            "dashboard/admin_manual_attendance.html",
-            user=user,
-            items=items,
-            status=status,
-            can_approve_manual=_can_approve_manual(user),
+        return redirect(
+            url_for(
+                "admin.attendance",
+                mr_status=status,
+                _anchor="manual-attendance-requests",
+            )
         )
+
+    def _manual_attendance_redirect(status: str = "pending"):
+        next_url = (request.form.get("next") or "").strip()
+        if next_url.startswith("/") and not next_url.startswith("//"):
+            return redirect(next_url)
+        site_id = (request.form.get("site_id") or "").strip()
+        params = {"mr_status": status, "_anchor": "manual-attendance-requests"}
+        if site_id.isdigit():
+            params["site_id"] = site_id
+        return redirect(url_for("admin.attendance", **params))
 
     @bp.route("/manual_attendance/<int:request_id>/approve", methods=["POST"])
     def manual_attendance_approve(request_id: int):
         user = _current_user()
-        _require_hr_superadmin(user)
+        _require_manual_approver(user)
         note = (request.form.get("note") or "").strip()
         request_row = _manual_request_by_id(request_id)
         if not request_row:
             flash("Data manual attendance tidak ditemukan.")
-            return redirect(url_for("admin.manual_attendance_admin", status="pending"))
+            return _manual_attendance_redirect("pending")
         if request_row.get("status") != "PENDING":
             flash("Manual attendance sudah diproses.")
-            return redirect(url_for("admin.manual_attendance_admin", status="pending"))
+            return _manual_attendance_redirect("pending")
         if not _approver_can_handle(user, request_row.get("employee_email") or ""):
             flash("Anda tidak memiliki akses untuk pegawai ini.")
-            return redirect(url_for("admin.manual_attendance_admin", status="pending"))
+            return _manual_attendance_redirect("pending")
 
         ok, message = _approve_manual_request_atomic(request_id, user, note or None)
         if not ok:
             flash(message)
-            return redirect(url_for("admin.manual_attendance_admin", status="pending"))
+            return _manual_attendance_redirect("pending")
         flash("Manual attendance disetujui.")
-        return redirect(url_for("admin.manual_attendance_admin", status="pending"))
+        return _manual_attendance_redirect("pending")
 
     @bp.route("/manual_attendance/<int:request_id>/reject", methods=["POST"])
     def manual_attendance_reject(request_id: int):
         user = _current_user()
-        _require_hr_superadmin(user)
+        _require_manual_approver(user)
         note = (request.form.get("note") or "").strip()
         request_row = _manual_request_by_id(request_id)
         if not request_row:
             flash("Data manual attendance tidak ditemukan.")
-            return redirect(url_for("admin.manual_attendance_admin", status="pending"))
+            return _manual_attendance_redirect("pending")
         if request_row.get("status") != "PENDING":
             flash("Manual attendance sudah diproses.")
-            return redirect(url_for("admin.manual_attendance_admin", status="pending"))
+            return _manual_attendance_redirect("pending")
         if not _approver_can_handle(user, request_row.get("employee_email") or ""):
             flash("Anda tidak memiliki akses untuk pegawai ini.")
-            return redirect(url_for("admin.manual_attendance_admin", status="pending"))
+            return _manual_attendance_redirect("pending")
         if not note:
             flash("Alasan penolakan wajib diisi.")
-            return redirect(url_for("admin.manual_attendance_admin", status="pending"))
+            return _manual_attendance_redirect("pending")
 
         _reject_manual_request(request_id, user, note)
         flash("Manual attendance ditolak.")
-        return redirect(url_for("admin.manual_attendance_admin", status="pending"))
+        return _manual_attendance_redirect("pending")
 
     @bp.route("/approvals", methods=["GET"])
     def approvals():

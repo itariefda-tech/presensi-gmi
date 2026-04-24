@@ -91,14 +91,14 @@ Bisa closing client pertama
 Produk modular & scalable
 
 ### Struktur Add-on
-- [ ] Tambahkan field `addons` di tabel client
-- [ ] Format JSON: `["patrol","payroll_plus","ai"]`
+- [x] Tambahkan field `addons` di tabel client
+- [x] Format JSON: `["patrol","payroll_plus","ai"]`
 
 ### Helper Add-on
-- [ ] Buat fungsi: `has_addon(client, feature)`
+- [x] Buat fungsi: `has_addon(client, feature)`
 
 ### Integrasi Add-on
-- [ ] Lock fitur berdasarkan addon:
+- [x] Lock fitur berdasarkan addon:
   - Patrol
   - Reporting advanced
   - API access
@@ -211,7 +211,7 @@ Pembeda utama di market security
 
 ### HRIS ENTERPRISE READY (Red Check)
 - [ ] Multi client
-- [ ] Add-on system
+- [x] Add-on system
 - [ ] Patrol aktif
 - [ ] Payroll advanced
 - [ ] AI analysis basic
