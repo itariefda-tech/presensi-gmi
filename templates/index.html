@@ -382,10 +382,11 @@
     </section>
   </main>
 </div>
+<!-- Owner add-on: Step 1 = Password Modal (credential check) -->
 <div class="owner-addon-modal" id="ownerAddonModal" aria-hidden="true">
   <div class="owner-addon-card" role="dialog" aria-modal="true" aria-labelledby="ownerAddonTitle">
     <div class="owner-addon-header">
-      <div class="hero-controls-title" id="ownerAddonTitle">Owner add-on</div>
+      <div class="hero-controls-title" id="ownerAddonTitle">Owner add-on: Pengaturan</div>
       <button class="owner-addon-close" type="button" data-owner-addon-close aria-label="Tutup">x</button>
     </div>
     <div class="hero-controls-body owner-addon-body">
@@ -393,31 +394,221 @@
         <input type="password" id="ownerAddonPassword" placeholder="Password owner" autocomplete="off" />
       </div>
       <button class="btn secondary" type="button" id="ownerAddonUnlock">Buka</button>
-      <label class="check">
-        <input type="checkbox" data-owner-addon="patrol" disabled />
-        <span>Patrol Guard Tour</span>
-      </label>
-      <label class="check">
-        <input type="checkbox" data-owner-addon="reporting_advanced" disabled />
-        <span>Reporting advanced</span>
-      </label>
-      <label class="check">
-        <input type="checkbox" data-owner-addon="api_access" disabled />
-        <span>API access</span>
-      </label>
-      <label class="check">
-        <input type="checkbox" data-owner-addon="payroll_plus" disabled />
-        <span>Payroll plus</span>
-      </label>
-      <label class="check">
-        <input type="checkbox" data-owner-addon="ai" disabled />
-        <span>AI</span>
-      </label>
-      <button class="btn" type="button" id="ownerAddonSave" disabled>Simpan</button>
       <div class="toast" id="ownerAddonStatus" aria-live="polite"></div>
     </div>
   </div>
 </div>
+
+<!-- Owner add-on: Step 2 = Toggles Modal (shown after successful password verification) -->
+<div class="owner-addon-modal" id="ownerAddonTogglesModal" aria-hidden="true">
+  <div class="owner-addon-card" role="dialog" aria-modal="true" aria-labelledby="ownerAddonTogglesTitle">
+    <div class="owner-addon-header">
+      <div class="hero-controls-title" id="ownerAddonTogglesTitle">Owner add-on: Pengaturan</div>
+      <button class="owner-addon-close" type="button" data-owner-addon-toggles-close aria-label="Tutup">x</button>
+    </div>
+    <div class="hero-controls-body owner-addon-body">
+      <label class="check">
+        <input type="checkbox" data-owner-addon="patrol" />
+        <span>Patrol Guard Tour</span>
+      </label>
+      <label class="check">
+        <input type="checkbox" data-owner-addon="reporting_advanced" />
+        <span>Reporting advanced</span>
+      </label>
+      <label class="check">
+        <input type="checkbox" data-owner-addon="api_access" />
+        <span>API access</span>
+      </label>
+      <label class="check">
+        <input type="checkbox" data-owner-addon="payroll_plus" />
+        <span>Payroll plus</span>
+      </label>
+      <label class="check">
+        <input type="checkbox" data-owner-addon="ai" />
+        <span>AI</span>
+      </label>
+      <button class="btn" type="button" id="ownerAddonSave">Simpan</button>
+      <div class="toast" id="ownerAddonTogglesStatus" aria-live="polite"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Owner add-on modal handler: password verification and toggles management -->
+<script>
+  (function () {
+    // DOM elements
+    var ownerAddonOpenBtn = document.querySelector('[data-owner-addon-open]');
+    var passwordModal = document.getElementById('ownerAddonModal');
+    var togglesModal = document.getElementById('ownerAddonTogglesModal');
+    var passwordInput = document.getElementById('ownerAddonPassword');
+    var unlockBtn = document.getElementById('ownerAddonUnlock');
+    var passwordStatus = document.getElementById('ownerAddonStatus');
+    var passwordCloseBtn = document.querySelector('[data-owner-addon-close]');
+    var togglesCloseBtn = document.querySelector('[data-owner-addon-toggles-close]');
+    var saveBtn = document.getElementById('ownerAddonSave');
+    var togglesStatus = document.getElementById('ownerAddonTogglesStatus');
+
+    // Utility functions
+    function showModal(modal) {
+      if (!modal) return;
+      modal.setAttribute('aria-hidden', 'false');
+    }
+
+    function hideModal(modal) {
+      if (!modal) return;
+      modal.setAttribute('aria-hidden', 'true');
+    }
+
+    // Find the add-on button (look for the gear icon or "add-on" button)
+    var addonBtn = null;
+    var allButtons = document.querySelectorAll('[id*="addon"], [id*="Addon"]');
+    for (var i = 0; i < allButtons.length; i++) {
+      if (allButtons[i].id === 'ownerAddonOpen' || allButtons[i].classList.contains('hero-tab-icon')) {
+        addonBtn = allButtons[i];
+        break;
+      }
+    }
+    // Fallback: search for a button near the hero-tabs
+    if (!addonBtn) {
+      var heroTabs = document.querySelector('.hero-tabs');
+      if (heroTabs) {
+        var tabs = heroTabs.querySelectorAll('button');
+        addonBtn = tabs[tabs.length - 1]; // assume last icon button is add-on
+      }
+    }
+
+    // Open password modal
+    if (addonBtn) {
+      addonBtn.addEventListener('click', function (e) {
+        try { e.preventDefault(); e.stopPropagation(); } catch (err) {}
+        passwordStatus.textContent = '';
+        passwordInput.value = '';
+        showModal(passwordModal);
+        try { passwordInput.focus(); } catch (err) {}
+      });
+    }
+
+    // Close buttons
+    if (passwordCloseBtn) {
+      passwordCloseBtn.addEventListener('click', function () { hideModal(passwordModal); });
+    }
+    if (togglesCloseBtn) {
+      togglesCloseBtn.addEventListener('click', function () { hideModal(togglesModal); });
+    }
+
+    // Unlock (verify password)
+    unlockBtn.addEventListener('click', function () {
+      var password = (passwordInput.value || '').toString();
+      passwordStatus.textContent = 'Memeriksa...';
+      fetch('/api/owner/addons/verify', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: password })
+      })
+        .then(function (r) {
+          return r.json().then(function (data) {
+            return { ok: r.ok, status: r.status, data: data };
+          });
+        })
+        .then(function (res) {
+          if (res.ok) {
+            passwordStatus.textContent = 'Password benar. Membuka pengaturan...';
+            hideModal(passwordModal);
+            loadToggles();
+          } else {
+            passwordStatus.textContent = res.data && res.data.message ? res.data.message : 'Password salah.';
+          }
+        })
+        .catch(function (err) {
+          console.error('Verify password error:', err);
+          passwordStatus.textContent = 'Gagal memeriksa password.';
+        });
+    });
+
+    // Load toggles (after successful password verification)
+    function loadToggles() {
+      togglesStatus.textContent = 'Memuat pengaturan add-on...';
+      fetch('/api/owner/addons', {
+        credentials: 'same-origin'
+      })
+        .then(function (r) {
+          return r.json().then(function (data) {
+            return { ok: r.ok, status: r.status, data: data };
+          });
+        })
+        .then(function (res) {
+          console.debug('owner/addons response:', res);
+          // Get current checkbox states
+          var checkboxes = togglesModal.querySelectorAll('input[type=checkbox]');
+          if (res.ok && res.data && res.data.data && Array.isArray(res.data.data.addons)) {
+            var addonMap = {};
+            res.data.data.addons.forEach(function (addon) {
+              addonMap[addon.key] = addon.enabled;
+            });
+            checkboxes.forEach(function (cb) {
+              var key = cb.dataset.ownerAddon;
+              if (key in addonMap) {
+                cb.checked = addonMap[key];
+              }
+            });
+          }
+          togglesStatus.textContent = '';
+          showModal(togglesModal);
+        })
+        .catch(function (err) {
+          console.error('Load toggles error:', err);
+          togglesStatus.textContent = 'Gagal memuat pengaturan.';
+          showModal(togglesModal);
+        });
+    }
+
+    // Save toggles
+    saveBtn.addEventListener('click', function () {
+      var addons = [];
+      togglesModal.querySelectorAll('input[type=checkbox]').forEach(function (cb) {
+        addons.push({
+          key: cb.dataset.ownerAddon,
+          enabled: cb.checked
+        });
+      });
+      togglesStatus.textContent = 'Menyimpan...';
+      fetch('/api/owner/addons', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ addons: addons })
+      })
+        .then(function (r) {
+          return r.json();
+        })
+        .then(function (data) {
+          if (data && data.ok) {
+            togglesStatus.textContent = data.message || 'Pengaturan tersimpan.';
+            setTimeout(function () {
+              hideModal(togglesModal);
+            }, 1000);
+          } else {
+            togglesStatus.textContent = data && data.message ? data.message : 'Gagal menyimpan pengaturan.';
+          }
+        })
+        .catch(function (err) {
+          console.error('Save toggles error:', err);
+          togglesStatus.textContent = 'Gagal menyimpan pengaturan.';
+        });
+    });
+
+    // Allow ESC to close modals
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') {
+        hideModal(passwordModal);
+        hideModal(togglesModal);
+      }
+    });
+  })();
+</script>
+
+<!-- Dashboard back-lock redirect script -->
 <script>
   (function () {
     var lockKey = "gmi_dashboard_back_lock";
