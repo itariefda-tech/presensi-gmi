@@ -357,6 +357,73 @@ html[data-theme="light"] .hero-controls{
   border-color: rgba(15,23,42,.10);
 }
 
+.owner-addon-modal{
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: none;
+  place-items: center;
+  padding: 18px;
+  background: rgba(2,6,23,.58);
+  backdrop-filter: blur(10px);
+}
+.owner-addon-modal.show{
+  display: grid;
+}
+.owner-addon-card{
+  width: min(380px, 100%);
+  max-height: min(760px, calc(100vh - 36px));
+  overflow: auto;
+  border: 1px solid rgba(255,255,255,.16);
+  border-radius: 16px;
+  background: rgba(11,16,32,.96);
+  color: var(--text);
+  box-shadow: 0 28px 70px rgba(0,0,0,.38);
+  padding: 14px;
+}
+.owner-addon-header{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.owner-addon-close{
+  width: 32px;
+  height: 32px;
+  border: 1px solid rgba(255,255,255,.14);
+  border-radius: 999px;
+  background: rgba(255,255,255,.06);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 900;
+  line-height: 1;
+}
+.owner-addon-close:hover{
+  filter: brightness(1.08);
+}
+.owner-addon-body{
+  grid-template-columns: 1fr;
+}
+.owner-addon-body .hero-input,
+.owner-addon-body .btn,
+.owner-addon-body .check,
+.owner-addon-body .toast{
+  grid-column: 1 / -1;
+}
+html[data-theme="light"] .owner-addon-modal{
+  background: rgba(15,23,42,.36);
+}
+html[data-theme="light"] .owner-addon-card{
+  background: rgba(255,255,255,.96);
+  border-color: rgba(15,23,42,.12);
+}
+html[data-theme="light"] .owner-addon-close{
+  background: rgba(15,23,42,.04);
+  border-color: rgba(15,23,42,.14);
+}
+
 .hero-tabs{
   display:flex;
   gap:8px;

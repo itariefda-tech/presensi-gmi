@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>HRIS PRO - Workforce Control</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}?v={{ boot_id|default('') }}" />
   {% block head_extra %}{% endblock %}
 </head>
 <body>
@@ -12,7 +12,8 @@
   <script>
     window.__GMI_INITIAL_THEME = "{{ theme|default('dark') }}";
     window.__GMI_BOOT_ID = "{{ boot_id|default('') }}";
+    window.__GMI_CSRF_TOKEN = "{{ csrf_token|default('') }}";
   </script>
-  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/app.js') }}?v={{ boot_id|default('') }}"></script>
 </body>
 </html>

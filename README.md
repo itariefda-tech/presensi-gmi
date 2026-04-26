@@ -10,16 +10,18 @@ Fokus Phase 8: role access real (SQLite), HR settings, dan flow aplikasi stabil.
    python -m venv .venv
    .\.venv\Scripts\activate
    pip install -r requirements.txt
+   set FLASK_SECRET=isi-secret-kuat-minimal-32-karakter
    set PRESENSI_DB_PATH=presensi.db
    python app.py
    ```
-   *`FLASK_SECRET` opsional. Jika kosong, aplikasi pakai secret default.*
+   `FLASK_SECRET` wajib. Aplikasi akan gagal start jika secret kosong.
 
 2. **Alternate (env Windows)**
    ```powershell
+   set FLASK_SECRET=isi-secret-kuat-minimal-32-karakter
    set PRESENSI_DB_PATH=C:\path\ke\presensi.db
    set ENABLE_SEED_DATA=1
-   set SEED_USERS_JSON=[{"email":"hrd@gmi.com","name":"HR Superadmin","role":"hr_superadmin","password":"hrd123"}]
+   set SEED_USERS_JSON=[{"email":"admin@example.com","name":"HR Superadmin","role":"hr_superadmin","password":"ganti-password-kuat"}]
    python app.py
    ```
    Gunakan cara ini kalau Anda sudah punya virtual environment aktif dan hanya ingin mengganti path DB atau override seed.
@@ -28,9 +30,19 @@ Fokus Phase 8: role access real (SQLite), HR settings, dan flow aplikasi stabil.
    ```powershell
    .\scripts\run_dev_windows.ps1
    ```
-   Script ini membuat `.venv` bila belum ada, set `FLASK_SECRET`, `PRESENSI_DB_PATH`, `ENABLE_SEED_DATA`, dan `SEED_USERS_JSON` yang mengandung akun `hrd@gmi.com`/`hrd123`, lalu menjalankan `python app.py`. Anda bisa override secret atau DB path dengan `-Secret` dan `-DbPath` saat memanggil script.
+   Script ini membuat `.venv` bila belum ada, set `FLASK_SECRET` dev-session dan `PRESENSI_DB_PATH`, lalu menjalankan `python app.py`. Seed user tidak aktif secara default. Jika butuh seed lokal, pakai `-EnableSeedData -SeedUsersJson '...'`.
 
 App: `http://localhost:5020/`
+
+## Password Reset Delivery
+
+Endpoint lupa password aktif jika salah satu delivery dikonfigurasi:
+
+- Email SMTP: `RESET_SMTP_HOST`, `RESET_SMTP_PORT`, `RESET_SMTP_USER`, `RESET_SMTP_PASSWORD`, `RESET_SMTP_FROM`
+- WhatsApp webhook: `RESET_WHATSAPP_WEBHOOK_URL`
+- Public link base: `APP_PUBLIC_URL`
+
+Tanpa delivery, tombol reset password akan nonaktif. Untuk debug lokal saja, `SHOW_RESET_TOKEN=1` mengembalikan token dan link reset di response API.
 
 ## Run (Docker)
 
@@ -48,11 +60,11 @@ App: `http://localhost:5020/`
 
 ## Demo Accounts (Seed)
 
-Seed data aktif secara default. Untuk menonaktifkan:
+Seed data nonaktif secara default. Untuk mengaktifkan secara eksplisit:
 
-- `ENABLE_SEED_DATA=0`
-- `SEED_USERS_JSON` (opsional) berisi array user (email, name, role, password)
-- Default HR superadmin: `hrd@gmi.com` / `hrd123`
+- `ENABLE_SEED_DATA=1`
+- `SEED_USERS_JSON` wajib berisi array user (email, name, role, password)
+- Jangan gunakan credential default/publik untuk environment bersama atau production.
 
 ## Roles (Final)
 

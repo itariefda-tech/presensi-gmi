@@ -12,7 +12,7 @@ Dokumen ini menjadi ringkasan singkat untuk template dashboard.
 
 ## Login (Seed)
 
-Seed user aktif secara default. Set `ENABLE_SEED_DATA=0` untuk menonaktifkan.
+Seed user nonaktif secara default. Set `ENABLE_SEED_DATA=1` dan isi `SEED_USERS_JSON` secara eksplisit untuk seed lokal/staging.
 Reset password admin meminta password baru secara manual (tanpa default password).
 
 ## Catatan

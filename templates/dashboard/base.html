@@ -80,11 +80,11 @@
           <span class="nav-label">Policies</span>
         </a>
         {% endif %}
-        <a href="{{ url_for('admin.qr_page') }}" class="{% if active == 'qr' %}active{% endif %}" title="QR Attendance">
+        <a href="{{ url_for('admin.qr_page') }}" class="{% if active == 'qr' %}active{% endif %}" title="Barcode">
           <span class="nav-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none"><path d="M4 4h6v6H4V4Zm10 0h6v6h-6V4ZM4 14h6v6H4v-6Zm10 4h2m4-4v6h-6v-6h6Z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
           </span>
-          <span class="nav-label">QR Attendance</span>
+          <span class="nav-label">Barcode</span>
         </a>
         {% if permissions.get("view_attendance") %}
         <a href="{{ url_for('admin.attendance') }}" class="{% if active == 'attendance' %}active{% endif %}" title="Attendance">
@@ -92,6 +92,14 @@
             <svg viewBox="0 0 24 24" fill="none"><path d="M7 4v3M17 4v3M4 9h16M6 6h12a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
           </span>
           <span class="nav-label">Attendance</span>
+        </a>
+        {% endif %}
+        {% if permissions.get("view_reports") %}
+        <a href="{{ url_for('admin.reports') }}" class="{% if active == 'reports' %}active{% endif %}" title="Reports">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M5 19V5m0 14h15M9 16v-5m4 5V8m4 8v-3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </span>
+          <span class="nav-label">Reports</span>
         </a>
         {% endif %}
         {% if permissions.get("view_payroll") %}

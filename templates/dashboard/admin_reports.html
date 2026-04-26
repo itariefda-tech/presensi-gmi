@@ -392,6 +392,7 @@
     late: [],
     absent: []
   };
+  const advancedReportingEnabled = {{ advanced_reporting_enabled|default(false)|tojson }};
   
   // Initialize date inputs
   function initializeDateInputs() {
@@ -441,13 +442,18 @@
     // Show loading
     showLoading();
     
-    // Generate reports in parallel
-    Promise.all([
+    const reportTasks = [
       generateAttendanceReport(startDate, endDate, clientId),
-      generateLateReport(startDate, endDate, clientId),
-      generateAbsentReport(startDate, endDate, clientId),
       generateSummaryReport(startDate, endDate, clientId)
-    ]).then(() => {
+    ];
+    if (advancedReportingEnabled) {
+      reportTasks.push(generateLateReport(startDate, endDate, clientId));
+      reportTasks.push(generateAbsentReport(startDate, endDate, clientId));
+    } else {
+      renderAdvancedLocked();
+    }
+
+    Promise.all(reportTasks).then(() => {
       hideLoading();
       showAlert('Reports generated successfully', 'success');
     }).catch(() => {
@@ -493,7 +499,8 @@
           currentReports.late = response.data;
           renderLateTable(response.data);
         } else {
-          throw new Error(response.message || 'Failed to load late report');
+          currentReports.late = [];
+          document.getElementById('lateRows').innerHTML = `<tr><td colspan="7" class="muted">${response.message || 'Advanced reporting add-on is required.'}</td></tr>`;
         }
       });
   }
@@ -514,7 +521,8 @@
           currentReports.absent = response.data;
           renderAbsentTable(response.data);
         } else {
-          throw new Error(response.message || 'Failed to load absent report');
+          currentReports.absent = [];
+          document.getElementById('absentRows').innerHTML = `<tr><td colspan="5" class="muted">${response.message || 'Advanced reporting add-on is required.'}</td></tr>`;
         }
       });
   }
@@ -600,6 +608,13 @@
         <td>${record.status === 'ON_LEAVE' ? 'Approved leave' : 'No check-in recorded'}</td>
       </tr>
     `).join('');
+  }
+
+  function renderAdvancedLocked() {
+    currentReports.late = [];
+    currentReports.absent = [];
+    document.getElementById('lateRows').innerHTML = '<tr><td colspan="7" class="muted">Advanced reporting add-on is required.</td></tr>';
+    document.getElementById('absentRows').innerHTML = '<tr><td colspan="5" class="muted">Advanced reporting add-on is required.</td></tr>';
   }
   
   // Update summary cards
@@ -693,8 +708,10 @@
   function showLoading() {
     // Show loading spinners in tables
     document.getElementById('attendanceRows').innerHTML = '<tr><td colspan="6" class="muted"><span class="spinner"></span> Loading...</td></tr>';
-    document.getElementById('lateRows').innerHTML = '<tr><td colspan="7" class="muted"><span class="spinner"></span> Loading...</td></tr>';
-    document.getElementById('absentRows').innerHTML = '<tr><td colspan="5" class="muted"><span class="spinner"></span> Loading...</td></tr>';
+    if (advancedReportingEnabled) {
+      document.getElementById('lateRows').innerHTML = '<tr><td colspan="7" class="muted"><span class="spinner"></span> Loading...</td></tr>';
+      document.getElementById('absentRows').innerHTML = '<tr><td colspan="5" class="muted"><span class="spinner"></span> Loading...</td></tr>';
+    }
   }
   
   function hideLoading() {

@@ -41,11 +41,11 @@
         </div>
         <div class="field-group">
           <label for="potonganTelat">Late Deduction Rate</label>
-          <input type="number" id="potonganTelat" class="input" placeholder="50000" min="0" value="50000">
+          <input type="number" id="potonganTelat" class="input" placeholder="50000" min="0" value="50000" {% if not payroll_plus_enabled %}readonly{% endif %}>
         </div>
         <div class="field-group">
           <label for="potonganAbsen">Absent Deduction Rate</label>
-          <input type="number" id="potonganAbsen" class="input" placeholder="100000" min="0" value="100000">
+          <input type="number" id="potonganAbsen" class="input" placeholder="100000" min="0" value="100000" {% if not payroll_plus_enabled %}readonly{% endif %}>
         </div>
         <div class="btn-row">
           <button type="submit" class="btn primary">Generate Payroll</button>
@@ -168,12 +168,27 @@
               <span id="calcTotalSalary"><strong>-</strong></span>
             </div>
           </div>
+          {% if payroll_plus_enabled %}
+          <div class="form-grid" style="margin-top:1rem;">
+            <div class="field-group">
+              <label for="editOtherDeductions">Other Deductions</label>
+              <input type="number" id="editOtherDeductions" class="input" min="0" value="0">
+            </div>
+            <div class="field-group">
+              <label for="editAllowances">Allowances</label>
+              <input type="number" id="editAllowances" class="input" min="0" value="0">
+            </div>
+          </div>
+          {% endif %}
         </div>
       </div>
     </div>
     <div class="modal-footer">
       <div class="btn-row">
         <button class="btn secondary" type="button" id="btnCloseDetail">Close</button>
+        {% if payroll_plus_enabled %}
+        <button class="btn secondary" type="button" id="btnSavePayroll">Save</button>
+        {% endif %}
         <button class="btn primary" type="button" id="btnApprovePayroll">Approve</button>
       </div>
     </div>
@@ -322,6 +337,8 @@
 <script>
 (function() {
   const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+  const payrollPlusEnabled = {{ payroll_plus_enabled|default(false)|tojson }};
+  let currentPayrollId = null;
 
   // Initialize period options
   function initializePeriodOptions() {
@@ -421,25 +438,22 @@
   
   // Show payroll detail
   function showPayrollDetail(payrollId) {
-    // Find payroll record from current table
-    const period = document.getElementById('periodSelect').value;
-    
-    fetch(`/api/payroll/list?period=${period}`)
+    fetch(`/api/payroll/${payrollId}`)
       .then(r => r.json())
       .then(response => {
         if (response.ok) {
-          const record = response.data.find(p => p.id === payrollId);
-          if (record) {
-            populatePayrollDetail(record);
-            document.getElementById('payrollDetailModal').setAttribute('aria-hidden', 'false');
-            document.getElementById('payrollDetailModal').classList.add('show');
-          }
+          populatePayrollDetail(response.data);
+          document.getElementById('payrollDetailModal').setAttribute('aria-hidden', 'false');
+          document.getElementById('payrollDetailModal').classList.add('show');
+        } else {
+          showAlert(response.message || 'Failed to load payroll detail', 'error');
         }
       });
   }
   
   // Populate payroll detail modal
   function populatePayrollDetail(record) {
+    currentPayrollId = record.id;
     document.getElementById('detailEmployeeName').textContent = record.employee_name || '-';
     document.getElementById('detailEmployeeEmail').textContent = record.employee_email;
     document.getElementById('detailPeriod').textContent = record.period;
@@ -455,6 +469,16 @@
     document.getElementById('calcOtherDeductions').textContent = `Rp ${formatNumber(record.potongan_lain || 0)}`;
     document.getElementById('calcAllowances').textContent = `Rp ${formatNumber(record.tunjangan || 0)}`;
     document.getElementById('calcTotalSalary').textContent = `Rp ${formatNumber(record.total_gaji)}`;
+    if (payrollPlusEnabled) {
+      document.getElementById('editOtherDeductions').value = Number(record.potongan_lain || 0);
+      document.getElementById('editAllowances').value = Number(record.tunjangan || 0);
+    }
+    const approveBtn = document.getElementById('btnApprovePayroll');
+    if (approveBtn) {
+      const approved = String(record.status || '').toLowerCase() === 'approved';
+      approveBtn.disabled = approved;
+      approveBtn.textContent = approved ? 'Approved' : 'Approve';
+    }
   }
   
   // Generate payroll
@@ -546,6 +570,55 @@
       alert.style.display = 'none';
     }, 5000);
   }
+
+  function savePayrollAdjustment() {
+    if (!currentPayrollId || !payrollPlusEnabled) return;
+    fetch(`/api/payroll/${currentPayrollId}/update`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {})
+      },
+      body: JSON.stringify({
+        potongan_lain: parseFloat(document.getElementById('editOtherDeductions').value || '0'),
+        tunjangan: parseFloat(document.getElementById('editAllowances').value || '0')
+      })
+    })
+    .then(r => r.json())
+    .then(response => {
+      if (response.ok) {
+        populatePayrollDetail(response.data);
+        loadPayrollData();
+        showAlert(response.message || 'Payroll updated', 'success');
+      } else {
+        showAlert(response.message || 'Failed to update payroll', 'error');
+      }
+    })
+    .catch(() => showAlert('Error updating payroll', 'error'));
+  }
+
+  function approvePayroll() {
+    if (!currentPayrollId) return;
+    fetch(`/api/payroll/${currentPayrollId}/approve`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {})
+      },
+      body: JSON.stringify({})
+    })
+    .then(r => r.json())
+    .then(response => {
+      if (response.ok) {
+        populatePayrollDetail(response.data);
+        loadPayrollData();
+        showAlert(response.message || 'Payroll approved', 'success');
+      } else {
+        showAlert(response.message || 'Failed to approve payroll', 'error');
+      }
+    })
+    .catch(() => showAlert('Error approving payroll', 'error'));
+  }
   
   // Event listeners
   document.addEventListener('DOMContentLoaded', () => {
@@ -590,12 +663,11 @@
     document.getElementById('btnCloseDetail').addEventListener('click', () => {
       document.getElementById('payrollDetailModal').setAttribute('aria-hidden', 'true');
       document.getElementById('payrollDetailModal').classList.remove('show');
+      currentPayrollId = null;
     });
-    
-    // Approve payroll button (placeholder)
-    document.getElementById('btnApprovePayroll').addEventListener('click', () => {
-      showAlert('Payroll approval feature coming soon', 'info');
-    });
+    const saveButton = document.getElementById('btnSavePayroll');
+    if (saveButton) saveButton.addEventListener('click', savePayrollAdjustment);
+    document.getElementById('btnApprovePayroll').addEventListener('click', approvePayroll);
   });
 
   window.showPayrollDetail = showPayrollDetail;

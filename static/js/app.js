@@ -66,6 +66,45 @@ function currentTheme(){
   return document.documentElement.getAttribute("data-theme") || "dark";
 }
 
+function csrfJsonHeaders(){
+  const headers = {"Content-Type": "application/json"};
+  if (window.__GMI_CSRF_TOKEN){
+    headers["X-CSRF-Token"] = window.__GMI_CSRF_TOKEN;
+  }
+  return headers;
+}
+
+function csrfHeaders(){
+  if (!window.__GMI_CSRF_TOKEN) return {};
+  return {"X-CSRF-Token": window.__GMI_CSRF_TOKEN};
+}
+
+function apiUrlCandidates(path){
+  const normalized = path.startsWith("/") ? path : `/${path}`;
+  const urls = [normalized];
+  if (window.location.protocol === "http:" || window.location.protocol === "https:" || window.location.protocol === "file:"){
+    urls.push(`http://127.0.0.1:5000${normalized}`);
+    urls.push(`http://localhost:5000${normalized}`);
+  }
+  return Array.from(new Set(urls));
+}
+
+async function fetchApi(path, options = {}){
+  let lastError = null;
+  for (const url of apiUrlCandidates(path)){
+    try {
+      const requestOptions = {...options};
+      if (url.startsWith("http://") || url.startsWith("https://")){
+        requestOptions.credentials = "include";
+      }
+      return await fetch(url, requestOptions);
+    } catch (err){
+      lastError = err;
+    }
+  }
+  throw lastError || new Error("Request gagal.");
+}
+
 /* =========================
    CLOCK (HH:MM, blink ':', no seconds)
 ========================= */
@@ -286,6 +325,9 @@ const ownerAddonUnlock = document.getElementById("ownerAddonUnlock");
 const ownerAddonSave = document.getElementById("ownerAddonSave");
 const ownerAddonStatus = document.getElementById("ownerAddonStatus");
 const ownerAddonToggles = Array.from(document.querySelectorAll("[data-owner-addon]"));
+const ownerAddonOpen = document.getElementById("ownerAddonOpen");
+const ownerAddonModal = document.getElementById("ownerAddonModal");
+const ownerAddonCloseButtons = Array.from(document.querySelectorAll("[data-owner-addon-close]"));
 
 if (heroGalleryData){
   try {
@@ -309,6 +351,24 @@ function setOwnerAddonStatus(message, state){
     ownerAddonStatus.dataset.state = state;
   } else {
     delete ownerAddonStatus.dataset.state;
+  }
+}
+
+function ownerAddonErrorMessage(response, payload, fallback){
+  const message = payload?.message || fallback;
+  if ((response.status === 401 || response.status === 403) && message === "Unauthorized."){
+    return "Login HR superadmin diperlukan untuk membuka add-on.";
+  }
+  return message;
+}
+
+function setOwnerAddonModalOpen(open){
+  if (!ownerAddonModal) return;
+  ownerAddonModal.classList.toggle("show", open);
+  ownerAddonModal.setAttribute("aria-hidden", open ? "false" : "true");
+  if (open){
+    loadOwnerAddons();
+    window.setTimeout(() => ownerAddonPassword?.focus(), 50);
   }
 }
 
@@ -338,11 +398,13 @@ function selectedOwnerAddons(){
 async function loadOwnerAddons(){
   if (!ownerAddonToggles.length) return;
   try {
-    const response = await fetch("/api/owner/addons");
+    const response = await fetchApi("/api/owner/addons");
     const payload = await response.json().catch(() => ({}));
     if (response.ok && payload.ok){
       setOwnerAddonValues(payload.data?.addons || []);
       setOwnerAddonUnlocked(Boolean(payload.data?.unlocked));
+    } else if (response.status === 401 || response.status === 403){
+      setOwnerAddonUnlocked(false);
     }
   } catch (_err) {
     setOwnerAddonStatus("Add-on belum dapat dimuat.", "error");
@@ -358,14 +420,14 @@ async function unlockOwnerAddons(){
   }
   setOwnerAddonStatus("Membuka akses...", "loading");
   try {
-    const response = await fetch("/api/owner/addons/verify", {
+    const response = await fetchApi("/api/owner/addons/verify", {
       method: "POST",
-      headers: {"Content-Type": "application/json"},
+      headers: csrfJsonHeaders(),
       body: JSON.stringify({password}),
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok || !payload.ok){
-      throw new Error(payload.message || "Akses owner gagal.");
+      throw new Error(ownerAddonErrorMessage(response, payload, "Akses owner gagal."));
     }
     setOwnerAddonValues(payload.data?.addons || []);
     setOwnerAddonUnlocked(true);
@@ -381,14 +443,14 @@ async function unlockOwnerAddons(){
 async function saveOwnerAddons(){
   setOwnerAddonStatus("Menyimpan add-on...", "loading");
   try {
-    const response = await fetch("/api/owner/addons", {
+    const response = await fetchApi("/api/owner/addons", {
       method: "POST",
-      headers: {"Content-Type": "application/json"},
+      headers: csrfJsonHeaders(),
       body: JSON.stringify({addons: selectedOwnerAddons()}),
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok || !payload.ok){
-      throw new Error(payload.message || "Add-on gagal disimpan.");
+      throw new Error(ownerAddonErrorMessage(response, payload, "Add-on gagal disimpan."));
     }
     setOwnerAddonValues(payload.data?.addons || []);
     setOwnerAddonStatus(payload.message || "Add-on tersimpan.", "success");
@@ -412,7 +474,24 @@ if (ownerAddonPassword){
 if (ownerAddonSave){
   ownerAddonSave.addEventListener("click", saveOwnerAddons);
 }
-loadOwnerAddons();
+if (ownerAddonOpen){
+  ownerAddonOpen.addEventListener("click", () => setOwnerAddonModalOpen(true));
+}
+ownerAddonCloseButtons.forEach(button => {
+  button.addEventListener("click", () => setOwnerAddonModalOpen(false));
+});
+if (ownerAddonModal){
+  ownerAddonModal.addEventListener("click", event => {
+    if (event.target === ownerAddonModal){
+      setOwnerAddonModalOpen(false);
+    }
+  });
+}
+document.addEventListener("keydown", event => {
+  if (event.key === "Escape" && ownerAddonModal?.classList.contains("show")){
+    setOwnerAddonModalOpen(false);
+  }
+});
 
 function renderHeroGalleryImage(){
   if (!heroGalleryMainImage) return;
@@ -474,8 +553,9 @@ async function uploadHeroGalleryFile(file){
   formData.append("image", file);
   setHeroGalleryUploadStatus("Mengunggah gambar...", "loading");
   try {
-    const response = await fetch("/api/hero-gallery/upload", {
+    const response = await fetchApi("/api/hero-gallery/upload", {
       method: "POST",
+      headers: csrfHeaders(),
       body: formData,
     });
     const payload = await response.json().catch(() => ({}));

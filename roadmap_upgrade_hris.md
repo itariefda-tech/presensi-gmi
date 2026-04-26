@@ -29,7 +29,7 @@ Sistem "terasa HRIS", bukan sekedar presensi
   - `reason`
 - [x] Implement approval:
   - Supervisor approve
-  - Koordinator fallback
+  - Manager Operational fallback
 - [x] Tambahkan status: pending / approved / rejected
 
 ### Approval Center
