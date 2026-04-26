@@ -273,13 +273,19 @@ Siap perusahaan 100-500 pegawai
 Pembeda utama di market security
 
 ### Patrol / Guard Tour
-- [ ] Buat tabel:
-  - `patrol_points`
-  - `patrol_logs`
-- [ ] Flow: scan QR / GPS
-- [ ] Simpan:
+- [x] Buat tabel:
+  - `patrol_points` (sebagai `patrol_checkpoints`)
+  - `patrol_logs` (sebagai `patrol_scans`)
+- [x] Flow: scan QR / GPS
+- [x] Simpan:
   - Waktu
   - Lokasi
+- [x] Admin Guard Tour Report Page:
+  - Halaman dashboard `/dashboard/admin/guard-tour`
+  - Filter: Site (wajib), Date Range (optional)
+  - API endpoint: `/api/admin/guard_tour/report`
+  - Export CSV support
+  - Display: Guard Name, Site, Checkpoint, Check Time, Status, Notes
 
 ### Dana Talangan
 - [ ] Buat tabel `loan`

@@ -193,11 +193,13 @@ def create_app() -> Flask:
     @app.context_processor
     def _inject_theme_preference():
         user = _current_user()
+        hris_brand_title = "HRIS ENTERPRISE" if _is_enterprise(user) else "HRIS PRO"
         return {
             "theme": _resolve_theme_preference(user),
             "theme_options": THEME_OPTIONS,
             "theme_setting_options": THEME_SETTING_OPTIONS,
             "theme_labels": THEME_LABELS,
+            "hris_brand_title": hris_brand_title,
         }
 
     def _parse_display_datetime(value: str | None) -> datetime | None:
@@ -2169,6 +2171,241 @@ def create_app() -> Flask:
         )
         return jsonify(ok=True, message="Tier user diperbarui.", data={"user_id": user_id, "tier": tier}), 200
 
+
+    @app.route("/api/admin/guard_tour/report", methods=["GET"])
+    def api_admin_guard_tour_report():
+        """Return guard tour / patrol scan records for a given site and optional date range.
+        Query params:
+          - site_id (required)
+          - date_start (YYYY-MM-DD)
+          - date_end (YYYY-MM-DD)
+          - format (json|csv) default json
+        """
+        user = _current_user()
+        forbidden = _require_api_role(user, ADMIN_ROLES)
+        if forbidden:
+            return forbidden
+
+        # Validate required site_id
+        site_id_raw = (request.args.get("site_id") or "").strip()
+        if not site_id_raw.isdigit():
+            return jsonify(ok=False, message="site_id harus berupa angka."), 400
+        site_id = int(site_id_raw)
+
+        addon_block = _require_admin_enterprise_addon(user, ADDON_PATROL, "Guard Tour")
+        if addon_block:
+            return addon_block
+
+        site = _get_site_by_id(site_id)
+        if not site:
+            return jsonify(ok=False, message="Site tidak ditemukan."), 404
+
+        date_start = (request.args.get("date_start") or "").strip()
+        date_end = (request.args.get("date_end") or "").strip()
+        output_format = (request.args.get("format") or "json").lower()
+
+        conn = _db_connect()
+        try:
+            # Build base query joining tours and checkpoints to get site and checkpoint names
+            sql = """
+            SELECT
+                s.id as scan_id,
+                s.tour_id,
+                s.employee_email,
+                s.checkpoint_id,
+                s.method,
+                s.timestamp,
+                s.validation_status,
+                s.validation_note,
+                s.gps_valid,
+                s.selfie_valid,
+                t.date as tour_date,
+                t.started_at,
+                t.ended_at,
+                t.status as tour_status,
+                t.total_checkpoints,
+                t.completed_checkpoints,
+                COALESCE(e.name, u.name, s.employee_email) as guard_name,
+                cp.name as checkpoint_name,
+                site.name as site_name
+            FROM patrol_scans s
+            JOIN patrol_tours t ON t.id = s.tour_id
+            LEFT JOIN patrol_checkpoints cp ON cp.id = s.checkpoint_id
+            LEFT JOIN sites site ON site.id = t.site_id
+            LEFT JOIN employees e ON lower(e.email) = lower(s.employee_email)
+            LEFT JOIN users u ON lower(u.email) = lower(s.employee_email)
+            WHERE t.site_id = ?
+            """
+            params = [site_id]
+            if date_start:
+                sql += " AND date(t.date) >= date(?)"
+                params.append(date_start)
+            if date_end:
+                sql += " AND date(t.date) <= date(?)"
+                params.append(date_end)
+            sql += " ORDER BY s.id DESC LIMIT 5000"
+
+            cur = conn.execute(sql, tuple(params))
+            rows = [dict(r) for r in cur.fetchall()]
+
+            session_sql = """
+            SELECT
+                t.id,
+                t.employee_user_id,
+                t.employee_id,
+                t.employee_email,
+                t.date,
+                t.started_at,
+                t.ended_at,
+                t.status,
+                t.total_checkpoints,
+                t.completed_checkpoints,
+                t.scan_mode,
+                COALESCE(e.name, u.name, t.employee_email) as guard_name,
+                site.name as site_name
+            FROM patrol_tours t
+            LEFT JOIN sites site ON site.id = t.site_id
+            LEFT JOIN employees e ON lower(e.email) = lower(t.employee_email)
+            LEFT JOIN users u ON lower(u.email) = lower(t.employee_email)
+            WHERE t.site_id = ?
+            """
+            session_params = [site_id]
+            if date_start:
+                session_sql += " AND date(t.date) >= date(?)"
+                session_params.append(date_start)
+            if date_end:
+                session_sql += " AND date(t.date) <= date(?)"
+                session_params.append(date_end)
+            session_sql += " ORDER BY t.id DESC LIMIT 500"
+            session_rows = [dict(r) for r in conn.execute(session_sql, tuple(session_params)).fetchall()]
+        finally:
+            conn.close()
+
+        # Normalize records for frontend
+        records = []
+        for r in rows:
+            status = (r.get("validation_status") or "").lower()
+            # map validation_status to simpler values
+            if status == PATROL_SCAN_VALID:
+                mapped = "completed"
+            elif not status:
+                mapped = "pending"
+            else:
+                mapped = "failed"
+            records.append(
+                {
+                    "scan_id": int(r.get("scan_id") or 0),
+                    "tour_id": int(r.get("tour_id") or 0),
+                    "guard_name": r.get("guard_name") or r.get("employee_email") or "-",
+                    "site_name": r.get("site_name") or "-",
+                    "checkpoint": r.get("checkpoint_name") or "-",
+                    "date": r.get("tour_date") or (r.get("timestamp") or "")[:10],
+                    "check_time": r.get("timestamp") or "",
+                    "method": (r.get("method") or "-").upper(),
+                    "tour_status": r.get("tour_status") or "",
+                    "progress": f"{int(r.get('completed_checkpoints') or 0)}/{int(r.get('total_checkpoints') or 0)}",
+                    "gps_valid": bool(r.get("gps_valid")),
+                    "selfie_valid": bool(r.get("selfie_valid")),
+                    "status": mapped,
+                    "notes": r.get("validation_note") or "",
+                }
+            )
+
+        sessions = []
+        for row in session_rows:
+            total_cp = int(row.get("total_checkpoints") or 0)
+            done_cp = int(row.get("completed_checkpoints") or 0)
+            if done_cp > total_cp:
+                done_cp = total_cp
+            missed_cp = max(0, total_cp - done_cp)
+            sessions.append(
+                {
+                    "session_id": int(row.get("id") or 0),
+                    "guard_name": row.get("guard_name") or row.get("employee_email") or "-",
+                    "employee_email": row.get("employee_email") or "-",
+                    "site_name": row.get("site_name") or "-",
+                    "date": row.get("date") or "",
+                    "started_at": row.get("started_at") or "",
+                    "ended_at": row.get("ended_at") or "",
+                    "status": (row.get("status") or "").lower(),
+                    "scan_mode": (row.get("scan_mode") or "-").upper(),
+                    "checkpoint_done": done_cp,
+                    "checkpoint_missed": missed_cp,
+                    "progress": f"{done_cp}/{total_cp}",
+                }
+            )
+
+        if output_format == "csv":
+            # build CSV
+            import io, csv
+
+            out = io.StringIO()
+            writer = csv.writer(out)
+            writer.writerow(["scan_id", "tour_id", "date", "guard_name", "site_name", "checkpoint", "check_time", "method", "tour_status", "progress", "status", "notes"])
+            for rec in records:
+                writer.writerow([
+                    rec["scan_id"],
+                    rec["tour_id"],
+                    rec["date"],
+                    rec["guard_name"],
+                    rec["site_name"],
+                    rec["checkpoint"],
+                    rec["check_time"],
+                    rec["method"],
+                    rec["tour_status"],
+                    rec["progress"],
+                    rec["status"],
+                    rec["notes"],
+                ])
+            csv_data = out.getvalue()
+            headers = {
+                "Content-Type": "text/csv; charset=utf-8",
+                "Content-Disposition": f'attachment; filename="guard_tour_site_{site_id}.csv"',
+            }
+            return Response(csv_data, headers=headers)
+
+        return jsonify(ok=True, records=records, sessions=sessions), 200
+
+    @app.route("/api/admin/guard_tour/dashboard", methods=["GET"])
+    def api_admin_guard_tour_dashboard():
+        user = _current_user()
+        forbidden = _require_api_role(user, ADMIN_ROLES)
+        if forbidden:
+            return forbidden
+
+        site_id_raw = (request.args.get("site_id") or "").strip()
+        if not site_id_raw.isdigit():
+            return jsonify(ok=False, message="site wajib dipilih."), 400
+        site_id = int(site_id_raw)
+
+        addon_block = _require_admin_enterprise_addon(user, ADDON_PATROL, "Guard Tour")
+        if addon_block:
+            return addon_block
+
+        site = _get_site_by_id(site_id)
+        if not site:
+            return jsonify(ok=False, message="Site tidak ditemukan."), 404
+        client_id = int(_row_get(site, "client_id") or 0)
+        if client_id <= 0:
+            return jsonify(ok=False, message="Site belum terhubung ke client."), 400
+
+        date_start = (request.args.get("date_start") or "").strip() or None
+        date_end = (request.args.get("date_end") or "").strip() or None
+        payload = _client_patrol_dashboard_payload(
+            client_id=client_id,
+            site_id=site_id,
+            can_manage=False,
+            date_from=date_start,
+            date_to=date_end,
+        )
+        payload["filters"] = {
+            "site_id": site_id,
+            "site_name": _row_get(site, "name") or "-",
+            "date_start": date_start,
+            "date_end": date_end,
+        }
+        return jsonify(ok=True, data=payload), 200
+
     @app.route("/api/clients", methods=["GET"])
     def clients_api():
         user = _current_user()
@@ -2362,6 +2599,8 @@ def create_app() -> Flask:
     def api_sites():
         """Return sites as JSON for selects/filters. Respects client admin scope."""
         user = _current_user()
+        if not user or user.role not in (ADMIN_ROLES | CLIENT_ROLES):
+            return _json_forbidden()
         client_scope = _client_admin_client_id(user)
         try:
             if client_scope:
@@ -3279,6 +3518,7 @@ ROLE_PERMISSION_KEYS = [
     "manage_policies",
     "view_attendance",
     "view_reports",
+    "view_patrol",
     "view_payroll",
     "approve_requests",
     "manage_settings_codes",
@@ -3297,6 +3537,7 @@ ROLE_PERMISSION_LABELS = {
     "manage_policies": "Policies",
     "view_attendance": "Attendance",
     "view_reports": "Reports",
+    "view_patrol": "Guard Tour",
     "view_payroll": "Payroll",
     "approve_requests": "Approvals",
     "manage_settings_codes": "Setting: Kode Reg",
@@ -3326,12 +3567,14 @@ ADDON_REPORTING_ADVANCED = "reporting_advanced"
 ADDON_API_ACCESS = "api_access"
 ADDON_PAYROLL_PLUS = "payroll_plus"
 ADDON_AI = "ai"
+ADDON_ENTERPRISE_TIER = "enterprise_tier"
 ADDON_ALLOWED = {
     ADDON_PATROL,
     ADDON_REPORTING_ADVANCED,
     ADDON_API_ACCESS,
     ADDON_PAYROLL_PLUS,
     ADDON_AI,
+    ADDON_ENTERPRISE_TIER,
 }
 ADDON_FEATURE_ALIASES = {
     "patrol": ADDON_PATROL,
@@ -3343,6 +3586,8 @@ ADDON_FEATURE_ALIASES = {
     "api_access": ADDON_API_ACCESS,
     "payroll_plus": ADDON_PAYROLL_PLUS,
     "ai": ADDON_AI,
+    "enterprise": ADDON_ENTERPRISE_TIER,
+    "enterprise_tier": ADDON_ENTERPRISE_TIER,
 }
 DEFAULT_ATTENDANCE_POLICY = {
     "work_duration_minutes": None,
@@ -8877,6 +9122,36 @@ def _addon_required_response(feature_label: str):
     )
 
 
+def _enterprise_addon_required_response(feature_label: str):
+    return (
+        jsonify(
+            ok=False,
+            message=f"{feature_label} membutuhkan tier Enterprise dan add-on aktif.",
+        ),
+        403,
+    )
+
+
+def _admin_enterprise_addon_enabled(user: User | None, feature: str) -> bool:
+    if not user or user.role not in ADMIN_ROLES:
+        return False
+    if not _is_enterprise(user):
+        return False
+    feature_key = _normalize_addon_key(feature)
+    active_addons = _global_addons()
+    if ADDON_ENTERPRISE_TIER in active_addons and feature_key == ADDON_PATROL:
+        return True
+    return feature_key in active_addons
+
+
+def _require_admin_enterprise_addon(user: User | None, feature: str, feature_label: str):
+    if not user or user.role not in ADMIN_ROLES:
+        return _json_forbidden()
+    if not _admin_enterprise_addon_enabled(user, feature):
+        return _enterprise_addon_required_response(feature_label)
+    return None
+
+
 def _require_client_addon(
     user: User | None,
     feature: str,
@@ -8956,6 +9231,8 @@ def _is_pro(user: User) -> bool:
         return False
     if user.role == "hr_superadmin":
         return True
+    if _is_enterprise(user):
+        return True
     if not hasattr(user, 'tier'):
         return False
     return _normalize_user_tier(user.tier) in {"pro", "enterprise"}
@@ -8965,6 +9242,8 @@ def _is_enterprise(user: User) -> bool:
     """Check if user has ENTERPRISE tier access"""
     if not user or not hasattr(user, 'tier'):
         return False
+    if user.role in ADMIN_ROLES and ADDON_ENTERPRISE_TIER in _global_addons():
+        return True
     return _normalize_user_tier(user.tier) == "enterprise"
 
 
@@ -11548,22 +11827,39 @@ def _client_patrol_employee_name_map(emails: set[str]) -> dict[str, str]:
         conn.close()
 
 
-def _client_patrol_monitoring_rows(site_id: int, date_value: str | None = None) -> dict:
+def _client_patrol_monitoring_rows(
+    site_id: int,
+    date_value: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> dict:
     today = date_value or _today_key()
     conn = _db_connect()
     try:
         if not _table_exists(conn, "patrol_tours"):
             return {"rows": [], "counts": {"ongoing": 0, "completed": 0, "stopped": 0}}
+        where = ["site_id = ?"]
+        params: list[object] = [site_id]
+        if date_from or date_to:
+            if date_from:
+                where.append("date >= ?")
+                params.append(date_from)
+            if date_to:
+                where.append("date <= ?")
+                params.append(date_to)
+        else:
+            where.append("date = ?")
+            params.append(today)
         cur = conn.execute(
-            """
+            f"""
             SELECT
                 id, employee_user_id, employee_id, employee_email, date,
                 started_at, ended_at, status, total_checkpoints, completed_checkpoints
             FROM patrol_tours
-            WHERE site_id = ? AND date = ?
+            WHERE {' AND '.join(where)}
             ORDER BY id DESC
             """,
-            (site_id, today),
+            tuple(params),
         )
         raw_rows = [dict(row) for row in cur.fetchall()]
     finally:
@@ -11611,24 +11907,38 @@ def _client_patrol_monitoring_rows(site_id: int, date_value: str | None = None) 
     return {"rows": rows, "counts": counts}
 
 
-def _client_patrol_recap_rows(site_id: int, limit: int = 50) -> list[dict]:
+def _client_patrol_recap_rows(
+    site_id: int,
+    limit: int = 50,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> list[dict]:
     if limit <= 0:
         limit = 50
     conn = _db_connect()
     try:
         if not _table_exists(conn, "patrol_tours"):
             return []
+        where = ["site_id = ?"]
+        params: list[object] = [site_id]
+        if date_from:
+            where.append("date >= ?")
+            params.append(date_from)
+        if date_to:
+            where.append("date <= ?")
+            params.append(date_to)
+        params.append(limit)
         cur = conn.execute(
-            """
+            f"""
             SELECT
                 id, employee_user_id, employee_id, employee_email, date,
                 started_at, ended_at, status, total_checkpoints, completed_checkpoints
             FROM patrol_tours
-            WHERE site_id = ?
+            WHERE {' AND '.join(where)}
             ORDER BY id DESC
             LIMIT ?
             """,
-            (site_id, limit),
+            tuple(params),
         )
         rows = [dict(row) for row in cur.fetchall()]
     finally:
@@ -11661,15 +11971,29 @@ def _client_patrol_recap_rows(site_id: int, limit: int = 50) -> list[dict]:
     return recap
 
 
-def _client_patrol_logs_for_site(site_id: int, limit: int = 600) -> list[dict]:
+def _client_patrol_logs_for_site(
+    site_id: int,
+    limit: int = 600,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> list[dict]:
     if limit <= 0:
         limit = 600
     conn = _db_connect()
     try:
         if not _table_exists(conn, "patrol_scans") or not _table_exists(conn, "patrol_tours"):
             return []
+        where = ["t.site_id = ?"]
+        params: list[object] = [site_id]
+        if date_from:
+            where.append("date(t.date) >= date(?)")
+            params.append(date_from)
+        if date_to:
+            where.append("date(t.date) <= date(?)")
+            params.append(date_to)
+        params.append(limit)
         cur = conn.execute(
-            """
+            f"""
             SELECT
                 s.id,
                 s.tour_id,
@@ -11678,11 +12002,11 @@ def _client_patrol_logs_for_site(site_id: int, limit: int = 600) -> list[dict]:
                 s.validation_status
             FROM patrol_scans s
             JOIN patrol_tours t ON t.id = s.tour_id
-            WHERE t.site_id = ?
+            WHERE {' AND '.join(where)}
             ORDER BY s.id DESC
             LIMIT ?
             """,
-            (site_id, limit),
+            tuple(params),
         )
         rows = [dict(row) for row in cur.fetchall()]
     finally:
@@ -11708,14 +12032,16 @@ def _client_patrol_dashboard_payload(
     client_id: int,
     site_id: int,
     can_manage: bool,
+    date_from: str | None = None,
+    date_to: str | None = None,
 ) -> dict:
     site_row = _get_site_by_id(site_id)
     site = dict(site_row) if site_row else {}
     route = _client_patrol_route_for_site(site_id, client_id)
     checkpoints = _client_patrol_checkpoint_rows(int(route["id"])) if route else []
-    monitoring = _client_patrol_monitoring_rows(site_id)
-    recap_rows = _client_patrol_recap_rows(site_id, limit=60)
-    logs_rows = _client_patrol_logs_for_site(site_id, limit=800)
+    monitoring = _client_patrol_monitoring_rows(site_id, date_from=date_from, date_to=date_to)
+    recap_rows = _client_patrol_recap_rows(site_id, limit=60, date_from=date_from, date_to=date_to)
+    logs_rows = _client_patrol_logs_for_site(site_id, limit=800, date_from=date_from, date_to=date_to)
     max_limit = PATROL_MAX_CHECKPOINTS
     current_count = len(checkpoints)
     over_limit = current_count > max_limit
@@ -13121,6 +13447,28 @@ def admin_bp() -> Blueprint:
             advanced_reporting_enabled=True,
         )
 
+    @bp.route("/guard-tour", methods=["GET"])
+    def guard_tour():
+        """Render the Guard Tour admin page (separate from reports).
+        Requires Enterprise tier and the global Guard Tour add-on.
+        """
+        user = _current_user()
+        if not _is_enterprise(user):
+            return render_template(
+                "dashboard/upgrade_prompt.html",
+                user=user,
+                feature="Guard Tour",
+                message="Guard Tour admin hanya tersedia untuk tier Enterprise.",
+            )
+        if not _admin_enterprise_addon_enabled(user, ADDON_PATROL):
+            return render_template(
+                "dashboard/upgrade_prompt.html",
+                user=user,
+                feature="Guard Tour",
+                message="Aktifkan add-on Guard Tour di Settings Add-on Enterprise.",
+            )
+        return render_template("dashboard/admin_guard_tour.html", user=user)
+
     @bp.route("/payroll", methods=["GET"])
     def payroll():
         user = _current_user()
@@ -13319,7 +13667,7 @@ def admin_bp() -> Blueprint:
         permissions = _get_role_permissions(user.role)
         default_tab = "users" if user.role == "hr_superadmin" else "theme"
         tab = (request.args.get("tab") or default_tab).lower()
-        if tab not in {"users", "roles", "hr", "password", "theme"}:
+        if tab not in {"users", "roles", "hr", "password", "theme", "addons"}:
             tab = default_tab
         if user.role != "hr_superadmin":
             allowed_tabs = ["theme"]

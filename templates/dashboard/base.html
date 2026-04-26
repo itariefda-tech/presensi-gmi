@@ -13,7 +13,7 @@
       } catch (e) {}
     })();
   </script>
-  <title>{{ title or "HRIS PRO - Dashboard" }}</title>
+  <title>{{ title or ((hris_brand_title or "HRIS PRO") ~ " - Dashboard") }}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}" />
 </head>
 <body data-dashboard-home="{{ url_for('admin.overview') }}">
@@ -23,7 +23,7 @@
       <div class="brand">
         <div class="brand-mark">
           <div class="dot" aria-hidden="true"></div>
-          <div class="brand-title">HRIS PRO</div>
+          <div class="brand-title">{{ hris_brand_title or "HRIS PRO" }}</div>
         </div>
         <button class="btn secondary collapse-btn" type="button" id="btnToggleSidebar" aria-label="Toggle sidebar">
           <svg class="collapse-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -101,6 +101,14 @@
             <svg viewBox="0 0 24 24" fill="none"><path d="M5 19V5m0 14h15M9 16v-5m4 5V8m4 8v-3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </span>
           <span class="nav-label" data-i18n="nav.reports">Reports</span>
+        </a>
+        {% endif %}
+        {% if permissions.get("view_patrol") %}
+        <a href="{{ url_for('admin.guard_tour') }}" class="{% if active == 'guard_tour' %}active{% endif %}" title="Guard Tour" data-i18n-title="nav.guard_tour">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm0-13c-2.76 0-5 2.24-5 5s2.24 5 5 5 5-2.24 5-5-2.24-5-5-5z" fill="currentColor"/></svg>
+          </span>
+          <span class="nav-label" data-i18n="nav.guard_tour">Guard Tour</span>
         </a>
         {% endif %}
         {% if permissions.get("view_payroll") %}

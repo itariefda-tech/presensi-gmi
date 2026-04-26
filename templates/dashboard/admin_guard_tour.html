@@ -1,0 +1,463 @@
+{% extends "dashboard/base.html" %}
+{% set active = "guard_tour" %}
+{% set heading = "Guard Tour" %}
+{% set subtitle = "Monitoring dan report guard tour per site" %}
+
+{% block body %}
+<section class="admin-patrol-pane" id="adminPatrolPane">
+  <article class="card admin-patrol-filter">
+    <div class="card-header">
+      <div class="card-header-actions">
+        <h3>Guard Tour Control Center</h3>
+        <div class="header-actions">
+          <select id="guardTourSite" class="input" required aria-label="Site">
+            <option value="">Pilih Site</option>
+          </select>
+          <input type="date" id="guardTourStart" class="input" aria-label="Tanggal mulai" />
+          <input type="date" id="guardTourEnd" class="input" aria-label="Tanggal selesai" />
+          <button class="btn primary" type="button" id="guardTourApply">Filter</button>
+          <button class="btn secondary" type="button" id="guardTourRefresh">Refresh</button>
+          <button class="btn secondary" type="button" id="guardTourExport">Export CSV</button>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="alert info" id="guardTourAlert" style="display:none;"></div>
+    </div>
+  </article>
+
+  <article class="card patrol-hero-panel">
+    <div class="panel-head patrol-hero-head">
+      <div>
+        <h3>Guard Tour Control Center</h3>
+        <div class="panel-sub">Monitor patroli aktif dan report scan checkpoint pegawai.</div>
+      </div>
+      <span class="status-pill muted" id="guardTourFilterLabel">Site belum dipilih</span>
+    </div>
+    <div class="patrol-hero-grid">
+      <div class="patrol-hero-card">
+        <div class="patrol-hero-label">Checkpoint Aktif</div>
+        <div class="patrol-hero-value" id="patrolHeroCheckpointCount">0/30</div>
+        <div class="patrol-hero-meta" id="patrolHeroRouteName">Guard Tour Route</div>
+      </div>
+      <div class="patrol-hero-card">
+        <div class="patrol-hero-label">Sedang Berjalan</div>
+        <div class="patrol-hero-value" id="patrolHeroOngoing">0</div>
+        <div class="patrol-hero-meta">Sesi aktif sesuai filter</div>
+      </div>
+      <div class="patrol-hero-card">
+        <div class="patrol-hero-label">Selesai</div>
+        <div class="patrol-hero-value" id="patrolHeroCompleted">0</div>
+        <div class="patrol-hero-meta">Sesi selesai sesuai filter</div>
+      </div>
+      <div class="patrol-hero-card">
+        <div class="patrol-hero-label">Terhenti</div>
+        <div class="patrol-hero-value" id="patrolHeroStopped">0</div>
+        <div class="patrol-hero-meta">Sesi incomplete/invalid</div>
+      </div>
+    </div>
+    <div class="patrol-live-meta">
+      <span class="status-pill muted">Live Monitor</span>
+      <span id="patrolLiveTimestamp">Belum sinkron</span>
+    </div>
+    <div class="patrol-inline-monitor" id="patrol-monitor">
+      <div class="patrol-board-head">
+        <h4>Monitoring Real-Time</h4>
+        <div class="panel-sub">Daftar pegawai yang sedang patroli beserta progres checkpoint.</div>
+      </div>
+      <div class="patrol-monitor-list" id="patrolMonitoringList"></div>
+      <div class="empty-state patrol-empty-state" id="patrolMonitoringEmpty">Belum ada sesi patroli aktif untuk filter ini.</div>
+    </div>
+  </article>
+
+  <article class="card patrol-report-panel">
+    <div class="panel-head">
+      <div>
+        <h3>Report Scan Checkpoint</h3>
+        <div class="panel-sub">Log scan checkpoint sesuai site dan tanggal yang dipilih.</div>
+      </div>
+      <span class="panel-badge muted" id="guardTourReportTotal">0 scan</span>
+    </div>
+    <div class="table-wrap">
+      <table class="table" aria-label="Guard tour scan report">
+        <thead>
+          <tr>
+            <th>Tanggal</th>
+            <th>Guard</th>
+            <th>Site</th>
+            <th>Checkpoint</th>
+            <th>Jam Check</th>
+            <th>Metode</th>
+            <th>Progress</th>
+            <th>Status</th>
+            <th>Catatan</th>
+          </tr>
+        </thead>
+        <tbody id="guardTourRows">
+          <tr><td colspan="9" class="muted">Pilih site untuk menampilkan report scan.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </article>
+
+</section>
+
+<style>
+.admin-patrol-pane {
+  display: grid;
+  gap: 1rem;
+}
+
+.card-header-actions,
+.header-actions,
+.panel-head,
+.patrol-live-meta,
+.patrol-board-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.header-actions {
+  justify-content: flex-end;
+}
+
+.panel-sub,
+.patrol-hero-meta,
+.patrol-monitor-email,
+.patrol-monitor-meta,
+.empty-state {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.panel-badge,
+.status-pill,
+.patrol-state-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.25rem 0.65rem;
+  font-size: 0.78rem;
+  font-weight: 800;
+  background: rgba(148, 163, 184, 0.16);
+  color: var(--muted);
+}
+
+.patrol-hero-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.patrol-hero-card,
+.patrol-cp-item,
+.patrol-monitor-item {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 1rem;
+}
+
+.patrol-hero-label {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.patrol-hero-value {
+  font-size: 2rem;
+  font-weight: 900;
+  line-height: 1;
+  margin: 0.45rem 0;
+}
+
+.patrol-checkpoint-list,
+.patrol-monitor-list {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 0.85rem;
+}
+
+.patrol-inline-monitor {
+  border-top: 1px solid var(--border);
+  margin-top: 1rem;
+  padding-top: 1rem;
+}
+
+.patrol-cp-top,
+.patrol-monitor-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.patrol-cp-seq {
+  min-width: 42px;
+  height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: rgba(37, 99, 235, 0.14);
+  color: var(--accent);
+  font-weight: 900;
+}
+
+.patrol-cp-name,
+.patrol-monitor-name {
+  font-weight: 800;
+}
+
+.patrol-cp-meta,
+.patrol-cp-gps {
+  color: var(--muted);
+  font-size: 0.86rem;
+  margin-top: 0.2rem;
+}
+
+.patrol-progress-track {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.22);
+  overflow: hidden;
+  margin: 0.75rem 0;
+}
+
+.patrol-progress-track span {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--accent2);
+}
+
+.patrol-state-badge.is-ongoing {
+  color: #b45309;
+  background: rgba(180, 83, 9, 0.14);
+}
+
+.patrol-state-badge.is-completed {
+  color: #16a34a;
+  background: rgba(22, 163, 74, 0.14);
+}
+
+.patrol-state-badge.is-stopped {
+  color: #dc2626;
+  background: rgba(220, 38, 38, 0.14);
+}
+
+.patrol-monitor-meta {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-top: 0.45rem;
+}
+
+</style>
+
+<script>
+  (function(){
+    const siteSelect = document.getElementById("guardTourSite");
+    const startInput = document.getElementById("guardTourStart");
+    const endInput = document.getElementById("guardTourEnd");
+    const applyButton = document.getElementById("guardTourApply");
+    const refreshButton = document.getElementById("guardTourRefresh");
+    const exportButton = document.getElementById("guardTourExport");
+    const alertEl = document.getElementById("guardTourAlert");
+    const reportRowsEl = document.getElementById("guardTourRows");
+    const reportTotalEl = document.getElementById("guardTourReportTotal");
+    let lastPayload = {};
+
+    function escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+      }[char]));
+    }
+
+    function setAlert(message) {
+      if (!alertEl) return;
+      alertEl.textContent = message || "";
+      alertEl.style.display = message ? "block" : "none";
+    }
+
+    function formatDateTime(value) {
+      if (!value) return "-";
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return value;
+      return date.toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" });
+    }
+
+    function formatDate(value) {
+      if (!value) return "-";
+      const date = new Date(`${value}T00:00:00`);
+      if (Number.isNaN(date.getTime())) return value;
+      return date.toLocaleDateString("id-ID", { dateStyle: "medium" });
+    }
+
+    function progressPercent(done, total) {
+      if (!total) return 0;
+      return Math.max(0, Math.min(100, Math.round((done / total) * 100)));
+    }
+
+    function statusClass(status) {
+      const normalized = String(status || "").toLowerCase();
+      if (normalized === "completed") return "is-completed";
+      if (normalized === "ongoing") return "is-ongoing";
+      return "is-stopped";
+    }
+
+    function statusLabel(status) {
+      const normalized = String(status || "").toLowerCase();
+      if (normalized === "completed") return "Selesai";
+      if (normalized === "ongoing") return "Sedang berjalan";
+      return "Terhenti";
+    }
+
+    function buildParams(format) {
+      const siteId = siteSelect.value;
+      if (!siteId) {
+        setAlert("Site wajib dipilih. Admin Guard Tour tidak memakai filter all site.");
+        return null;
+      }
+      const params = new URLSearchParams({ site_id: siteId });
+      if (startInput.value) params.set("date_start", startInput.value);
+      if (endInput.value) params.set("date_end", endInput.value);
+      if (format) params.set("format", format);
+      return params;
+    }
+
+    async function loadSites() {
+      const response = await fetch("/api/sites", { credentials: "same-origin" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload.ok === false) throw new Error(payload.message || "Gagal memuat site.");
+      const sites = Array.isArray(payload.data) ? payload.data : [];
+      siteSelect.innerHTML = '<option value="">Pilih Site</option>';
+      sites.forEach((site) => {
+        const option = document.createElement("option");
+        option.value = site.id;
+        option.textContent = site.name || `Site ${site.id}`;
+        siteSelect.appendChild(option);
+      });
+    }
+
+    function renderHero(payload) {
+      const setup = payload.setup || {};
+      const route = setup.route || {};
+      const counts = payload.monitoring?.counts || {};
+      document.getElementById("patrolHeroCheckpointCount").textContent = `${Number(setup.checkpoint_count || 0)}/${Number(setup.checkpoint_limit || 30)}`;
+      document.getElementById("patrolHeroRouteName").textContent = route.name || "Guard Tour Route";
+      document.getElementById("patrolHeroOngoing").textContent = String(Number(counts.ongoing || 0));
+      document.getElementById("patrolHeroCompleted").textContent = String(Number(counts.completed || 0));
+      document.getElementById("patrolHeroStopped").textContent = String(Number(counts.stopped || 0));
+      document.getElementById("patrolLiveTimestamp").textContent = `Sinkron terakhir ${new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`;
+      const filter = payload.filters || {};
+      document.getElementById("guardTourFilterLabel").textContent = filter.site_name || route.site_name || "Site terpilih";
+    }
+
+    function renderMonitoring(payload) {
+      const rows = Array.isArray(payload.monitoring?.rows) ? payload.monitoring.rows : [];
+      const list = document.getElementById("patrolMonitoringList");
+      const empty = document.getElementById("patrolMonitoringEmpty");
+      if (!rows.length) {
+        list.innerHTML = "";
+        empty.style.display = "block";
+        return;
+      }
+      empty.style.display = "none";
+      list.innerHTML = rows.map((row) => {
+        const done = Number(row.progress_done || 0);
+        const total = Number(row.progress_total || 0);
+        return `
+          <article class="patrol-monitor-item">
+            <div class="patrol-monitor-top">
+              <div class="patrol-monitor-name">${escapeHtml(row.employee_name || row.employee_email || "-")}</div>
+              <span class="patrol-state-badge ${statusClass(row.status)}">${statusLabel(row.status)}</span>
+            </div>
+            <div class="patrol-monitor-email">${escapeHtml(row.employee_email || "-")}</div>
+            <div class="patrol-progress-track"><span style="width:${progressPercent(done, total)}%"></span></div>
+            <div class="patrol-monitor-meta">
+              <span>Progress ${done}/${total}</span>
+              <span>Mulai ${formatDateTime(row.started_at)}</span>
+            </div>
+          </article>
+        `;
+      }).join("");
+    }
+
+    function scanStatusBadge(status) {
+      if (status === "completed") return '<span class="patrol-state-badge is-completed">Valid</span>';
+      if (status === "failed") return '<span class="patrol-state-badge is-stopped">Issue</span>';
+      return '<span class="patrol-state-badge is-ongoing">Pending</span>';
+    }
+
+    function renderReport(records) {
+      const rows = Array.isArray(records) ? records : [];
+      if (reportTotalEl) reportTotalEl.textContent = `${rows.length} scan`;
+      if (!rows.length) {
+        reportRowsEl.innerHTML = '<tr><td colspan="9" class="muted">Tidak ada scan checkpoint untuk filter ini.</td></tr>';
+        return;
+      }
+      reportRowsEl.innerHTML = rows.map((record) => `
+        <tr>
+          <td>${escapeHtml(record.date || "-")}</td>
+          <td>${escapeHtml(record.guard_name || "-")}</td>
+          <td>${escapeHtml(record.site_name || "-")}</td>
+          <td>${escapeHtml(record.checkpoint || "-")}</td>
+          <td>${escapeHtml(record.check_time || "-")}</td>
+          <td>${escapeHtml(record.method || "-")}</td>
+          <td>${escapeHtml(record.progress || "-")}</td>
+          <td>${scanStatusBadge(record.status)}</td>
+          <td>${escapeHtml(record.notes || "-")}</td>
+        </tr>
+      `).join("");
+    }
+
+    function renderPayload(payload) {
+      lastPayload = payload || {};
+      renderHero(lastPayload);
+      renderMonitoring(lastPayload);
+    }
+
+    async function loadDashboard() {
+      const params = buildParams("");
+      if (!params) return;
+      setAlert("Memuat data Guard Tour...");
+      try {
+        const [dashboardResponse, reportResponse] = await Promise.all([
+          fetch(`/api/admin/guard_tour/dashboard?${params.toString()}`, { credentials: "same-origin" }),
+          fetch(`/api/admin/guard_tour/report?${params.toString()}`, { credentials: "same-origin" }),
+        ]);
+        const dashboardPayload = await dashboardResponse.json().catch(() => ({}));
+        const reportPayload = await reportResponse.json().catch(() => ({}));
+        if (!dashboardResponse.ok || dashboardPayload.ok === false) throw new Error(dashboardPayload.message || "Gagal memuat dashboard Guard Tour.");
+        if (!reportResponse.ok || reportPayload.ok === false) throw new Error(reportPayload.message || "Gagal memuat report Guard Tour.");
+        renderPayload(dashboardPayload.data || {});
+        renderReport(reportPayload.records || []);
+        setAlert(`${(reportPayload.records || []).length} scan checkpoint ditampilkan.`);
+      } catch (error) {
+        setAlert(error.message || "Gagal memuat Guard Tour.");
+      }
+    }
+
+    function exportCsv() {
+      const params = buildParams("csv");
+      if (!params) return;
+      window.location.href = `/api/admin/guard_tour/report?${params.toString()}`;
+    }
+
+    loadSites().catch((error) => setAlert(error.message));
+    applyButton?.addEventListener("click", loadDashboard);
+    refreshButton?.addEventListener("click", loadDashboard);
+    exportButton?.addEventListener("click", exportCsv);
+  })();
+</script>
+{% endblock %}

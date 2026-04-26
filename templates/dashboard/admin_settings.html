@@ -9,6 +9,7 @@
     {% if user.role == "hr_superadmin" %}
     <a class="tab-btn {% if tab == 'users' %}active{% endif %}" href="{{ url_for('admin.settings', tab='users') }}">Users</a>
     <a class="tab-btn {% if tab == 'roles' %}active{% endif %}" href="{{ url_for('admin.settings', tab='roles') }}">Roles</a>
+    <a class="tab-btn {% if tab == 'addons' %}active{% endif %}" href="{{ url_for('admin.settings', tab='addons') }}">Add-on</a>
     {% endif %}
     {% if permissions.get('manage_settings_codes') %}
     <a class="tab-btn {% if tab == 'hr' %}active{% endif %}" href="{{ url_for('admin.settings', tab='hr') }}">Kode Reg</a>
@@ -191,6 +192,49 @@
   </div>
   {% endif %}
 
+  {% if tab == 'addons' and user.role == "hr_superadmin" %}
+  <div class="card" style="margin-top:12px;">
+    <div style="font-weight:700; margin-bottom:8px;">Enterprise Add-on</div>
+    <div class="muted" style="margin-bottom:12px;">Toggle ini mengaktifkan fitur add-on untuk user admin tier Enterprise.</div>
+    <div class="stack" id="ownerAddonPanel">
+      <form class="inline" id="ownerAddonUnlockForm">
+        <input class="input" type="password" id="ownerAddonPassword" placeholder="Password owner add-on" autocomplete="current-password" required />
+        <button class="btn primary" type="submit">Unlock</button>
+      </form>
+      <div class="form-grid" style="grid-template-columns: repeat(2, minmax(220px, 1fr));">
+        <label class="check">
+          <input type="checkbox" data-owner-addon value="patrol" disabled />
+          <span>Guard Tour</span>
+        </label>
+        <label class="check">
+          <input type="checkbox" data-owner-addon value="reporting_advanced" disabled />
+          <span>Advanced Reporting</span>
+        </label>
+        <label class="check">
+          <input type="checkbox" data-owner-addon value="payroll_plus" disabled />
+          <span>Payroll Plus</span>
+        </label>
+        <label class="check">
+          <input type="checkbox" data-owner-addon value="api_access" disabled />
+          <span>API Access</span>
+        </label>
+        <label class="check">
+          <input type="checkbox" data-owner-addon value="ai" disabled />
+          <span>AI</span>
+        </label>
+        <label class="check">
+          <input type="checkbox" data-owner-addon value="enterprise_tier" disabled />
+          <span>Enterprise Tier</span>
+        </label>
+      </div>
+      <div class="btn-row">
+        <button class="btn primary btn-fixed-100" type="button" id="ownerAddonSave" disabled>Simpan</button>
+      </div>
+      <div class="alert info" id="ownerAddonAlert" style="display:none;"></div>
+    </div>
+  </div>
+  {% endif %}
+
   {% if tab == 'hr' and permissions.get('manage_settings_codes') %}
   <div class="card">
     <div style="font-weight:700; margin-bottom:8px;">Pemberian Kode Pendaftaran Pegawai</div>
@@ -287,6 +331,97 @@
       });
     });
 
+  })();
+</script>
+{% endif %}
+{% if tab == 'addons' and user.role == "hr_superadmin" %}
+<script>
+  (function(){
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute("content") || "";
+    const unlockForm = document.getElementById("ownerAddonUnlockForm");
+    const passwordInput = document.getElementById("ownerAddonPassword");
+    const saveButton = document.getElementById("ownerAddonSave");
+    const alertBox = document.getElementById("ownerAddonAlert");
+    const toggles = Array.from(document.querySelectorAll("[data-owner-addon]"));
+
+    function showMessage(message) {
+      if (!alertBox) return;
+      alertBox.textContent = message;
+      alertBox.style.display = "block";
+    }
+
+    function setUnlocked(unlocked) {
+      toggles.forEach((toggle) => {
+        toggle.disabled = !unlocked;
+      });
+      if (saveButton) saveButton.disabled = !unlocked;
+    }
+
+    function applyAddons(addons) {
+      const active = new Set(Array.isArray(addons) ? addons : []);
+      toggles.forEach((toggle) => {
+        toggle.checked = active.has(toggle.value);
+      });
+    }
+
+    function selectedAddons() {
+      return toggles.filter((toggle) => toggle.checked).map((toggle) => toggle.value);
+    }
+
+    async function requestJson(url, options) {
+      const response = await fetch(url, {
+        credentials: "same-origin",
+        ...options,
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": csrfToken,
+          ...(options && options.headers ? options.headers : {}),
+        },
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload.ok === false) {
+        throw new Error(payload.message || "Request add-on gagal.");
+      }
+      return payload;
+    }
+
+    requestJson("/api/owner/addons", { method: "GET", headers: {} })
+      .then((payload) => {
+        const data = payload.data || {};
+        applyAddons(data.addons || []);
+        setUnlocked(Boolean(data.unlocked));
+        if (data.unlocked) showMessage("Akses owner add-on aktif.");
+      })
+      .catch((error) => showMessage(error.message));
+
+    unlockForm?.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      try {
+        const payload = await requestJson("/api/owner/addons/verify", {
+          method: "POST",
+          body: JSON.stringify({ password: passwordInput?.value || "" }),
+        });
+        applyAddons(payload.data?.addons || []);
+        setUnlocked(true);
+        if (passwordInput) passwordInput.value = "";
+        showMessage(payload.message || "Akses owner aktif.");
+      } catch (error) {
+        showMessage(error.message);
+      }
+    });
+
+    saveButton?.addEventListener("click", async () => {
+      try {
+        const payload = await requestJson("/api/owner/addons", {
+          method: "POST",
+          body: JSON.stringify({ addons: selectedAddons() }),
+        });
+        applyAddons(payload.data?.addons || []);
+        showMessage(payload.message || "Add-on tersimpan.");
+      } catch (error) {
+        showMessage(error.message);
+      }
+    });
   })();
 </script>
 {% endif %}
