@@ -152,6 +152,8 @@ const toggleModeGpsSelfie = document.getElementById("toggleModeGpsSelfie");
 const toggleModeGps = document.getElementById("toggleModeGps");
 const toggleModeQr = document.getElementById("toggleModeQr");
 const togglePagePatroli = document.getElementById("togglePagePatroli");
+const displaySettingsSave = document.getElementById("displaySettingsSave");
+const displaySettingsStatus = document.getElementById("displaySettingsStatus");
 
 const heroLogo = document.getElementById("heroLogo");
 const heroLabel = document.getElementById("heroLabel");
@@ -169,6 +171,7 @@ const attendanceModeStorage = {
   gps: "gmi_att_mode_gps",
   qr: "gmi_att_mode_qr",
 };
+const displaySettingsStorage = "gmi_display_settings";
 
 const defaultLabel = heroLabel ? heroLabel.textContent.trim() : "";
 
@@ -215,6 +218,76 @@ function syncHero(){
 [toggleLogo, toggleLabel, toggleClock, toggleNotice, toggleInvite, toggleHeroCircles, toggleFormCircles, toggleLockCircles].forEach(cb => {
   if(cb) cb.addEventListener("change", syncHero);
 });
+
+function setDisplaySettingsStatus(message, state){
+  if (!displaySettingsStatus) return;
+  displaySettingsStatus.textContent = message || "";
+  if (state){
+    displaySettingsStatus.dataset.state = state;
+  } else {
+    delete displaySettingsStatus.dataset.state;
+  }
+}
+
+function loadDisplaySettings(){
+  try {
+    const raw = localStorage.getItem(displaySettingsStorage);
+    if (!raw) return;
+    const settings = JSON.parse(raw);
+    if (!settings || typeof settings !== "object") return;
+    [
+      ["logo", toggleLogo],
+      ["label", toggleLabel],
+      ["clock", toggleClock],
+      ["notice", toggleNotice],
+      ["invite", toggleInvite],
+      ["heroCircles", toggleHeroCircles],
+      ["formCircles", toggleFormCircles],
+      ["lockCircles", toggleLockCircles],
+    ].forEach(([key, toggle]) => {
+      if (toggle && typeof settings[key] === "boolean"){
+        toggle.checked = settings[key];
+      }
+    });
+    if (labelInput && typeof settings.companyLabel === "string"){
+      labelInput.value = settings.companyLabel;
+      if (heroLabel){
+        heroLabel.textContent = settings.companyLabel.trim() || defaultLabel || "Label";
+      }
+    }
+  } catch (_err) {
+    localStorage.removeItem(displaySettingsStorage);
+  }
+}
+
+function saveDisplaySettings(){
+  const settings = {
+    logo: Boolean(toggleLogo?.checked),
+    label: Boolean(toggleLabel?.checked),
+    clock: Boolean(toggleClock?.checked),
+    notice: Boolean(toggleNotice?.checked),
+    invite: Boolean(toggleInvite?.checked),
+    heroCircles: Boolean(toggleHeroCircles?.checked),
+    formCircles: Boolean(toggleFormCircles?.checked),
+    lockCircles: Boolean(toggleLockCircles?.checked),
+    companyLabel: labelInput?.value || "",
+  };
+  localStorage.setItem(displaySettingsStorage, JSON.stringify(settings));
+  if (primaryKeySelect){
+    localStorage.setItem("gmi_primary_key", primaryKeySelect.value);
+    applyPrimaryKeyMode(primaryKeySelect.value);
+  }
+  handleAttendanceModeChange(null);
+  if (togglePagePatroli){
+    const enabled = togglePagePatroli.checked;
+    localStorage.setItem("gmi_page_patroli_enabled", enabled ? "1" : "0");
+    window.dispatchEvent(new CustomEvent("gmi_patroli_toggle_changed", { detail: { enabled } }));
+  }
+  syncHero();
+  setDisplaySettingsStatus("Pengaturan tampilan diterapkan.", "success");
+}
+
+loadDisplaySettings();
 
 function loadAttendanceModeToggle(toggle, key){
   if (!toggle) return true;
@@ -333,10 +406,13 @@ const ownerAddonPassword = document.getElementById("ownerAddonPassword");
 const ownerAddonUnlock = document.getElementById("ownerAddonUnlock");
 const ownerAddonSave = document.getElementById("ownerAddonSave");
 const ownerAddonStatus = document.getElementById("ownerAddonStatus");
+const ownerAddonTogglesStatus = document.getElementById("ownerAddonTogglesStatus");
 const ownerAddonToggles = Array.from(document.querySelectorAll("[data-owner-addon]"));
 const ownerAddonOpen = document.getElementById("ownerAddonOpen");
 const ownerAddonModal = document.getElementById("ownerAddonModal");
+const ownerAddonTogglesModal = document.getElementById("ownerAddonTogglesModal");
 const ownerAddonCloseButtons = Array.from(document.querySelectorAll("[data-owner-addon-close]"));
+const ownerAddonTogglesCloseButtons = Array.from(document.querySelectorAll("[data-owner-addon-toggles-close]"));
 
 if (heroGalleryData){
   try {
@@ -363,6 +439,16 @@ function setOwnerAddonStatus(message, state){
   }
 }
 
+function setOwnerAddonTogglesStatus(message, state){
+  if (!ownerAddonTogglesStatus) return;
+  ownerAddonTogglesStatus.textContent = message || "";
+  if (state){
+    ownerAddonTogglesStatus.dataset.state = state;
+  } else {
+    delete ownerAddonTogglesStatus.dataset.state;
+  }
+}
+
 function ownerAddonErrorMessage(response, payload, fallback){
   const message = payload?.message || fallback;
   if ((response.status === 401 || response.status === 403) && message === "Unauthorized."){
@@ -375,9 +461,23 @@ function setOwnerAddonModalOpen(open){
   if (!ownerAddonModal) return;
   ownerAddonModal.classList.toggle("show", open);
   ownerAddonModal.setAttribute("aria-hidden", open ? "false" : "true");
+  if (!open && ownerAddonTogglesModal){
+    ownerAddonTogglesModal.classList.remove("show");
+    ownerAddonTogglesModal.setAttribute("aria-hidden", "true");
+  }
   if (open){
-    loadOwnerAddons();
+    setOwnerAddonStatus("", null);
+    setOwnerAddonTogglesStatus("", null);
     window.setTimeout(() => ownerAddonPassword?.focus(), 50);
+  }
+}
+
+function setOwnerAddonTogglesModalOpen(open){
+  if (!ownerAddonTogglesModal) return;
+  ownerAddonTogglesModal.classList.toggle("show", open);
+  ownerAddonTogglesModal.setAttribute("aria-hidden", open ? "false" : "true");
+  if (open){
+    setDisplaySettingsStatus("", null);
   }
 }
 
@@ -406,17 +506,20 @@ function selectedOwnerAddons(){
 
 async function loadOwnerAddons(){
   if (!ownerAddonToggles.length) return;
+  setOwnerAddonTogglesStatus("Memuat add-on...", "loading");
   try {
     const response = await fetchApi("/api/owner/addons");
     const payload = await response.json().catch(() => ({}));
     if (response.ok && payload.ok){
       setOwnerAddonValues(payload.data?.addons || []);
       setOwnerAddonUnlocked(Boolean(payload.data?.unlocked));
+      setOwnerAddonTogglesStatus("", null);
     } else if (response.status === 401 || response.status === 403){
       setOwnerAddonUnlocked(false);
+      setOwnerAddonTogglesStatus("Akses owner belum aktif.", "error");
     }
   } catch (_err) {
-    setOwnerAddonStatus("Add-on belum dapat dimuat.", "error");
+    setOwnerAddonTogglesStatus("Add-on belum dapat dimuat.", "error");
   }
 }
 
@@ -442,6 +545,9 @@ async function unlockOwnerAddons(){
     setOwnerAddonUnlocked(true);
     ownerAddonPassword.value = "";
     setOwnerAddonStatus(payload.message || "Akses owner aktif.", "success");
+    setOwnerAddonModalOpen(false);
+    setOwnerAddonTogglesModalOpen(true);
+    await loadOwnerAddons();
   } catch (err){
     const message = err instanceof Error ? err.message : "Akses owner gagal.";
     setOwnerAddonUnlocked(false);
@@ -450,7 +556,7 @@ async function unlockOwnerAddons(){
 }
 
 async function saveOwnerAddons(){
-  setOwnerAddonStatus("Menyimpan add-on...", "loading");
+  setOwnerAddonTogglesStatus("Menyimpan add-on...", "loading");
   try {
     const response = await fetchApi("/api/owner/addons", {
       method: "POST",
@@ -462,10 +568,10 @@ async function saveOwnerAddons(){
       throw new Error(ownerAddonErrorMessage(response, payload, "Add-on gagal disimpan."));
     }
     setOwnerAddonValues(payload.data?.addons || []);
-    setOwnerAddonStatus(payload.message || "Add-on tersimpan.", "success");
+    setOwnerAddonTogglesStatus(payload.message || "Add-on tersimpan.", "success");
   } catch (err){
     const message = err instanceof Error ? err.message : "Add-on gagal disimpan.";
-    setOwnerAddonStatus(message, "error");
+    setOwnerAddonTogglesStatus(message, "error");
   }
 }
 
@@ -489,6 +595,9 @@ if (ownerAddonOpen){
 ownerAddonCloseButtons.forEach(button => {
   button.addEventListener("click", () => setOwnerAddonModalOpen(false));
 });
+ownerAddonTogglesCloseButtons.forEach(button => {
+  button.addEventListener("click", () => setOwnerAddonTogglesModalOpen(false));
+});
 if (ownerAddonModal){
   ownerAddonModal.addEventListener("click", event => {
     if (event.target === ownerAddonModal){
@@ -496,11 +605,25 @@ if (ownerAddonModal){
     }
   });
 }
+if (ownerAddonTogglesModal){
+  ownerAddonTogglesModal.addEventListener("click", event => {
+    if (event.target === ownerAddonTogglesModal){
+      setOwnerAddonTogglesModalOpen(false);
+    }
+  });
+}
 document.addEventListener("keydown", event => {
   if (event.key === "Escape" && ownerAddonModal?.classList.contains("show")){
     setOwnerAddonModalOpen(false);
   }
+  if (event.key === "Escape" && ownerAddonTogglesModal?.classList.contains("show")){
+    setOwnerAddonTogglesModalOpen(false);
+  }
 });
+
+if (displaySettingsSave){
+  displaySettingsSave.addEventListener("click", saveDisplaySettings);
+}
 
 function renderHeroGalleryImage(){
   if (!heroGalleryMainImage) return;

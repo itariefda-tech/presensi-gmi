@@ -39,6 +39,7 @@ class AuthResult:
 APP_BOOT_ID = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
 PERF_LOG = (os.environ.get("PERF_LOG") or "").lower() in {"1", "true", "yes"}
 PERF_LOGGER = logging.getLogger("perf")
+API_ACCESS_TOKEN = (os.environ.get("API_ACCESS_TOKEN") or os.environ.get("HRIS_API_TOKEN") or "").strip()
 try:
     ADMIN_LIST_LIMIT = int(os.environ.get("ADMIN_LIST_LIMIT") or 0)
 except ValueError:
@@ -83,7 +84,7 @@ def create_app() -> Flask:
         if origin.startswith(("http://localhost:", "http://127.0.0.1:")):
             response.headers.setdefault("Access-Control-Allow-Origin", origin)
             response.headers.setdefault("Access-Control-Allow-Credentials", "true")
-            response.headers.setdefault("Access-Control-Allow-Headers", "Content-Type, X-CSRF-Token, X-CSRFToken")
+            response.headers.setdefault("Access-Control-Allow-Headers", "Content-Type, X-CSRF-Token, X-CSRFToken, X-API-Key, Authorization")
             response.headers.setdefault("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
         return response
 
@@ -2547,12 +2548,14 @@ def create_app() -> Flask:
 
     @app.route("/api/v1/attendance", methods=["GET"])
     def api_v1_attendance():
-        user = _current_user()
+        user = _api_v1_user()
         if not user or user.role not in (ADMIN_ROLES | CLIENT_ROLES):
             return _json_forbidden()
 
         client_id = None
+        branch_id = None
         client_id_raw = (request.args.get("client_id") or "").strip()
+        branch_id_raw = (request.args.get("branch_id") or request.args.get("site_id") or "").strip()
         if user.role in CLIENT_ROLES and user.client_id:
             client_id = user.client_id
         elif user.client_id:
@@ -2564,6 +2567,16 @@ def create_app() -> Flask:
                 return jsonify(ok=False, message="client_id tidak valid."), 400
         if not client_id:
             return jsonify(ok=False, message="client_id wajib untuk API access."), 400
+        if user.role in CLIENT_ROLES and user.site_id:
+            branch_id = user.site_id
+        elif branch_id_raw:
+            try:
+                branch_id = int(branch_id_raw)
+            except ValueError:
+                return jsonify(ok=False, message="branch_id tidak valid."), 400
+            site = _get_site_by_id(branch_id)
+            if not site or int(_row_get(site, "client_id") or 0) != int(client_id):
+                return jsonify(ok=False, message="branch_id tidak terdaftar pada client ini."), 400
 
         addon_block = _require_client_addon(user, ADDON_API_ACCESS, "API access", client_id)
         if addon_block:
@@ -2583,6 +2596,7 @@ def create_app() -> Flask:
             (_row_get(row, "employee_email") or "").strip().lower()
             for row in _list_active_assignments(_today_key())
             if int(_row_get(row, "client_id") or 0) == int(client_id)
+            and (not branch_id or int(_row_get(row, "site_id") or 0) == int(branch_id))
         }
         scoped_emails = {email for email in scoped_emails if email}
         rows = _attendance_live(
@@ -2595,6 +2609,7 @@ def create_app() -> Flask:
             ok=True,
             data={
                 "client_id": client_id,
+                "branch_id": branch_id,
                 "date_from": date_from,
                 "date_to": date_to,
                 "records": rows,
@@ -3394,6 +3409,7 @@ def _persist_user(user: User) -> None:
         "must_change_password": user.must_change_password,
         "client_id": user.client_id,
         "site_id": user.site_id,
+        "branch_id": user.site_id,
     }
 
 
@@ -3414,6 +3430,8 @@ def _current_user() -> User | None:
         theme = row["theme_preference"] if "theme_preference" in row.keys() and row["theme_preference"] else data.get("theme", "silver_line")
         client_id = row["client_id"] if "client_id" in row.keys() else data.get("client_id")
         site_id = row["site_id"] if "site_id" in row.keys() else data.get("site_id")
+        if (site_id is None or site_id == "") and "branch_id" in row.keys():
+            site_id = row["branch_id"]
     else:
         role = _normalize_role(data.get("role", "employee"))
         email = data.get("email", "")
@@ -3421,7 +3439,7 @@ def _current_user() -> User | None:
         tier = data.get("tier", "basic")
         theme = data.get("theme", "silver_line")
         client_id = data.get("client_id")
-        site_id = data.get("site_id")
+        site_id = data.get("site_id") or data.get("branch_id")
     return User(
         id=int(data.get("id") or 0),
         email=email,
@@ -3433,6 +3451,31 @@ def _current_user() -> User | None:
         must_change_password=int(data.get("must_change_password") or 0),
         client_id=int(client_id) if str(client_id).isdigit() and int(client_id) > 0 else None,
         site_id=int(site_id) if str(site_id).isdigit() and int(site_id) > 0 else None,
+    )
+
+
+def _api_v1_user() -> User | None:
+    user = _current_user()
+    if user:
+        return user
+    if not API_ACCESS_TOKEN:
+        return None
+    raw_token = (request.headers.get("X-API-Key") or "").strip()
+    auth_header = (request.headers.get("Authorization") or "").strip()
+    if not raw_token and auth_header.lower().startswith("bearer "):
+        raw_token = auth_header[7:].strip()
+    if not raw_token or not hmac.compare_digest(raw_token, API_ACCESS_TOKEN):
+        return None
+    client_id_raw = (request.args.get("client_id") or "").strip()
+    branch_id_raw = (request.args.get("branch_id") or request.args.get("site_id") or "").strip()
+    return User(
+        id=0,
+        email="api@system.local",
+        role="hr_superadmin",
+        name="API Access",
+        tier="enterprise",
+        client_id=int(client_id_raw) if client_id_raw.isdigit() and int(client_id_raw) > 0 else None,
+        site_id=int(branch_id_raw) if branch_id_raw.isdigit() and int(branch_id_raw) > 0 else None,
     )
 
 
@@ -4423,26 +4466,55 @@ def _log_audit_event(
         return
     conn = _db_connect()
     try:
-        if not _table_exists(conn, "audit_logs"):
+        details_payload = details or {}
+        client_id = details_payload.get("client_id") if isinstance(details_payload, dict) else None
+        branch_id = (details_payload.get("branch_id") or details_payload.get("site_id")) if isinstance(details_payload, dict) else None
+        created_at = _now_ts()
+        if not _table_exists(conn, "audit_logs") and not _table_exists(conn, "logs"):
             return
-        conn.execute(
-            """
-            INSERT INTO audit_logs (
-                entity_type, entity_id, action,
-                actor_email, actor_role, summary, details_json, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                entity_type,
-                entity_id,
-                action,
-                actor.email,
-                actor.role,
-                summary,
-                json.dumps(details or {}, ensure_ascii=True),
-                _now_ts(),
-            ),
-        )
+        if _table_exists(conn, "audit_logs"):
+            conn.execute(
+                """
+                INSERT INTO audit_logs (
+                    entity_type, entity_id, action,
+                    actor_email, actor_user_id, client_id, branch_id,
+                    actor_role, summary, details_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    entity_type,
+                    entity_id,
+                    action,
+                    actor.email,
+                    actor.id,
+                    client_id,
+                    branch_id,
+                    actor.role,
+                    summary,
+                    json.dumps(details_payload, ensure_ascii=True),
+                    created_at,
+                ),
+            )
+        if _table_exists(conn, "logs"):
+            conn.execute(
+                """
+                INSERT INTO logs (
+                    user_id, user_email, action, timestamp,
+                    client_id, branch_id, entity_type, entity_id, details_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    actor.id,
+                    actor.email,
+                    action,
+                    created_at,
+                    client_id,
+                    branch_id,
+                    entity_type,
+                    entity_id,
+                    json.dumps({"summary": summary, **details_payload}, ensure_ascii=True),
+                ),
+            )
     finally:
         conn.commit()
         conn.close()
@@ -4598,6 +4670,9 @@ def _db_connect() -> sqlite3.Connection:
 
 def _user_row_to_user(row: sqlite3.Row, theme: str) -> User:
     row_theme = row["theme_preference"] if "theme_preference" in row.keys() and row["theme_preference"] else theme
+    site_id = row["site_id"] if "site_id" in row.keys() else None
+    if (site_id is None or site_id == "") and "branch_id" in row.keys():
+        site_id = row["branch_id"]
     return User(
         id=int(row["id"]),
         email=row["email"],
@@ -4608,7 +4683,7 @@ def _user_row_to_user(row: sqlite3.Row, theme: str) -> User:
         selfie_path=row["selfie_path"] if "selfie_path" in row.keys() else None,
         must_change_password=int(row["must_change_password"] or 0),
         client_id=int(row["client_id"]) if "client_id" in row.keys() and row["client_id"] is not None else None,
-        site_id=int(row["site_id"]) if "site_id" in row.keys() and row["site_id"] is not None else None,
+        site_id=int(site_id) if site_id is not None and str(site_id).isdigit() else None,
     )
 
 
@@ -6521,15 +6596,19 @@ def _create_assignment_with_conn(
             """,
             (start_date, _now_ts(), employee_user_id),
         )
+    site_row = conn.execute("SELECT client_id FROM sites WHERE id = ?", (site_id,)).fetchone()
+    client_id = site_row["client_id"] if site_row else None
     cur = conn.execute(
         """
         INSERT INTO assignments (
-            employee_user_id, site_id, shift_id, job_title, start_date, end_date,
+            employee_user_id, client_id, site_id, branch_id, shift_id, job_title, start_date, end_date,
             status, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             employee_user_id,
+            client_id,
+            site_id,
             site_id,
             shift_id,
             job_title,
@@ -7167,6 +7246,95 @@ def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {definition}")
 
 
+def _backfill_enterprise_scope_columns(conn: sqlite3.Connection) -> None:
+    if _table_exists(conn, "users"):
+        conn.execute("UPDATE users SET branch_id = site_id WHERE branch_id IS NULL AND site_id IS NOT NULL")
+        conn.execute("UPDATE users SET site_id = branch_id WHERE site_id IS NULL AND branch_id IS NOT NULL")
+    if _table_exists(conn, "employees"):
+        conn.execute("UPDATE employees SET branch_id = site_id WHERE branch_id IS NULL AND site_id IS NOT NULL")
+        if _table_exists(conn, "sites"):
+            conn.execute(
+                """
+                UPDATE employees
+                SET client_id = (
+                    SELECT s.client_id FROM sites s WHERE s.id = employees.site_id
+                )
+                WHERE client_id IS NULL
+                  AND site_id IS NOT NULL
+                  AND EXISTS (SELECT 1 FROM sites s WHERE s.id = employees.site_id)
+                """
+            )
+    if _table_exists(conn, "assignments") and _table_exists(conn, "sites"):
+        conn.execute("UPDATE assignments SET branch_id = site_id WHERE branch_id IS NULL AND site_id IS NOT NULL")
+        conn.execute(
+            """
+            UPDATE assignments
+            SET client_id = (
+                SELECT s.client_id FROM sites s WHERE s.id = assignments.site_id
+            )
+            WHERE client_id IS NULL
+              AND site_id IS NOT NULL
+              AND EXISTS (SELECT 1 FROM sites s WHERE s.id = assignments.site_id)
+            """
+        )
+    if _table_exists(conn, "leave_requests") and _table_exists(conn, "users"):
+        conn.execute(
+            """
+            UPDATE leave_requests
+            SET client_id = (
+                    SELECT u.client_id FROM users u WHERE lower(u.email) = lower(leave_requests.employee_email)
+                ),
+                branch_id = (
+                    SELECT COALESCE(u.branch_id, u.site_id) FROM users u WHERE lower(u.email) = lower(leave_requests.employee_email)
+                )
+            WHERE (client_id IS NULL OR branch_id IS NULL)
+              AND EXISTS (SELECT 1 FROM users u WHERE lower(u.email) = lower(leave_requests.employee_email))
+            """
+        )
+    if _table_exists(conn, "manual_attendance_requests") and _table_exists(conn, "users"):
+        conn.execute(
+            """
+            UPDATE manual_attendance_requests
+            SET client_id = (
+                    SELECT u.client_id FROM users u WHERE lower(u.email) = lower(manual_attendance_requests.employee_email)
+                ),
+                branch_id = (
+                    SELECT COALESCE(u.branch_id, u.site_id) FROM users u WHERE lower(u.email) = lower(manual_attendance_requests.employee_email)
+                )
+            WHERE (client_id IS NULL OR branch_id IS NULL)
+              AND EXISTS (SELECT 1 FROM users u WHERE lower(u.email) = lower(manual_attendance_requests.employee_email))
+            """
+        )
+    if _table_exists(conn, "payroll") and _table_exists(conn, "employees"):
+        conn.execute(
+            """
+            UPDATE payroll
+            SET client_id = (
+                    SELECT e.client_id FROM employees e WHERE e.id = payroll.employee_id
+                ),
+                branch_id = (
+                    SELECT COALESCE(e.branch_id, e.site_id) FROM employees e WHERE e.id = payroll.employee_id
+                )
+            WHERE (client_id IS NULL OR branch_id IS NULL)
+              AND EXISTS (SELECT 1 FROM employees e WHERE e.id = payroll.employee_id)
+            """
+        )
+    if _table_exists(conn, "attendance") and _table_exists(conn, "users"):
+        conn.execute(
+            """
+            UPDATE attendance
+            SET client_id = (
+                    SELECT u.client_id FROM users u WHERE lower(u.email) = lower(attendance.employee_email)
+                ),
+                branch_id = (
+                    SELECT COALESCE(u.branch_id, u.site_id) FROM users u WHERE lower(u.email) = lower(attendance.employee_email)
+                )
+            WHERE (client_id IS NULL OR branch_id IS NULL)
+              AND EXISTS (SELECT 1 FROM users u WHERE lower(u.email) = lower(attendance.employee_email))
+            """
+        )
+
+
 def _cleanup_orphans(conn: sqlite3.Connection) -> None:
     if _table_exists(conn, "supervisor_sites"):
         conn.execute(
@@ -7469,6 +7637,7 @@ def _init_db() -> None:
                 selfie_path TEXT,
                 client_id INTEGER,
                 site_id INTEGER,
+                branch_id INTEGER,
                 tier TEXT DEFAULT 'basic',
                 theme_preference TEXT DEFAULT 'silver_line'
             )
@@ -7556,7 +7725,9 @@ def _init_db() -> None:
                 notes TEXT,
                 is_active INTEGER DEFAULT 1,
                 created_at TEXT,
-                site_id INTEGER
+                site_id INTEGER,
+                client_id INTEGER,
+                branch_id INTEGER
             )
             """
         )
@@ -7641,7 +7812,9 @@ def _init_db() -> None:
             CREATE TABLE IF NOT EXISTS assignments (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 employee_user_id INTEGER NOT NULL,
+                client_id INTEGER,
                 site_id INTEGER NOT NULL,
+                branch_id INTEGER,
                 shift_id INTEGER,
                 job_title TEXT,
                 start_date TEXT NOT NULL,
@@ -7715,6 +7888,8 @@ def _init_db() -> None:
             CREATE TABLE IF NOT EXISTS leave_requests (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 employee_email TEXT NOT NULL,
+                client_id INTEGER,
+                branch_id INTEGER,
                 leave_type TEXT NOT NULL,
                 date_from TEXT NOT NULL,
                 date_to TEXT NOT NULL,
@@ -7754,6 +7929,9 @@ def _init_db() -> None:
                 entity_id INTEGER,
                 action TEXT NOT NULL,
                 actor_email TEXT NOT NULL,
+                actor_user_id INTEGER,
+                client_id INTEGER,
+                branch_id INTEGER,
                 actor_role TEXT NOT NULL,
                 summary TEXT NOT NULL,
                 details_json TEXT,
@@ -7767,12 +7945,36 @@ def _init_db() -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_audit_logs_entity ON audit_logs(entity_type, entity_id)"
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                user_email TEXT,
+                action TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                client_id INTEGER,
+                branch_id INTEGER,
+                entity_type TEXT,
+                entity_id INTEGER,
+                details_json TEXT
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON logs(timestamp)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_logs_client_branch ON logs(client_id, branch_id)"
+        )
 
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS manual_attendance_requests (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 employee_id INTEGER,
+                client_id INTEGER,
+                branch_id INTEGER,
                 employee_name TEXT,
                 employee_email TEXT,
                 date TEXT NOT NULL,
@@ -7962,6 +8164,8 @@ def _init_db() -> None:
             CREATE TABLE IF NOT EXISTS payroll (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 employee_id INTEGER NOT NULL,
+                client_id INTEGER,
+                branch_id INTEGER,
                 employee_email TEXT NOT NULL,
                 period TEXT NOT NULL,
                 salary_base REAL NOT NULL DEFAULT 0,
@@ -7991,6 +8195,8 @@ def _init_db() -> None:
             "CREATE INDEX IF NOT EXISTS idx_payroll_period ON payroll(period)"
         )
         if _table_exists(conn, "payroll"):
+            _ensure_column(conn, "payroll", "client_id", "client_id INTEGER")
+            _ensure_column(conn, "payroll", "branch_id", "branch_id INTEGER")
             _ensure_column(conn, "payroll", "approved_by_email", "approved_by_email TEXT")
             _ensure_column(conn, "payroll", "approved_at", "approved_at TEXT")
 
@@ -8000,6 +8206,8 @@ def _init_db() -> None:
                 CREATE TABLE IF NOT EXISTS attendance (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     employee_id INTEGER,
+                    client_id INTEGER,
+                    branch_id INTEGER,
                     employee_name TEXT,
                     employee_email TEXT,
                     date TEXT NOT NULL,
@@ -8037,6 +8245,34 @@ def _init_db() -> None:
             _ensure_column(conn, "sites", "shift_mode", "shift_mode TEXT")
             _ensure_column(conn, "sites", "shift_data", "shift_data TEXT")
             _ensure_column(conn, "sites", "updated_at", "updated_at TEXT")
+        if _table_exists(conn, "users"):
+            _ensure_column(conn, "users", "client_id", "client_id INTEGER")
+            _ensure_column(conn, "users", "site_id", "site_id INTEGER")
+            _ensure_column(conn, "users", "branch_id", "branch_id INTEGER")
+        if _table_exists(conn, "employees"):
+            _ensure_column(conn, "employees", "site_id", "site_id INTEGER")
+            _ensure_column(conn, "employees", "client_id", "client_id INTEGER")
+            _ensure_column(conn, "employees", "branch_id", "branch_id INTEGER")
+        if _table_exists(conn, "assignments"):
+            _ensure_column(conn, "assignments", "client_id", "client_id INTEGER")
+            _ensure_column(conn, "assignments", "branch_id", "branch_id INTEGER")
+        if _table_exists(conn, "leave_requests"):
+            _ensure_column(conn, "leave_requests", "client_id", "client_id INTEGER")
+            _ensure_column(conn, "leave_requests", "branch_id", "branch_id INTEGER")
+        if _table_exists(conn, "manual_attendance_requests"):
+            _ensure_column(conn, "manual_attendance_requests", "client_id", "client_id INTEGER")
+            _ensure_column(conn, "manual_attendance_requests", "branch_id", "branch_id INTEGER")
+        if _table_exists(conn, "attendance"):
+            _ensure_column(conn, "attendance", "client_id", "client_id INTEGER")
+            _ensure_column(conn, "attendance", "branch_id", "branch_id INTEGER")
+        if _table_exists(conn, "audit_logs"):
+            _ensure_column(conn, "audit_logs", "actor_user_id", "actor_user_id INTEGER")
+            _ensure_column(conn, "audit_logs", "client_id", "client_id INTEGER")
+            _ensure_column(conn, "audit_logs", "branch_id", "branch_id INTEGER")
+        if _table_exists(conn, "logs"):
+            _ensure_column(conn, "logs", "client_id", "client_id INTEGER")
+            _ensure_column(conn, "logs", "branch_id", "branch_id INTEGER")
+        _backfill_enterprise_scope_columns(conn)
         if _table_exists(conn, "patrol_routes"):
             _ensure_column(conn, "patrol_routes", "client_id", "client_id INTEGER")
             _ensure_column(conn, "patrol_routes", "site_id", "site_id INTEGER")
@@ -8815,17 +9051,20 @@ def _create_leave_request(
     attachment: str | None,
     attachment_path: str | None,
 ) -> int:
+    client_id, branch_id = _enterprise_scope_for_employee_email(employee_email)
     conn = _db_connect()
     try:
         cur = conn.execute(
             """
             INSERT INTO leave_requests (
-                employee_email, leave_type, date_from, date_to, reason,
+                employee_email, client_id, branch_id, leave_type, date_from, date_to, reason,
                 attachment, attachment_path, status, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 employee_email,
+                client_id,
+                branch_id,
                 leave_type,
                 date_from,
                 date_to,
@@ -9276,6 +9515,7 @@ def _create_payroll_record(
         employee = _employee_by_email(employee_email)
         if not employee:
             raise ValueError(f"Employee {employee_email} not found")
+        client_id, branch_id = _enterprise_scope_for_employee_email(employee_email)
         
         # Calculate payroll
         payroll_data = _calculate_payroll(
@@ -9290,13 +9530,15 @@ def _create_payroll_record(
         cur = conn.execute(
             """
             INSERT OR REPLACE INTO payroll (
-                employee_id, employee_email, period, salary_base, attendance_days,
+                employee_id, client_id, branch_id, employee_email, period, salary_base, attendance_days,
                 late_days, absent_days, leave_days, potongan_telat, potongan_absen,
                 potongan_lain, tunjangan, total_gaji, status, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 employee.get('id'),
+                client_id,
+                branch_id,
                 employee_email,
                 period,
                 payroll_data['salary_base'],
@@ -9345,15 +9587,20 @@ def _list_payroll_by_period(period: str, site_id: int | None = None) -> list[dic
                 FROM payroll p
                 LEFT JOIN employees e ON p.employee_id = e.id
                 WHERE p.period = ?
-                  AND EXISTS (
+                  AND (
+                    p.branch_id = ?
+                    OR e.site_id = ?
+                    OR EXISTS (
                       SELECT 1 FROM assignments a
-                      WHERE a.employee_id = e.id
+                      JOIN users u ON u.id = a.employee_user_id
+                      WHERE lower(u.email) = lower(p.employee_email)
                         AND a.site_id = ?
                         AND (a.status IS NULL OR upper(a.status) = 'ACTIVE')
+                    )
                   )
                 ORDER BY e.name
                 """,
-                (period, site_id),
+                (period, site_id, site_id, site_id),
             )
         return [dict(row) for row in cur.fetchall()]
     finally:
@@ -9677,18 +9924,21 @@ def _create_manual_request(
     created_by: User,
 ) -> None:
     action = _normalize_attendance_action(action)
+    client_id, branch_id = _enterprise_scope_for_employee_email(employee.get("email"))
     conn = _db_connect()
     try:
         conn.execute(
             """
             INSERT INTO manual_attendance_requests (
-                employee_id, employee_name, employee_email,
+                employee_id, client_id, branch_id, employee_name, employee_email,
                 date, time, action, reason,
                 created_by_user_id, created_by_email, created_by_role, created_at, status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 employee.get("id"),
+                client_id,
+                branch_id,
                 employee.get("name"),
                 employee.get("email"),
                 date,
@@ -9827,10 +10077,16 @@ def _approve_manual_request_atomic(
             "UPDATE manual_attendance_requests SET status = ?, reviewed_by_user_id = ?, reviewed_at = ?, review_note = ? WHERE id = ?",
             ("APPROVED", reviewer.email, _now_ts(), note, request_id),
         )
+        client_id = row["client_id"] if "client_id" in row.keys() else None
+        branch_id = row["branch_id"] if "branch_id" in row.keys() else None
+        if client_id is None and branch_id is None:
+            client_id, branch_id = _enterprise_scope_for_employee_email(row["employee_email"])
         conn.execute(
-            "INSERT INTO attendance (employee_id, employee_name, employee_email, date, time, action, method, selfie_path, source, manual_request_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO attendance (employee_id, client_id, branch_id, employee_name, employee_email, date, time, action, method, selfie_path, source, manual_request_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 row["employee_id"],
+                client_id,
+                branch_id,
                 row["employee_name"],
                 row["employee_email"],
                 row["date"],
@@ -9924,17 +10180,20 @@ def _reject_manual_request(request_id: int, reviewer: User, note: str) -> None:
 
 def _insert_manual_attendance_record(request_row: dict) -> None:
     action = _normalize_attendance_action(request_row.get("action"))
+    client_id, branch_id = _enterprise_scope_for_employee_email(request_row.get("employee_email"))
     conn = _db_connect()
     try:
         conn.execute(
             """
             INSERT INTO attendance (
-                employee_id, employee_name, employee_email,
+                employee_id, client_id, branch_id, employee_name, employee_email,
                 date, time, action, method, selfie_path, source, manual_request_id, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 request_row.get("employee_id"),
+                client_id,
+                branch_id,
                 request_row.get("employee_name"),
                 request_row.get("employee_email"),
                 request_row.get("date"),
@@ -9950,6 +10209,51 @@ def _insert_manual_attendance_record(request_row: dict) -> None:
     finally:
         conn.commit()
         conn.close()
+
+
+def _enterprise_scope_for_employee_email(email: str | None) -> tuple[int | None, int | None]:
+    normalized = (email or "").strip().lower()
+    if not normalized:
+        return None, None
+    conn = _db_connect()
+    try:
+        if _table_exists(conn, "users"):
+            row = conn.execute(
+                """
+                SELECT client_id, COALESCE(branch_id, site_id) AS branch_id
+                FROM users
+                WHERE lower(email) = ?
+                LIMIT 1
+                """,
+                (normalized,),
+            ).fetchone()
+            if row and (row["client_id"] is not None or row["branch_id"] is not None):
+                return (
+                    int(row["client_id"]) if row["client_id"] is not None else None,
+                    int(row["branch_id"]) if row["branch_id"] is not None else None,
+                )
+        if _table_exists(conn, "assignments") and _table_exists(conn, "users") and _table_exists(conn, "sites"):
+            row = conn.execute(
+                """
+                SELECT s.client_id, a.site_id AS branch_id
+                FROM assignments a
+                JOIN users u ON u.id = a.employee_user_id
+                JOIN sites s ON s.id = a.site_id
+                WHERE lower(u.email) = ?
+                  AND a.status = 'ACTIVE'
+                ORDER BY a.start_date DESC, a.created_at DESC, a.id DESC
+                LIMIT 1
+                """,
+                (normalized,),
+            ).fetchone()
+            if row:
+                return (
+                    int(row["client_id"]) if row["client_id"] is not None else None,
+                    int(row["branch_id"]) if row["branch_id"] is not None else None,
+                )
+    finally:
+        conn.close()
+    return None, None
 
 
 def _create_attendance_record(
@@ -9972,6 +10276,7 @@ def _create_attendance_record(
     date_value = _today_key()
     employee_id = employee.get("id") if employee else None
     employee_name = employee.get("name") if employee else None
+    client_id, branch_id = _enterprise_scope_for_employee_email(employee_email)
     created_at = _now_ts()
     print(f"[API] INSERT attendance: email={employee_email}, date={date_value}, time={time_value}, action={action}, method={method}, device_time={device_time}, source={source}, selfie_path={selfie_path}, created_at={created_at}")
     conn = _db_connect()
@@ -9979,12 +10284,14 @@ def _create_attendance_record(
         cur = conn.execute(
             """
             INSERT INTO attendance (
-                employee_id, employee_name, employee_email,
+                employee_id, client_id, branch_id, employee_name, employee_email,
                 date, time, action, method, selfie_path, source, device_time, accuracy, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 employee_id,
+                client_id,
+                branch_id,
                 employee_name,
                 employee_email,
                 date_value,
@@ -13504,7 +13811,7 @@ def _attendance_live(
     try:
         if _table_exists(conn, "attendance"):
             base_query = """
-                SELECT employee_name, employee_email, date, time, action, method, source, created_at
+                SELECT employee_name, employee_email, client_id, branch_id, date, time, action, method, source, created_at
                 FROM attendance
             """
             clauses = []
@@ -13545,6 +13852,8 @@ def _attendance_live(
                     {
                         "employee": name,
                         "email": row["employee_email"] or "-",
+                        "client_id": row["client_id"] if "client_id" in row.keys() else None,
+                        "branch_id": row["branch_id"] if "branch_id" in row.keys() else None,
                         "date": date,
                         "time": time_value,
                         "action": row["action"] or "-",
@@ -13575,6 +13884,8 @@ def _aggregate_attendance_records(rows: list[dict]) -> list[dict]:
             entry = {
                 "employee": row.get("employee") or "-",
                 "email": row.get("email") or "-",
+                "client_id": row.get("client_id"),
+                "branch_id": row.get("branch_id"),
                 "date": row.get("date") or "-",
                 "check_in": "-",
                 "check_out": "-",

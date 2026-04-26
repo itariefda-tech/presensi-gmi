@@ -425,7 +425,7 @@ html[data-theme="light"] .hero-controls{
   display: grid;
 }
 .owner-addon-card{
-  width: min(380px, 100%);
+  width: min(520px, 100%);
   max-height: min(760px, calc(100vh - 36px));
   overflow: auto;
   border: 1px solid rgba(255,255,255,.16);
@@ -459,12 +459,48 @@ html[data-theme="light"] .hero-controls{
 }
 .owner-addon-body{
   grid-template-columns: 1fr;
+  gap: 12px;
 }
 .owner-addon-body .hero-input,
 .owner-addon-body .btn,
 .owner-addon-body .check,
 .owner-addon-body .toast{
   grid-column: 1 / -1;
+}
+.owner-addon-section{
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+  padding: 12px;
+  border: 1px solid rgba(255,255,255,.14);
+  border-radius: 12px;
+  background: rgba(255,255,255,.04);
+}
+.owner-addon-section + .owner-addon-section{
+  border-top-color: rgba(56,189,248,.34);
+}
+.owner-addon-section .hero-controls-title,
+.owner-addon-section .hero-input,
+.owner-addon-section .hero-row,
+.owner-addon-section .btn,
+.owner-addon-section .toast{
+  grid-column: 1 / -1;
+}
+.owner-addon-section .check{
+  grid-column: auto;
+}
+.owner-addon-section .toast[data-state="success"]{
+  border-color: rgba(34,197,94,.35);
+  color: #22c55e;
+}
+.owner-addon-section .toast[data-state="error"]{
+  border-color: rgba(251,113,133,.40);
+  color: #fb7185;
+}
+.owner-addon-section .toast[data-state="loading"]{
+  border-color: rgba(56,189,248,.35);
+  color: var(--muted);
 }
 html[data-theme="light"] .owner-addon-modal{
   background: rgba(15,23,42,.36);
@@ -476,6 +512,10 @@ html[data-theme="light"] .owner-addon-card{
 html[data-theme="light"] .owner-addon-close{
   background: rgba(15,23,42,.04);
   border-color: rgba(15,23,42,.14);
+}
+html[data-theme="light"] .owner-addon-section{
+  background: rgba(255,255,255,.58);
+  border-color: rgba(15,23,42,.12);
 }
 
 .hero-tabs{

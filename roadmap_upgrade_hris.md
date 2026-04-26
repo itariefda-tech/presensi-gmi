@@ -249,21 +249,21 @@ konsisten secara visual di semua halaman
 Siap perusahaan 100-500 pegawai
 
 ### Multi Client & Branch
-- [ ] Tambahkan field:
+- [x] Tambahkan field:
   - `client_id`
   - `branch_id`
-- [ ] Filter semua data berdasarkan client
+- [x] Filter semua data berdasarkan client
 
 ### Audit Log
-- [ ] Buat tabel `logs`
-- [ ] Simpan:
+- [x] Buat tabel `logs`
+- [x] Simpan:
   - User
   - Action
   - Timestamp
 
 ### API Basic
-- [ ] Endpoint: `/api/v1/attendance`
-- [ ] Auth sederhana
+- [x] Endpoint: `/api/v1/attendance`
+- [x] Auth sederhana
 
 ---
 
