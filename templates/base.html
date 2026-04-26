@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="id" data-theme="{{ theme|default('dark') }}">
+<html lang="id" data-theme="{{ theme|default('silver_line') }}">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -10,10 +10,11 @@
 <body>
   {% block body %}{% endblock %}
   <script>
-    window.__GMI_INITIAL_THEME = "{{ theme|default('dark') }}";
+    window.__GMI_INITIAL_THEME = "{{ theme|default('silver_line') }}";
     window.__GMI_BOOT_ID = "{{ boot_id|default('') }}";
     window.__GMI_CSRF_TOKEN = "{{ csrf_token|default('') }}";
   </script>
+  <script src="{{ url_for('static', filename='js/i18n.js') }}?v={{ boot_id|default('') }}"></script>
   <script src="{{ url_for('static', filename='js/app.js') }}?v={{ boot_id|default('') }}"></script>
 </body>
 </html>

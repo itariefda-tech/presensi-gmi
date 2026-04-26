@@ -111,40 +111,136 @@ Produk modular & scalable
 Profesional & tidak membingungkan
 
 ### Setup Bahasa
-- [ ] Buat folder: `/static/i18n/`
-- [ ] Buat file:
+- [x] Buat folder: `/static/i18n/`
+- [x] Buat file:
   - `id.json`
   - `en.json`
 
 ### Implementasi
-- [ ] Tambahkan attribute: `data-i18n`
-- [ ] Buat JS loader language
-- [ ] Buat fungsi: `applyLang()`
+- [x] Tambahkan attribute: `data-i18n`
+- [x] Buat JS loader language
+- [x] Buat fungsi: `applyLang()`
 
 ### UI Switch
-- [ ] Tambahkan tombol: ID / EN
-- [ ] Simpan di localStorage
+- [x] Tambahkan tombol: ID / EN
+- [x] Simpan di localStorage
 
 ---
 
-## Phase 5: Multi Theme (5 Theme)
+## Phase 5: Multi Theme (dari 2 theme jadi 5 Theme)
+- untuk semua ui kecuali ui dashboard client admin, jadi sementara biarkan saja jangan diubah atau disentuh.
 
 ### Target
 UI premium + branding
+Membangun sistem multi-theme yang:
+  elegan & konsisten
+  siap untuk branding client (white-label)
+  scalable untuk SaaS / enterprise
+  bukan sekadar variasi warna, tapi karakter visual berbeda
 
-### Tambah Theme Baru
-- [ ] Ocean
-- [ ] Sunset
-- [ ] Forest
+🎨 THEME YANG DIGUNAKAN (FINAL)
+✅ Dengan:
 
-### Theme System
-- [ ] Gunakan `data-theme`
-- [ ] Simpan di localStorage
+ sage_calm → soft, natural, human-friendly
+ silver_line → clean, corporate, minimal
+ noir_warm → dark elegant, warm premium
 
-### Advanced
-- [ ] Tambahkan field `theme_preference` di user
-- [ ] Tambahkan theme per client
+🧩 THEME SYSTEM (WAJIB RAPUH → JADI SOLID)
+1. Gunakan Attribute Theme
+<html data-theme="sage_calm">
+2. Struktur CSS Berbasis Token
 
+Semua styling HARUS menggunakan variable:
+
+:root{
+  --bg;
+  --panel;
+  --text;
+  --muted;
+  --border;
+  --accent;
+}
+
+Setiap theme override token ini.
+
+3. Theme Switcher (Frontend)
+ Tambahkan pilihan theme di UI hanya berada di halaman setting dengan menambahkan tab baru "Tema" pilihan hanya 3 (dropdown / segmented button), jangan ganggu togle tema light /dark, jadi biarkan yang lama tetap ada itu pertahankan sebagai  tema default. ketika user merasa bosen dia harus masuk ke setting tuju tab tema.
+
+ Update data-theme secara realtime
+ Simpan ke:
+localStorage.setItem("theme", selectedTheme)
+ Load saat aplikasi start
+
+4. Default Behavior
+Default theme: silver_line (paling netral untuk demo/client)
+Fallback jika tidak ada: silver_line
+🔌 INTEGRATION BACKEND (LEVEL UP)
+5. User Preference
+
+Tambahkan field:
+
+theme_preference TEXT
+
+Behavior:
+
+Jika user login → gunakan theme user
+Jika tidak ada → fallback ke localStorage
+Jika kosong semua → gunakan default
+6. Client-Based Theme (WHITE LABEL READY)
+
+Tambahkan field:
+
+client_theme TEXT
+
+Behavior:
+
+Jika client punya theme → override user
+Jika tidak → gunakan user preference
+⚙️ PRIORITY RESOLUTION (PENTING)
+
+Urutan prioritas theme:
+
+client_theme
+user.theme_preference
+localStorage
+default (silver_line)
+🧪 VALIDATION CHECKLIST
+ Semua halaman konsisten (admin, employee, mobile)
+ Tidak ada hardcoded color
+ Semua pakai CSS variable
+ Theme switch realtime tanpa reload
+ Tidak ada konflik antar theme
+🧨 CONSTRAINTS (JANGAN DILANGGAR)
+
+JANGAN:
+
+menambahkan theme random tanpa konsep
+mencampur warna antar theme
+menggunakan hardcoded warna di component
+membuat styling berbeda-beda antar halaman
+🏁 EXPECTED RESULT
+
+Hasil akhir harus:
+
+terasa seperti produk SaaS premium
+bisa langsung dipakai untuk multiple client
+mudah ditambah theme baru di masa depan
+konsisten secara visual di semua halaman
+🚀 OPTIONAL (NEXT LEVEL)
+ Theme preview (live switch tanpa reload)
+ Animasi transisi antar theme (halus)
+ Theme config JSON (untuk dynamic branding)
+
+### Status Implementasi Phase 5
+- [x] Theme final dibatasi ke `sage_calm`, `silver_line`, dan `noir_warm` untuk pilihan Settings.
+- [x] Default/fallback theme diset ke `silver_line`.
+- [x] Token CSS theme ditambahkan untuk app, dashboard admin, dan mobile employee tanpa mengubah dashboard client admin.
+- [x] Toggle light/dark lama tetap dipertahankan.
+- [x] Tab Settings baru `Tema` dibuat dengan pilihan theme final.
+- [x] Preferensi user disimpan ke `users.theme_preference`.
+- [x] Field white-label client disiapkan di `clients.client_theme`.
+- [x] Resolusi prioritas theme: `client_theme` > `user.theme_preference` > `localStorage` > `silver_line`.
+- [x] Theme switch realtime tersambung via `data-theme` dan localStorage.
 ---
 
 ## Phase 6: Enterprise Core

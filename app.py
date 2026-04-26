@@ -189,6 +189,16 @@ def create_app() -> Flask:
             "pending_manual_count": pending_manual_count,
         }
 
+    @app.context_processor
+    def _inject_theme_preference():
+        user = _current_user()
+        return {
+            "theme": _resolve_theme_preference(user),
+            "theme_options": THEME_OPTIONS,
+            "theme_setting_options": THEME_SETTING_OPTIONS,
+            "theme_labels": THEME_LABELS,
+        }
+
     def _parse_display_datetime(value: str | None) -> datetime | None:
         if not value:
             return None
@@ -254,6 +264,30 @@ def create_app() -> Flask:
             )
         status = 200 if result.ok else 400
         return jsonify(result.__dict__), status
+
+    @app.route("/api/user/theme", methods=["POST"])
+    def user_theme_update():
+        user = _current_user()
+        if not user:
+            return _json_forbidden()
+        data = _get_json()
+        theme = _normalize_theme(data.get("theme"))
+        _update_user_theme_preference(user.id, theme)
+        user.theme = theme
+        _persist_user(user)
+        return jsonify(ok=True, data={"theme": theme}), 200
+
+    @app.route("/api/client/theme", methods=["POST"])
+    def client_theme_update():
+        user = _current_user()
+        _require_client_admin(user)
+        client_id = _client_user_client_id(user)
+        if not client_id:
+            return _json_forbidden()
+        data = _get_json()
+        theme = _normalize_theme(data.get("theme"))
+        _update_client_theme_preference(client_id, theme)
+        return jsonify(ok=True, data={"theme": theme}), 200
 
     @app.route("/api/auth/signup", methods=["POST"])
     def signup():
@@ -596,14 +630,14 @@ def create_app() -> Flask:
     def index():
         return render_template(
             "index.html",
-            theme="dark",
+            theme="silver_line",
             hero_gallery_images=_list_hero_gallery_images(),
         )
 
     @app.route("/reset-password", methods=["GET"])
     def reset_password_page():
         token = (request.args.get("token") or "").strip()
-        return render_template("reset_password.html", token=token, theme="dark")
+        return render_template("reset_password.html", token=token, theme="silver_line")
 
     @app.route("/dashboard/pegawai", methods=["GET"])
     def dashboard_employee():
@@ -622,6 +656,7 @@ def create_app() -> Flask:
             active_assignment=assignment,
             active_site=site,
             active_client=client,
+            theme=_normalize_theme(_row_get(client, "client_theme", user.theme) if client else user.theme),
         )
 
     @app.route("/dashboard/client", methods=["GET"])
@@ -686,6 +721,7 @@ def create_app() -> Flask:
             user=user,
             client=client,
             site=site,
+            theme=user.theme,
             today=today,
             employees=employees,
             attendance_records=attendance_records,
@@ -2297,8 +2333,13 @@ def create_app() -> Flask:
             # Default to current period
             now = datetime.now()
             period = f"{now.year:04d}-{now.month:02d}"
-        
-        payroll_list = _list_payroll_by_period(period)
+        site_id = request.args.get("site_id")
+        try:
+            site_id_val = int(site_id) if site_id is not None and site_id != "" else None
+        except ValueError:
+            site_id_val = None
+
+        payroll_list = _list_payroll_by_period(period, site_id=site_id_val)
         return jsonify(ok=True, data=payroll_list), 200
     
     @app.route("/api/payroll/my", methods=["GET"])
@@ -2315,6 +2356,20 @@ def create_app() -> Flask:
         
         payroll_record = _get_payroll_by_employee_period(user.email, period)
         return jsonify(ok=True, data=payroll_record or {}), 200
+
+    @app.route("/api/sites", methods=["GET"])
+    def api_sites():
+        """Return sites as JSON for selects/filters. Respects client admin scope."""
+        user = _current_user()
+        client_scope = _client_admin_client_id(user)
+        try:
+            if client_scope:
+                sites = _list_sites_by_client(client_scope)
+            else:
+                sites = _list_sites()
+            return jsonify(ok=True, data=sites), 200
+        except Exception:
+            return jsonify(ok=False, message="Gagal mengambil daftar site."), 500
 
     @app.route("/api/payroll/<int:payroll_id>", methods=["GET"])
     def payroll_detail(payroll_id: int):
@@ -3041,6 +3096,44 @@ def create_app() -> Flask:
         message = "Pengajuan ditolak." if action == "reject" else "Pengajuan disetujui."
         return jsonify(ok=True, message=message), 200
 
+    @app.route("/api/leave/reject", methods=["POST"])
+    def leave_reject():
+        user = _current_user()
+        if not user or not _can_approve_leave(user):
+            return _json_forbidden()
+        data = _get_json()
+        rid = data.get("id")
+        note = (data.get("note") or "").strip()
+        try:
+            request_id = int(rid)
+        except (TypeError, ValueError):
+            return jsonify(ok=False, message="ID tidak valid."), 400
+        record = _get_leave_request_by_id(request_id)
+        if not record:
+            return jsonify(ok=False, message="Pengajuan tidak ditemukan."), 404
+        if (record.get("status") or "").lower() != "pending":
+            return jsonify(ok=False, message="Pengajuan sudah diproses."), 400
+        if not _approver_can_handle(user, record.get("employee_email") or ""):
+            return _json_forbidden()
+        if not note:
+            return jsonify(ok=False, message="Alasan penolakan wajib diisi."), 400
+
+        _update_leave_request_status(
+            request_id=request_id,
+            status="rejected",
+            approver_email=user.email,
+            note=note,
+        )
+        _log_audit_event(
+            entity_type="leave_request",
+            entity_id=request_id,
+            action="REJECT",
+            actor=user,
+            summary="Pengajuan izin ditolak.",
+            details={"status": "rejected", "note": note},
+        )
+        return jsonify(ok=True, message="Pengajuan ditolak."), 200
+
     return app
 
 
@@ -3060,7 +3153,7 @@ def _validate_login(data: Dict[str, str]) -> AuthResult:
     login_type = (data.get("login_type") or "email").strip().lower()
     identifier = (data.get("identifier") or data.get("email") or data.get("phone") or "").strip()
     password = data.get("password", "")
-    theme = data.get("theme", "dark")
+    submitted_theme = _normalize_theme(data.get("theme", "silver_line"))
 
     if login_type == "phone":
         phone = _normalize_phone(identifier)
@@ -3090,6 +3183,12 @@ def _validate_login(data: Dict[str, str]) -> AuthResult:
         employee = _employee_by_email(email, only_active=False)
         if employee and int(employee.get("is_active") or 0) != 1:
             return AuthResult(False, "Akun pegawai belum aktif.")
+    theme = (
+        row["theme_preference"]
+        if "theme_preference" in row.keys() and row["theme_preference"]
+        else submitted_theme
+    )
+    theme = _normalize_theme(theme)
     user = _user_row_to_user(row, theme)
     _persist_user(user)
 
@@ -3143,6 +3242,15 @@ ADMIN_ROLE_OPTIONS = ["hr_superadmin", "manager_operational", "supervisor", "adm
 CLIENT_ROLE_OPTIONS = ["client_admin", "client_assistant", "client_supervisor", "client_operational"]
 ROLE_OPTIONS = ADMIN_ROLE_OPTIONS + CLIENT_ROLE_OPTIONS + ["employee"]
 USER_TIER_OPTIONS = ["basic", "pro", "enterprise"]
+THEME_OPTIONS = ["dark", "light", "sage_calm", "silver_line", "noir_warm"]
+THEME_SETTING_OPTIONS = ["sage_calm", "silver_line", "noir_warm"]
+THEME_LABELS = {
+    "dark": "Dark",
+    "light": "Light",
+    "sage_calm": "Sage Calm",
+    "silver_line": "Silver Line",
+    "noir_warm": "Noir Warm",
+}
 ROLE_PERMISSION_KEYS = [
     "view_overview",
     "manage_clients_view",
@@ -3266,7 +3374,7 @@ class User:
     email: str
     role: str
     name: str = ""
-    theme: str = "dark"
+    theme: str = "silver_line"
     tier: str = "basic"
     selfie_path: str | None = None
     must_change_password: int = 0
@@ -3303,6 +3411,7 @@ def _current_user() -> User | None:
         email = row["email"] if "email" in row.keys() else data.get("email", "")
         name = row["name"] if "name" in row.keys() else data.get("name", "")
         tier = row["tier"] if "tier" in row.keys() else data.get("tier", "basic")
+        theme = row["theme_preference"] if "theme_preference" in row.keys() and row["theme_preference"] else data.get("theme", "silver_line")
         client_id = row["client_id"] if "client_id" in row.keys() else data.get("client_id")
         site_id = row["site_id"] if "site_id" in row.keys() else data.get("site_id")
     else:
@@ -3310,6 +3419,7 @@ def _current_user() -> User | None:
         email = data.get("email", "")
         name = data.get("name", "")
         tier = data.get("tier", "basic")
+        theme = data.get("theme", "silver_line")
         client_id = data.get("client_id")
         site_id = data.get("site_id")
     return User(
@@ -3317,7 +3427,7 @@ def _current_user() -> User | None:
         email=email,
         role=role,
         name=name,
-        theme=data.get("theme", "dark"),
+        theme=_normalize_theme(theme),
         tier=_normalize_user_tier(str(tier or "basic")),
         selfie_path=data.get("selfie_path"),
         must_change_password=int(data.get("must_change_password") or 0),
@@ -3449,6 +3559,21 @@ def _pro_required_response(feature_label: str):
 def _normalize_user_tier(value: str | None) -> str:
     tier = (value or "basic").strip().lower()
     return tier if tier in USER_TIER_OPTIONS else "basic"
+
+
+def _normalize_theme(value: str | None) -> str:
+    theme = (value or "silver_line").strip().lower()
+    return theme if theme in THEME_OPTIONS else "silver_line"
+
+
+def _resolve_theme_preference(user: User | None) -> str:
+    if not user:
+        return "silver_line"
+    if user.role != "client_admin" and user.client_id:
+        client = _get_client_by_id(user.client_id)
+        if client and "client_theme" in client.keys() and client["client_theme"]:
+            return _normalize_theme(client["client_theme"])
+    return _normalize_theme(user.theme)
 
 
 def _normalize_role(value: str | None) -> str:
@@ -4472,12 +4597,13 @@ def _db_connect() -> sqlite3.Connection:
 
 
 def _user_row_to_user(row: sqlite3.Row, theme: str) -> User:
+    row_theme = row["theme_preference"] if "theme_preference" in row.keys() and row["theme_preference"] else theme
     return User(
         id=int(row["id"]),
         email=row["email"],
         role=_normalize_role(row["role"]),
         name=row["name"] or "",
-        theme=theme,
+        theme=_normalize_theme(row_theme),
         tier=_normalize_user_tier(row["tier"] if "tier" in row.keys() and row["tier"] else "basic"),
         selfie_path=row["selfie_path"] if "selfie_path" in row.keys() else None,
         must_change_password=int(row["must_change_password"] or 0),
@@ -4948,6 +5074,24 @@ def _update_user_selfie_path(user_id: int, selfie_path: str | None) -> None:
         conn.close()
 
 
+def _update_user_theme_preference(user_id: int, theme: str) -> None:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "users"):
+            return
+        conn.execute(
+            """
+            UPDATE users
+            SET theme_preference = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (_normalize_theme(theme), _now_ts(), user_id),
+        )
+    finally:
+        conn.commit()
+        conn.close()
+
+
 def _update_user_selfie_path_with_conn(
     conn: sqlite3.Connection, user_id: int, selfie_path: str | None
 ) -> None:
@@ -5055,7 +5199,7 @@ def _list_clients() -> list[dict]:
             """
             SELECT
                 id, name, legal_name, address, office_email, office_phone,
-                pic_name, pic_title, pic_phone, addons, is_active, notes, created_at
+                pic_name, pic_title, pic_phone, addons, client_theme, is_active, notes, created_at
             FROM clients
             ORDER BY created_at DESC
             """
@@ -5643,17 +5787,19 @@ def _create_client(
     pic_phone: str,
     notes: str | None,
     addons: list[str] | str | None = None,
+    client_theme: str = "silver_line",
 ) -> None:
     addons_json = _addons_json(addons)
+    theme = _normalize_theme(client_theme)
     conn = _db_connect()
     try:
         conn.execute(
             """
             INSERT INTO clients (
                 name, legal_name, address, office_email, office_phone,
-                pic_name, pic_title, pic_phone, addons, is_active, notes, created_at
+                pic_name, pic_title, pic_phone, addons, client_theme, is_active, notes, created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 name,
@@ -5665,6 +5811,7 @@ def _create_client(
                 pic_title,
                 pic_phone,
                 addons_json,
+                theme,
                 1,
                 notes or None,
                 _now_ts(),
@@ -5688,11 +5835,13 @@ def _update_client(
     is_active: int,
     notes: str | None,
     addons: list[str] | str | None = None,
+    client_theme: str | None = None,
 ) -> None:
     addons_json = _addons_json(addons) if addons is not None else None
+    theme = _normalize_theme(client_theme) if client_theme is not None else None
     conn = _db_connect()
     try:
-        if addons_json is None:
+        if addons_json is None and theme is None:
             conn.execute(
                 """
                 UPDATE clients
@@ -5716,7 +5865,7 @@ def _update_client(
                     client_id,
                 ),
             )
-        else:
+        elif theme is None:
             conn.execute(
                 """
                 UPDATE clients
@@ -5741,6 +5890,75 @@ def _update_client(
                     client_id,
                 ),
             )
+        elif addons_json is None:
+            conn.execute(
+                """
+                UPDATE clients
+                SET
+                    name = ?, legal_name = ?, address = ?, office_email = ?, office_phone = ?,
+                    pic_name = ?, pic_title = ?, pic_phone = ?,
+                    client_theme = ?, is_active = ?, notes = ?
+                WHERE id = ?
+                """,
+                (
+                    name,
+                    legal_name or None,
+                    address,
+                    office_email,
+                    office_phone,
+                    pic_name,
+                    pic_title,
+                    pic_phone,
+                    theme,
+                    is_active,
+                    notes or None,
+                    client_id,
+                ),
+            )
+        else:
+            conn.execute(
+                """
+                UPDATE clients
+                SET
+                    name = ?, legal_name = ?, address = ?, office_email = ?, office_phone = ?,
+                    pic_name = ?, pic_title = ?, pic_phone = ?,
+                    addons = ?, client_theme = ?, is_active = ?, notes = ?
+                WHERE id = ?
+                """,
+                (
+                    name,
+                    legal_name or None,
+                    address,
+                    office_email,
+                    office_phone,
+                    pic_name,
+                    pic_title,
+                    pic_phone,
+                    addons_json,
+                    theme,
+                    is_active,
+                    notes or None,
+                    client_id,
+                ),
+            )
+    finally:
+        conn.commit()
+        conn.close()
+
+
+def _update_client_theme_preference(client_id: int, theme: str) -> None:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "clients"):
+            return
+        conn.execute(
+            """
+            UPDATE clients
+            SET client_theme = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (_normalize_theme(theme), _now_ts(), client_id),
+        )
     finally:
         conn.commit()
         conn.close()
@@ -7251,7 +7469,8 @@ def _init_db() -> None:
                 selfie_path TEXT,
                 client_id INTEGER,
                 site_id INTEGER,
-                tier TEXT DEFAULT 'basic'
+                tier TEXT DEFAULT 'basic',
+                theme_preference TEXT DEFAULT 'silver_line'
             )
             """
         )
@@ -7268,8 +7487,12 @@ def _init_db() -> None:
                 conn.execute("UPDATE users SET tier = 'basic' WHERE tier IS NULL")
             except sqlite3.OperationalError:
                 pass  # Column already exists
+            _ensure_column(conn, "users", "theme_preference", "theme_preference TEXT DEFAULT 'silver_line'")
             conn.execute(
                 "UPDATE users SET tier = 'basic' WHERE tier IS NULL OR lower(tier) NOT IN ('basic', 'pro', 'enterprise')"
+            )
+            conn.execute(
+                "UPDATE users SET theme_preference = 'silver_line' WHERE theme_preference IS NULL OR lower(theme_preference) NOT IN ('dark', 'light', 'sage_calm', 'silver_line', 'noir_warm')"
             )
         conn.execute(
             """
@@ -7289,6 +7512,7 @@ def _init_db() -> None:
                 pic_title TEXT NOT NULL,
                 pic_phone TEXT NOT NULL,
                 addons TEXT DEFAULT '[]',
+                client_theme TEXT DEFAULT 'silver_line',
                 is_active INTEGER DEFAULT 1,
                 notes TEXT,
                 created_at TEXT,
@@ -7296,6 +7520,11 @@ def _init_db() -> None:
             )
             """
         )
+        if _table_exists(conn, "clients"):
+            _ensure_column(conn, "clients", "client_theme", "client_theme TEXT DEFAULT 'silver_line'")
+            conn.execute(
+                "UPDATE clients SET client_theme = 'silver_line' WHERE client_theme IS NULL OR lower(client_theme) NOT IN ('dark', 'light', 'sage_calm', 'silver_line', 'noir_warm')"
+            )
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS client_contacts (
@@ -7792,6 +8021,9 @@ def _init_db() -> None:
             _ensure_column(conn, "attendance", "source", "source TEXT")
             _ensure_column(conn, "attendance", "manual_request_id", "manual_request_id INTEGER")
             _ensure_column(conn, "attendance", "selfie_path", "selfie_path TEXT")
+            # Add device_time and accuracy for audit purposes (store raw client metadata)
+            _ensure_column(conn, "attendance", "device_time", "device_time TEXT")
+            _ensure_column(conn, "attendance", "accuracy", "accuracy TEXT")
             _ensure_column(conn, "sites", "client_name", "client_name TEXT")
             _ensure_column(conn, "sites", "client_id", "client_id INTEGER")
             _ensure_column(conn, "sites", "address", "address TEXT")
@@ -9088,22 +9320,41 @@ def _create_payroll_record(
         conn.close()
 
 
-def _list_payroll_by_period(period: str) -> list[dict]:
-    """List all payroll records for a period"""
+def _list_payroll_by_period(period: str, site_id: int | None = None) -> list[dict]:
+    """List all payroll records for a period. Optionally filter by site_id (employee assignment site)."""
     conn = _db_connect()
     try:
         if not _table_exists(conn, "payroll"):
             return []
-        cur = conn.execute(
-            """
-            SELECT p.*, e.name as employee_name
-            FROM payroll p
-            LEFT JOIN employees e ON p.employee_id = e.id
-            WHERE p.period = ?
-            ORDER BY e.name
-            """,
-            (period,)
-        )
+        if site_id is None:
+            cur = conn.execute(
+                """
+                SELECT p.*, e.name as employee_name
+                FROM payroll p
+                LEFT JOIN employees e ON p.employee_id = e.id
+                WHERE p.period = ?
+                ORDER BY e.name
+                """,
+                (period,)
+            )
+        else:
+            # Only include payrolls for employees who have an active assignment at the given site
+            cur = conn.execute(
+                """
+                SELECT p.*, e.name as employee_name
+                FROM payroll p
+                LEFT JOIN employees e ON p.employee_id = e.id
+                WHERE p.period = ?
+                  AND EXISTS (
+                      SELECT 1 FROM assignments a
+                      WHERE a.employee_id = e.id
+                        AND a.site_id = ?
+                        AND (a.status IS NULL OR upper(a.status) = 'ACTIVE')
+                  )
+                ORDER BY e.name
+                """,
+                (period, site_id),
+            )
         return [dict(row) for row in cur.fetchall()]
     finally:
         conn.close()
@@ -9710,10 +9961,14 @@ def _create_attendance_record(
     source: str,
     selfie_path: str | None = None,
 ) -> dict:
-    # Gunakan tanggal hari ini untuk field 'date', time dari device_time jika ada
+    # Gunakan tanggal hari ini untuk field 'date', namun gunakan SERVER time sebagai authoritative 'time'.
+    # Simpan device_time dan accuracy sebagai raw metadata untuk audit.
     action = _normalize_attendance_action(action)
     method = _normalize_attendance_method(method)
-    _, time_value = _device_time_parts(device_time)
+    # Server-authoritative time
+    time_value = datetime.now().strftime("%H:%M")
+    # Keep raw device_time as provided for auditing
+    device_time_raw = device_time or ""
     date_value = _today_key()
     employee_id = employee.get("id") if employee else None
     employee_name = employee.get("name") if employee else None
@@ -9725,8 +9980,8 @@ def _create_attendance_record(
             """
             INSERT INTO attendance (
                 employee_id, employee_name, employee_email,
-                date, time, action, method, selfie_path, source, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                date, time, action, method, selfie_path, source, device_time, accuracy, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 employee_id,
@@ -9738,6 +9993,8 @@ def _create_attendance_record(
                 method,
                 selfie_path,
                 source,
+                device_time_raw,
+                "",
                 created_at,
             ),
         )
@@ -12751,24 +13008,18 @@ def admin_bp() -> Blueprint:
         user = _current_user()
         if not user:
             return abort(403)
+        _require_admin(user)
+        permissions = _get_role_permissions(user.role)
+        default_tab = "users" if user.role == "hr_superadmin" else "theme"
+        tab = (request.args.get("tab") or default_tab).lower()
+        if tab not in {"users", "roles", "hr", "password", "theme"}:
+            tab = default_tab
         if user.role != "hr_superadmin":
-            permissions = _get_role_permissions(user.role)
-            if not (
-                permissions.get("manage_settings_codes")
-                or permissions.get("manage_settings_password")
-            ):
-                return abort(403)
-        tab = (request.args.get("tab") or "users").lower()
-        if tab not in {"users", "roles", "hr", "password"}:
-            tab = "users"
-        if user.role != "hr_superadmin":
-            allowed_tabs = []
+            allowed_tabs = ["theme"]
             if permissions.get("manage_settings_codes"):
                 allowed_tabs.append("hr")
             if permissions.get("manage_settings_password"):
                 allowed_tabs.append("password")
-            if not allowed_tabs:
-                return abort(403)
             if tab not in allowed_tabs:
                 tab = allowed_tabs[0]
         users = [u for u in _list_users() if u.get("role") in ADMIN_ROLES]
@@ -12794,6 +13045,20 @@ def admin_bp() -> Blueprint:
             permission_labels=ROLE_PERMISSION_LABELS,
             permission_keys=ROLE_PERMISSION_KEYS,
         )
+
+    @bp.route("/settings/theme/update", methods=["POST"])
+    def settings_theme_update():
+        user = _current_user()
+        _require_admin(user)
+        theme = (request.form.get("theme_preference") or "").strip().lower()
+        if theme not in THEME_SETTING_OPTIONS:
+            flash("Tema tidak valid.")
+            return redirect(url_for("admin.settings", tab="theme"))
+        _update_user_theme_preference(user.id, theme)
+        user.theme = theme
+        _persist_user(user)
+        flash("Tema berhasil diperbarui.")
+        return redirect(url_for("admin.settings", tab="theme"))
 
     @bp.route("/settings/registration-codes/create", methods=["POST"])
     def settings_registration_codes_create():

@@ -23,6 +23,7 @@ const Geolocation = (() => {
 })();
 
 const themeToggle = document.querySelector("[data-theme-toggle]");
+const THEME_OPTIONS = ["dark", "light", "sage_calm", "silver_line", "noir_warm"];
 const clockHH = document.getElementById("clockHH");
 const clockMM = document.getElementById("clockMM");
 const clockColon = document.getElementById("clockColon");
@@ -51,6 +52,28 @@ const qrData = document.getElementById("qrData");
 const qrBlock = document.querySelector(".tool-qr");
 const btnCheckin = document.getElementById("btnCheckin");
 const btnCheckout = document.getElementById("btnCheckout");
+
+function normalizeTheme(theme){
+  return THEME_OPTIONS.includes(theme) ? theme : "silver_line";
+}
+
+function getCsrfToken(){
+  const meta = document.querySelector('meta[name="csrf-token"]');
+  return meta ? meta.getAttribute("content") || "" : "";
+}
+
+function persistTheme(theme){
+  const token = getCsrfToken();
+  if (!token || typeof fetch !== "function") return;
+  fetch("/api/user/theme", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-CSRF-Token": token,
+    },
+    body: JSON.stringify({ theme }),
+  }).catch(() => {});
+}
 const checkinStatus = document.getElementById("checkinStatus");
 const checkoutStatus = document.getElementById("checkoutStatus");
 const attToast = document.getElementById("attToast");
@@ -358,21 +381,27 @@ async function checkLocationStatus(){
   }
 }
 
-function setTheme(theme){
-  document.documentElement.setAttribute("data-theme", theme);
-  localStorage.setItem("gmi_theme", theme);
+function setTheme(theme, options = {}){
+  const normalized = normalizeTheme(theme);
+  const shouldPersist = options.persist !== false;
+  document.documentElement.setAttribute("data-theme", normalized);
+  localStorage.setItem("gmi_theme", normalized);
+  localStorage.setItem("theme", normalized);
   if (themeToggle) {
-    themeToggle.classList.toggle("active", theme === "light");
+    themeToggle.classList.toggle("active", normalized === "light");
+    themeToggle.setAttribute("data-current-theme", normalized);
+    themeToggle.setAttribute("title", `Theme: ${normalized}`);
   }
+  if (shouldPersist) persistTheme(normalized);
 }
 
 function initTheme(){
-  const saved = localStorage.getItem("gmi_theme") || "dark";
-  setTheme(saved);
+  const saved = normalizeTheme(document.documentElement.getAttribute("data-theme") || localStorage.getItem("theme") || localStorage.getItem("gmi_theme") || "silver_line");
+  setTheme(saved, { persist: false });
 }
 
 function currentTheme(){
-  return document.documentElement.getAttribute("data-theme") || "dark";
+  return normalizeTheme(document.documentElement.getAttribute("data-theme") || "silver_line");
 }
 
 if (themeToggle) {

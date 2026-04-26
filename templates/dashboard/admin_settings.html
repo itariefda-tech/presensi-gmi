@@ -16,6 +16,7 @@
     {% if permissions.get('manage_settings_password') %}
     <a class="tab-btn {% if tab == 'password' %}active{% endif %}" href="{{ url_for('admin.settings', tab='password') }}">Password</a>
     {% endif %}
+    <a class="tab-btn {% if tab == 'theme' %}active{% endif %}" href="{{ url_for('admin.settings', tab='theme') }}">Tema</a>
   </div>
 
   {% for msg in get_flashed_messages() %}
@@ -236,6 +237,23 @@
     <button class="btn primary" type="button" id="btnOpenChangePassword">Ganti Password</button>
   </div>
 </div>
+{% endif %}
+{% if tab == 'theme' %}
+<form class="stack" method="post" action="{{ url_for('admin.settings_theme_update') }}" style="margin-top:12px;">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+  {% set selected_theme = theme if theme in theme_setting_options else "silver_line" %}
+  <div class="form-row">
+    <label class="label" for="themePreference">Tema</label>
+    <select class="input" id="themePreference" name="theme_preference" data-theme-select>
+      {% for option in theme_setting_options %}
+      <option value="{{ option }}" {% if selected_theme == option %}selected{% endif %}>{{ theme_labels.get(option, option) }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="btn-row">
+    <button class="btn primary btn-fixed-100" type="submit">Simpan</button>
+  </div>
+</form>
 {% endif %}
 </div>
 {% if tab == 'users' %}

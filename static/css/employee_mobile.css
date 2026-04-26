@@ -84,6 +84,21 @@ html[data-theme="light"] .kpi-card[data-card="masuk"] .kpi-card__action{
   border-color: rgba(255, 255, 255, 0.35);
   color: #fff;
 }
+html[data-theme="silver_line"] .card,
+html[data-theme="silver_line"] .mobile-card,
+html[data-theme="silver_line"] .presence-card{
+  background: linear-gradient(180deg, rgba(255,255,255,.92), rgba(226,232,240,.82));
+}
+html[data-theme="sage_calm"] .card,
+html[data-theme="sage_calm"] .mobile-card,
+html[data-theme="sage_calm"] .presence-card{
+  background: linear-gradient(180deg, rgba(255,255,255,.86), rgba(207,231,213,.80));
+}
+html[data-theme="noir_warm"] .card,
+html[data-theme="noir_warm"] .mobile-card,
+html[data-theme="noir_warm"] .presence-card{
+  background: linear-gradient(180deg, rgba(31,26,21,.94), rgba(55,39,27,.78));
+}
 *, *::before, *::after{
   box-sizing: inherit;
 }

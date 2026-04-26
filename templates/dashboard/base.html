@@ -7,7 +7,8 @@
   <script>
     (function(){
       try {
-        var saved = localStorage.getItem("gmi_theme") || "dark";
+        var initial = "{{ theme|default('silver_line') }}";
+        var saved = initial || localStorage.getItem("theme") || localStorage.getItem("gmi_theme") || "silver_line";
         document.documentElement.setAttribute("data-theme", saved);
       } catch (e) {}
     })();
@@ -33,105 +34,105 @@
       </div>
       <nav class="nav">
         {% if permissions.get("view_overview") %}
-        <a href="{{ url_for('admin.overview') }}" class="{% if active == 'overview' %}active{% endif %}" title="Dashboard">
+        <a href="{{ url_for('admin.overview') }}" class="{% if active == 'overview' %}active{% endif %}" title="Dashboard" data-i18n-title="nav.dashboard">
           <span class="nav-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none"><path d="M4 12 12 5l8 7v7a2 2 0 0 1-2 2h-3v-5H9v5H6a2 2 0 0 1-2-2v-7Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
           </span>
-          <span class="nav-label">Dashboard</span>
+          <span class="nav-label" data-i18n="nav.dashboard">Dashboard</span>
         </a>
         {% endif %}
         {% if permissions.get("manage_clients_view") %}
-        <a href="{{ url_for('admin.clients') }}" class="{% if active == 'clients' %}active{% endif %}" title="Client">
+        <a href="{{ url_for('admin.clients') }}" class="{% if active == 'clients' %}active{% endif %}" title="Client" data-i18n-title="nav.client">
           <span class="nav-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none"><path d="M4 7h16v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7Zm4-2h8v2H8V5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
           </span>
-          <span class="nav-label">Client</span>
+          <span class="nav-label" data-i18n="nav.client">Client</span>
         </a>
         {% endif %}
         {% if permissions.get("manage_sites") %}
-        <a href="{{ url_for('admin.sites') }}" class="{% if active == 'sites' %}active{% endif %}" title="Sites">
+        <a href="{{ url_for('admin.sites') }}" class="{% if active == 'sites' %}active{% endif %}" title="Sites" data-i18n-title="nav.sites">
           <span class="nav-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none"><path d="M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><circle cx="12" cy="10" r="2.5" stroke="currentColor" stroke-width="1.6"/></svg>
           </span>
-          <span class="nav-label">Sites</span>
+          <span class="nav-label" data-i18n="nav.sites">Sites</span>
         </a>
         {% endif %}
         {% if permissions.get("manage_employees_view") %}
-        <a href="{{ url_for('admin.employees') }}" class="{% if active == 'employees' %}active{% endif %}" title="Employee">
+        <a href="{{ url_for('admin.employees') }}" class="{% if active == 'employees' %}active{% endif %}" title="Employee" data-i18n-title="nav.employee">
           <span class="nav-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none"><path d="M16 19c0-2.2-2.7-4-4-4s-4 1.8-4 4m8-10a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
           </span>
-          <span class="nav-label">Employee</span>
+          <span class="nav-label" data-i18n="nav.employee">Employee</span>
         </a>
         {% endif %}
         {% if permissions.get("manage_assignments") %}
-        <a href="{{ url_for('admin.assignments') }}" class="{% if active == 'assignments' %}active{% endif %}" title="Assignments">
+        <a href="{{ url_for('admin.assignments') }}" class="{% if active == 'assignments' %}active{% endif %}" title="Assignments" data-i18n-title="nav.assignments">
           <span class="nav-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none"><path d="M4 7h7v10H4V7Zm9 0h7v4h-7V7Zm0 6h7v4h-7v-4Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
           </span>
-          <span class="nav-label">Assignments</span>
+          <span class="nav-label" data-i18n="nav.assignments">Assignments</span>
         </a>
         {% endif %}
         {% if permissions.get("manage_policies") %}
-        <a href="{{ url_for('admin.policies') }}" class="{% if active == 'policies' %}active{% endif %}" title="Policies">
+        <a href="{{ url_for('admin.policies') }}" class="{% if active == 'policies' %}active{% endif %}" title="Policies" data-i18n-title="nav.policies">
           <span class="nav-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none"><path d="M4 6h16v4H4V6Zm0 6h10v6H4v-6Zm12 0h4v6h-4v-6Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
           </span>
-          <span class="nav-label">Policies</span>
+          <span class="nav-label" data-i18n="nav.policies">Policies</span>
         </a>
         {% endif %}
-        <a href="{{ url_for('admin.qr_page') }}" class="{% if active == 'qr' %}active{% endif %}" title="Barcode">
+        <a href="{{ url_for('admin.qr_page') }}" class="{% if active == 'qr' %}active{% endif %}" title="Barcode" data-i18n-title="nav.barcode">
           <span class="nav-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none"><path d="M4 4h6v6H4V4Zm10 0h6v6h-6V4ZM4 14h6v6H4v-6Zm10 4h2m4-4v6h-6v-6h6Z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
           </span>
-          <span class="nav-label">Barcode</span>
+          <span class="nav-label" data-i18n="nav.barcode">Barcode</span>
         </a>
         {% if permissions.get("view_attendance") %}
-        <a href="{{ url_for('admin.attendance') }}" class="{% if active == 'attendance' %}active{% endif %}" title="Attendance">
+        <a href="{{ url_for('admin.attendance') }}" class="{% if active == 'attendance' %}active{% endif %}" title="Attendance" data-i18n-title="nav.attendance">
           <span class="nav-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none"><path d="M7 4v3M17 4v3M4 9h16M6 6h12a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
           </span>
-          <span class="nav-label">Attendance</span>
+          <span class="nav-label" data-i18n="nav.attendance">Attendance</span>
         </a>
         {% endif %}
         {% if permissions.get("view_reports") %}
-        <a href="{{ url_for('admin.reports') }}" class="{% if active == 'reports' %}active{% endif %}" title="Reports">
+        <a href="{{ url_for('admin.reports') }}" class="{% if active == 'reports' %}active{% endif %}" title="Reports" data-i18n-title="nav.reports">
           <span class="nav-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none"><path d="M5 19V5m0 14h15M9 16v-5m4 5V8m4 8v-3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </span>
-          <span class="nav-label">Reports</span>
+          <span class="nav-label" data-i18n="nav.reports">Reports</span>
         </a>
         {% endif %}
         {% if permissions.get("view_payroll") %}
-        <a href="{{ url_for('admin.payroll') }}" class="{% if active == 'payroll' %}active{% endif %}" title="Payroll">
+        <a href="{{ url_for('admin.payroll') }}" class="{% if active == 'payroll' %}active{% endif %}" title="Payroll" data-i18n-title="nav.payroll">
           <span class="nav-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none"><path d="M6 4h12v16H6V4Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M9 8h6M9 12h6M9 16h3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
           </span>
-          <span class="nav-label">Payroll</span>
+          <span class="nav-label" data-i18n="nav.payroll">Payroll</span>
         </a>
         {% endif %}
         {% if user.role != "hr_superadmin" %}
-        <a href="{{ url_for('manual_attendance') }}" class="{% if active == 'manual_attendance' %}active{% endif %}" title="Manual Attendance">
+        <a href="{{ url_for('manual_attendance') }}" class="{% if active == 'manual_attendance' %}active{% endif %}" title="Manual Attendance" data-i18n-title="nav.manual_attendance">
           <span class="nav-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none"><path d="M4 6h9M4 10h9M4 14h6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="m14 14 5-5 2 2-5 5-3 1 1-3Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
           </span>
-          <span class="nav-label">Manual Attendance Request</span>
+          <span class="nav-label" data-i18n="nav.manual_attendance">Manual Attendance Request</span>
         </a>
         {% endif %}
         {% if permissions.get("approve_requests") %}
-        <a href="{{ url_for('admin.approvals') }}" class="{% if active == 'approvals' %}active{% endif %}" title="Approvals">
+        <a href="{{ url_for('admin.approvals') }}" class="{% if active == 'approvals' %}active{% endif %}" title="Approvals" data-i18n-title="nav.approvals">
           <span class="nav-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </span>
-          <span class="nav-label">Aprroval</span>
+          <span class="nav-label" data-i18n="nav.approvals">Approval</span>
         </a>
         {% endif %}
-        {% if permissions.get("manage_settings_codes") or permissions.get("manage_settings_password") %}
-        <a href="{{ url_for('admin.settings') }}" class="{% if active == 'settings' %}active{% endif %}" title="Settings">
+        {% if user.role in ["hr_superadmin", "manager_operational", "supervisor", "admin_asistent"] %}
+        <a href="{{ url_for('admin.settings') }}" class="{% if active == 'settings' %}active{% endif %}" title="Settings" data-i18n-title="nav.settings">
           <span class="nav-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none"><path d="M12 8.7a3.3 3.3 0 1 0 0 6.6 3.3 3.3 0 0 0 0-6.6Zm9 3.3c0-.4 0-.7-.1-1.1l2-1.6-2-3.5-2.4 1a8.5 8.5 0 0 0-1.8-1l-.4-2.6h-4l-.4 2.6a8.5 8.5 0 0 0-1.8 1l-2.4-1-2 3.5 2 1.6c0 .4-.1.7-.1 1.1 0 .4 0 .7.1 1.1l-2 1.6 2 3.5 2.4-1a8.5 8.5 0 0 0 1.8 1l.4 2.6h4l.4-2.6a8.5 8.5 0 0 0 1.8-1l2.4 1 2-3.5-2-1.6c.1-.4.1-.7.1-1.1Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
           </span>
-          <span class="nav-label">Settings</span>
+          <span class="nav-label" data-i18n="nav.settings">Settings</span>
         </a>
         {% endif %}
       </nav>
@@ -153,23 +154,27 @@
             <div class="user-email">{{ user.email }}</div>
             <div class="user-role">{{ user.role|replace('_',' ')|title }}</div>
           </div>
+          <div data-lang-switch aria-label="Language">
+            <button class="btn secondary" type="button" data-lang-value="id" data-i18n="language.id" aria-pressed="false">ID</button>
+            <button class="btn secondary" type="button" data-lang-value="en" data-i18n="language.en" aria-pressed="false">EN</button>
+          </div>
           <div class="themePick" aria-label="Pemilih tema">
             <div class="themeLabel"></div>
             <button type="button" class="themeToggle toggle" aria-label="Ubah tema" data-theme-toggle>
               <div class="handle"></div>
-              <span>Ubah tema</span>
+              <span data-i18n="common.theme">Ubah tema</span>
             </button>
           </div>
           {% set pending_total = (pending_leave_count or 0) + (pending_manual_count or 0) %}
-          <button class="btn secondary notify-btn" type="button" aria-label="Notifikasi" data-pending-leave="{{ pending_leave_count or 0 }}" data-pending-manual="{{ pending_manual_count or 0 }}">
+          <button class="btn secondary notify-btn" type="button" aria-label="Notifikasi" data-i18n-aria-label="common.notifications" data-pending-leave="{{ pending_leave_count or 0 }}" data-pending-manual="{{ pending_manual_count or 0 }}">
             <svg class="notify-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <path d="M18 8a6 6 0 1 0-12 0c0 5-2 6-2 6h16s-2-1-2-6Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
               <path d="M9.5 19a2.5 2.5 0 0 0 5 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
             </svg>
             <span class="notify-badge{% if pending_total > 0 %} is-active{% endif %}" aria-hidden="true"></span>
           </button>
-          {% if permissions.get("manage_settings_codes") or permissions.get("manage_settings_password") %}
-          <a class="btn secondary settings-btn" href="{{ url_for('admin.settings') }}" aria-label="Settings">
+          {% if user.role in ["hr_superadmin", "manager_operational", "supervisor", "admin_asistent"] %}
+          <a class="btn secondary settings-btn" href="{{ url_for('admin.settings') }}" aria-label="Settings" data-i18n-aria-label="nav.settings">
   <svg class="settings-gear" viewBox="0 0 24 24" fill="none" aria-hidden="true">
     <path d="M12 8.7a3.3 3.3 0 1 0 0 6.6 3.3 3.3 0 0 0 0-6.6Zm9 3.3c0-.4 0-.7-.1-1.1l2-1.6-2-3.5-2.4 1a8.5 8.5 0 0 0-1.8-1l-.4-2.6h-4l-.4 2.6a8.5 8.5 0 0 0-1.8 1l-2.4-1-2 3.5 2 1.6c0 .4-.1.7-.1 1.1 0 .4 0 .7.1 1.1l-2 1.6 2 3.5 2.4-1a8.5 8.5 0 0 0 1.8 1l.4 2.6h4l.4-2.6a8.5 8.5 0 0 0 1.8-1l2.4 1 2-3.5-2-1.6c.1-.4.1-.7.1-1.1Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
   </svg>
@@ -200,14 +205,14 @@
 
   <div class="modal" id="changePasswordModal" aria-hidden="true">
     <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="changePasswordTitle">
-      <div class="modal-title" id="changePasswordTitle">Ganti Password</div>
+      <div class="modal-title" id="changePasswordTitle" data-i18n="modal.change_password">Ganti Password</div>
       <form id="changePasswordForm" class="stack">
         <input class="input" type="password" name="current_password" placeholder="Password saat ini" required />
         <input class="input" type="password" name="new_password" placeholder="Password baru" required />
         <input class="input" type="password" name="new_password2" placeholder="Ulangi password baru" required />
         <div class="inline">
-          <button class="btn primary btn-fixed-100" type="submit">Simpan</button>
-          <button class="btn secondary" type="button" id="btnCloseChangePassword">Batal</button>
+          <button class="btn primary btn-fixed-100" type="submit" data-i18n="common.save">Simpan</button>
+          <button class="btn secondary" type="button" id="btnCloseChangePassword" data-i18n="common.cancel">Batal</button>
         </div>
       </form>
       <div class="alert info" id="changePasswordAlert" style="display:none;"></div>
@@ -215,13 +220,14 @@
   </div>
   <div class="modal" id="notifyModal" aria-hidden="true">
     <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="notifyTitle">
-      <div class="modal-title" id="notifyTitle">Notifikasi</div>
+      <div class="modal-title" id="notifyTitle" data-i18n="modal.notifications">Notifikasi</div>
       <div id="notifyBody" class="stack"></div>
       <div class="modal-footer">
-        <button class="btn secondary full" type="button" id="btnCloseNotify">Tutup</button>
+        <button class="btn secondary full" type="button" id="btnCloseNotify" data-i18n="common.close">Tutup</button>
       </div>
     </div>
   </div>
+  <script src="{{ url_for('static', filename='js/i18n.js') }}"></script>
   <script src="{{ url_for('static', filename='js/dashboard_theme.js') }}"></script>
   <script src="{{ url_for('static', filename='js/change_password.js') }}"></script>
   <script src="{{ url_for('static', filename='js/profile_photo.js') }}"></script>

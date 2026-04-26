@@ -31,6 +31,7 @@ document.querySelectorAll("[data-go]").forEach(el => {
 ========================= */
 const themeBtns = Array.from(document.querySelectorAll(".themeBtn"));
 const themeToggle = document.querySelector("[data-theme-toggle]");
+const THEME_OPTIONS = ["dark", "light", "sage_calm", "silver_line", "noir_warm"];
 const themeInputs = [
   document.getElementById("themeEmp"),
   document.getElementById("themeAdmin"),
@@ -38,14 +39,22 @@ const themeInputs = [
   document.getElementById("themeForgot"),
 ];
 
+function normalizeTheme(theme){
+  return THEME_OPTIONS.includes(theme) ? theme : "silver_line";
+}
+
 function setTheme(theme){
-  document.documentElement.setAttribute("data-theme", theme);
-  localStorage.setItem("gmi_theme", theme);
-  themeBtns.forEach(b => b.classList.toggle("active", b.dataset.theme === theme));
+  const normalized = normalizeTheme(theme);
+  document.documentElement.setAttribute("data-theme", normalized);
+  localStorage.setItem("gmi_theme", normalized);
+  localStorage.setItem("theme", normalized);
+  themeBtns.forEach(b => b.classList.toggle("active", b.dataset.theme === normalized));
   if (themeToggle){
-    themeToggle.classList.toggle("active", theme === "light");
+    themeToggle.classList.toggle("active", normalized === "light");
+    themeToggle.setAttribute("data-current-theme", normalized);
+    themeToggle.setAttribute("title", `Theme: ${normalized}`);
   }
-  themeInputs.forEach(inp => { if (inp) inp.value = theme; });
+  themeInputs.forEach(inp => { if (inp) inp.value = normalized; });
 }
 
 themeBtns.forEach(btn => {
@@ -58,12 +67,12 @@ if (themeToggle){
   });
 }
 
-const initialTheme = window.__GMI_INITIAL_THEME || document.documentElement.getAttribute("data-theme") || "dark";
-const savedTheme = localStorage.getItem("gmi_theme") || initialTheme;
+const initialTheme = window.__GMI_INITIAL_THEME || document.documentElement.getAttribute("data-theme") || "silver_line";
+const savedTheme = normalizeTheme(localStorage.getItem("theme") || localStorage.getItem("gmi_theme") || initialTheme);
 setTheme(savedTheme);
 
 function currentTheme(){
-  return document.documentElement.getAttribute("data-theme") || "dark";
+  return normalizeTheme(document.documentElement.getAttribute("data-theme") || "silver_line");
 }
 
 function csrfJsonHeaders(){

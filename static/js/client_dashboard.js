@@ -623,8 +623,8 @@
       };
 
       const mapMethodLabel = (value) => {
-        const normalized = (value || "").toString().trim().toLowerCase();
-        if (normalized === "gps_selfie" || normalized === "gps+selfie") return "GPSLF";
+        const normalized = (value || "").toString().trim().toLowerCase().replace("+", "_").replace("-", "_");
+        if (normalized === "gps_selfie") return "GPSLF";
         if (normalized === "gps") return "GPS";
         if (normalized === "qr") return "QR";
         return value || "-";

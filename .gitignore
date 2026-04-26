@@ -5,6 +5,7 @@ __pycache__/
 *.pyd
 .env
 .venv/
+.venv*/
 venv/
 
 # Database & runtime
@@ -16,6 +17,15 @@ app.db
 # Uploads / runtime
 static/uploads/
 *.log
+*.tmp
+*.bak
+*.orig
+
+# Binary installers / downloaded tools
+*.exe
+*.msi
+*.dmg
+*.pkg
 
 # OS
 .DS_Store
@@ -28,6 +38,19 @@ Thumbs.db
 # Secrets
 .env
 node_modules
+
+# Local diagnostics / scratch scripts
+/_find.py
+/_pipver.py
+/check_masib.py
+/clear_attendance.py
+/dump_users.py
+/getgit.py
+/verify_clear.py
+/scripts/show_attendance_debug.py
+/tools/local/
+/tools/installers/
+/tools/backups/
 
 # Capacitor/mobile
 mobile-capacitor/

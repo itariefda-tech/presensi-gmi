@@ -12,6 +12,9 @@
         <select id="periodSelect" class="input">
           <option value="">Select Period</option>
         </select>
+        <select id="siteSelect" class="input">
+          <option value="">All Sites</option>
+        </select>
         <button class="btn primary" id="btnLoadPayroll">Load Payroll</button>
         <button class="btn secondary" id="btnGeneratePayroll">Generate New</button>
       </div>
@@ -379,6 +382,25 @@
         console.error('Failed to load employees');
       });
   }
+
+  // Load sites for filter
+  function loadSites() {
+    const siteSelect = document.getElementById('siteSelect');
+    fetch('/api/sites')
+      .then(r => r.json())
+      .then(response => {
+        if (response.ok) {
+          siteSelect.innerHTML = '<option value="">All Sites</option>';
+          response.data.forEach(s => {
+            const option = new Option(s.name || s.address || `Site ${s.id}`, s.id);
+            siteSelect.add(option);
+          });
+        }
+      })
+      .catch(() => {
+        console.error('Failed to load sites');
+      });
+  }
   
   // Load payroll data
   function loadPayrollData() {
@@ -391,7 +413,9 @@
     const tbody = document.getElementById('payrollRows');
     tbody.innerHTML = '<tr><td colspan="12" class="muted"><span class="spinner"></span> Loading payroll data...</td></tr>';
     
-    fetch(`/api/payroll/list?period=${period}`)
+  const site = document.getElementById('siteSelect')?.value || '';
+  const siteQuery = site ? `&site_id=${encodeURIComponent(site)}` : '';
+  fetch(`/api/payroll/list?period=${period}${siteQuery}`)
       .then(r => r.json())
       .then(response => {
         if (response.ok) {
@@ -624,6 +648,7 @@
   document.addEventListener('DOMContentLoaded', () => {
     initializePeriodOptions();
     loadEmployees();
+  loadSites();
     
     // Period select change
     document.getElementById('periodSelect').addEventListener('change', (e) => {

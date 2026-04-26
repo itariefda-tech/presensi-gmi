@@ -7,7 +7,8 @@
   <script>
     (function(){
       try {
-        var saved = localStorage.getItem("gmi_theme") || "dark";
+        var initial = "{{ theme|default('silver_line') }}";
+        var saved = initial || localStorage.getItem("theme") || localStorage.getItem("gmi_theme") || "silver_line";
         document.documentElement.setAttribute("data-theme", saved);
       } catch (e) {}
     })();
@@ -45,11 +46,15 @@
         </div>
         <div class="header-col header-right">
           <div class="header-right-stack">
+          <div data-lang-switch aria-label="Language">
+            <button class="help-btn help-btn-inline" type="button" data-lang-value="id" data-i18n="language.id" aria-pressed="false">ID</button>
+            <button class="help-btn help-btn-inline" type="button" data-lang-value="en" data-i18n="language.en" aria-pressed="false">EN</button>
+          </div>
           <div class="themePick" aria-label="Pemilih tema">
             <div class="themeLabel"></div>
             <button type="button" class="themeToggle toggle" aria-label="Ubah tema" data-theme-toggle>
               <div class="handle"></div>
-              <span>Ubah tema</span>
+              <span data-i18n="common.theme">Ubah tema</span>
             </button>
           </div>
             <div class="header-help">
@@ -83,7 +88,7 @@
                 <article class="kpi-card" data-card="location">
                   <div class="kpi-card__header">
                     <div>
-                      <div class="kpi-card__label">Lokasi</div>
+                      <div class="kpi-card__label" data-i18n="employee.location">Lokasi</div>
                     </div>
                     <button class="btn btn-location icon-only" id="btnLocation" type="button" aria-label="Ambil lokasi">
                       <span class="btn-location-icon" aria-hidden="true">
@@ -93,23 +98,23 @@
                       </span>
                     </button>
                   </div>
-                  <div class="kpi-card__value" id="kpiLocationStatus">Menunggu lokasi</div>
-                  <div class="kpi-card__meta" id="kpiLocationCoords">Belum ada koordinat.</div>
+                  <div class="kpi-card__value" id="kpiLocationStatus" data-i18n="employee.waiting_location">Menunggu lokasi</div>
+                  <div class="kpi-card__meta" id="kpiLocationCoords" data-i18n="employee.no_coordinates">Belum ada koordinat.</div>
                 </article>
                 <article class="kpi-card" data-card="masuk">
-                  <div class="kpi-card__label">Masuk</div>
+                  <div class="kpi-card__label" data-i18n="employee.checkin">Masuk</div>
                   <div class="kpi-card__value" id="kpiMasukValue">--:--</div>
                   <div class="kpi-card__meta" id="kpiMasukMeta">Status: Belum absen</div>
                 </article>
                 <article class="kpi-card" data-card="selfie">
                   <div class="kpi-card__header">
                     <div>
-                      <div class="kpi-card__label">Selfie</div>
+                      <div class="kpi-card__label" data-i18n="employee.selfie">Selfie</div>
                     </div>
                   </div>
                   <div class="selfie-card-body">
                     <div class="selfie-box">
-                      <label class="label" for="selfieFile">Wajib Selfie</label>
+                      <label class="label" for="selfieFile" data-i18n="employee.selfie_required">Wajib Selfie</label>
                       <label class="selfie-pick" for="selfieFile" aria-label="Ambil selfie">
                         <svg viewBox="0 0 24 24" aria-hidden="true">
                           <path d="M3 7a2 2 0 0 1 2-2h3l1-2h6l1 2h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Zm9 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z" fill="currentColor" opacity=".85"/>
@@ -121,13 +126,13 @@
                   </div>
                 </article>
                 <article class="kpi-card" data-card="site">
-                  <div class="kpi-card__label">SITE</div>
-                  <div class="kpi-card__value" id="kpiSiteName">{{ active_site.name if active_site else "Belum ada site" }}</div>
+                  <div class="kpi-card__label" data-i18n="employee.site">SITE</div>
+                  <div class="kpi-card__value" id="kpiSiteName"{% if not active_site %} data-i18n="employee.no_site"{% endif %}>{{ active_site.name if active_site else "Belum ada site" }}</div>
                   <div class="kpi-card__meta">
                     {% if active_client and active_client.name %}
                       {{ active_client.name }}
                     {% else %}
-                      Client belum ditetapkan
+                      <span data-i18n="employee.client_unassigned">Client belum ditetapkan</span>
                     {% endif %}
                   </div>
                 </article>
@@ -145,7 +150,7 @@
                 data-status="online"
               >
                 <span class="network-lamp" aria-hidden="true"></span>
-                <span class="network-label">Online</span>
+                <span class="network-label" data-i18n="common.online">Online</span>
               </span>
               <div class="clock-site-row" aria-label="Jam digital">
                 <div class="clock-row" aria-label="Jam digital">
@@ -153,7 +158,7 @@
                 </div>
               </div>
               <span class="presence-status-badge is-ready" id="presenceStatusTitle" role="status" aria-live="polite">
-                Siap Attendance
+                <span data-i18n="employee.ready_attendance">Siap Attendance</span>
               </span>
               <span class="network-alert" id="netStatusAlert" aria-live="assertive"></span>
             </div>
@@ -164,7 +169,7 @@
                     <path d="M12 2a7 7 0 1 0 7 7 7 7 0 0 0-7-7zm1 7V5h-2v6h6V9z"/>
                   </svg>
                 </span>
-                <span class="btn-label">Masuk</span>
+                <span class="btn-label" data-i18n="employee.checkin">Masuk</span>
                 <span class="btn-spinner" aria-hidden="true"></span>
               </button>
               <button class="btn-presence btn-checkout" id="btnCheckout" type="button">
@@ -173,7 +178,7 @@
                     <path d="M12 2a7 7 0 1 0 7 7 7 7 0 0 0-7-7zm-1 11h2v6h-2zm0-8h2v6h-2z"/>
                   </svg>
                 </span>
-                <span class="btn-label">Pulang</span>
+                <span class="btn-label" data-i18n="employee.checkout">Pulang</span>
                 <span class="btn-spinner" aria-hidden="true"></span>
               </button>
             </div>
@@ -194,8 +199,8 @@
 
               <div class="tool-row tool-qr">
                 <label class="label">QR / Barcode</label>
-                <button class="btn secondary full" id="btnScan" type="button">Mulai Scan</button>
-                <div class="muted" id="qrStatus">Belum scan.</div>
+                <button class="btn secondary full" id="btnScan" type="button" data-i18n="patrol.scan_camera">Mulai Scan</button>
+                  <div class="muted" id="qrStatus">Belum scan.</div>
                 <video id="qrVideo" class="preview" autoplay muted playsinline></video>
                 <input type="text" id="qrData" class="input" placeholder="Hasil scan QR" />
               </div>
@@ -227,7 +232,7 @@
         <section class="swipe-pane" data-pane="1" aria-label="Izin dan Story">
           <div class="card mobile-card">
             <div class="leave-header">
-              <h4>Ajukan</h4>
+                <h4 data-i18n="leave.apply">Ajukan</h4>
               <div class="leave-summary">
                 <span id="leavePendingCount">Menunggu: 0</span>
                 <button class="icon-btn" id="btnLeaveRefresh" type="button" aria-label="Refresh">
@@ -247,7 +252,7 @@
                     <path d="M7 2h7l5 5v15a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm7 1.5V8h4.5"/>
                   </svg>
                 </span>
-                <span>Izin</span>
+                <span data-i18n="leave.permission">Izin</span>
               </button>
               <button class="leave-action-btn" data-type="sakit" type="button">
                 <span class="action-icon" aria-hidden="true">
@@ -255,7 +260,7 @@
                     <path d="M11 4h2v16h-2zM10 10h4v10h-4zM14 6h4v14h-4z"/>
                   </svg>
                 </span>
-                <span>Sakit</span>
+                <span data-i18n="leave.sick">Sakit</span>
               </button>
             </div>
 
@@ -272,15 +277,15 @@
                   <input type="text" id="leaveTo" class="input" placeholder="DD-MM-YYYY" />
                 </div>
                 <div class="field-group">
-                  <label class="label">Alasan</label>
+                  <label class="label" data-i18n="leave.reason">Alasan</label>
                   <textarea id="leaveReason" class="input" rows="3" placeholder="Tulis singkat"></textarea>
                 </div>
                 <div class="field-group">
-                  <label class="label">Lampiran (opsional)</label>
+                  <label class="label" data-i18n="leave.attachment_optional">Lampiran (opsional)</label>
                   <input type="file" id="leaveAttachment" class="input" accept="image/*,application/pdf" />
                 </div>
-                <button class="btn primary full" id="btnLeave" type="button">Kirim</button>
-                <button class="btn secondary full" id="leaveSheetClose" type="button">Tutup</button>
+                <button class="btn primary full" id="btnLeave" type="button" data-i18n="leave.send">Kirim</button>
+                <button class="btn secondary full" id="leaveSheetClose" type="button" data-i18n="common.close">Tutup</button>
               </div>
             </div>
           </div>
@@ -298,7 +303,7 @@
             </div>
             <div class="card-body-collapsible" id="leave-story-body">
               <div id="leaveStory" class="story-list">
-                <div class="muted">Memuat data...</div>
+                <div class="muted" data-i18n="common.loading">Memuat data...</div>
               </div>
             </div>
           </div>
@@ -316,7 +321,7 @@
                 <div class="muted leave-detail-note-label">Catatan</div>
                 <div id="leaveDetailNote">-</div>
               </div>
-              <button class="btn primary full" id="leaveDetailClose" type="button">Tutup</button>
+              <button class="btn primary full" id="leaveDetailClose" type="button" data-i18n="common.close">Tutup</button>
             </div>
           </div>
 
@@ -325,7 +330,7 @@
 
         <section class="swipe-pane" data-pane="2" aria-label="Laporan">
            <div class="card mobile-card">
-             <h4>Ringkasan Bulan Ini</h4>
+             <h4 data-i18n="employee.month_summary">Ringkasan Bulan Ini</h4>
              <div class="report-grid">
                <div class="report-item" data-field="present"><span>Hadir</span><strong>0</strong></div>
                <div class="report-item" data-field="late"><span>Telat</span><strong>0</strong></div>
@@ -335,7 +340,7 @@
            </div>
           <div class="card mobile-card card-collapsible is-collapsed" id="daily-report-card" data-collapsible>
             <div class="card-header-collapsible">
-              <h4 style="margin:0;">Laporan Harian</h4>
+              <h4 style="margin:0;" data-i18n="employee.daily_report">Laporan Harian</h4>
               <button class="collapse-toggle" type="button" data-collapse-toggle aria-expanded="false" aria-controls="daily-report-body">
                 <span class="icon-burger" aria-hidden="true"><span></span><span></span><span></span></span>
                 <span class="icon-minus" aria-hidden="true"></span>
@@ -350,16 +355,16 @@
                 </div>
                 <div class="daily-report-body" id="dailyReportRows">
                   <div class="daily-report-row empty">
-                    <div class="muted">Memuat data...</div>
+                    <div class="muted" data-i18n="common.loading">Memuat data...</div>
                   </div>
                 </div>
               </div>
             </div>
           </div>
           <div class="card mobile-card">
-            <h4>Keamanan Akun</h4>
+            <h4 data-i18n="employee.account_security">Keamanan Akun</h4>
             <p class="muted">Ganti password secara berkala untuk keamanan.</p>
-            <button class="btn primary full" id="btnOpenChangePassword" type="button">Ganti Password</button>
+            <button class="btn primary full" id="btnOpenChangePassword" type="button" data-i18n="modal.change_password">Ganti Password</button>
           </div>
         </section>
 
@@ -367,7 +372,7 @@
           <div class="card mobile-card patrol-hero-card">
             <div class="patrol-hero-top">
               <div>
-                <h4 class="patrol-hero-title">Guard Tour</h4>
+                <h4 class="patrol-hero-title" data-i18n="patrol.guard_tour">Guard Tour</h4>
                 <div class="muted" id="patrolRouteLabel">Belum ada rute aktif.</div>
               </div>
               <span class="patrol-status-badge status-idle" id="patrolStatusBadge">idle</span>
@@ -392,8 +397,8 @@
               </article>
             </div>
             <div class="patrol-actions-row">
-              <button class="btn primary" id="btnPatrolStart" type="button">Mulai Patrol</button>
-              <button class="btn secondary" id="btnPatrolRefresh" type="button">Refresh</button>
+              <button class="btn primary" id="btnPatrolStart" type="button" data-i18n="patrol.start">Mulai Patrol</button>
+              <button class="btn secondary" id="btnPatrolRefresh" type="button" data-i18n="common.refresh">Refresh</button>
             </div>
             <div class="presence-toast patrol-toast" id="patrolToast" role="status" aria-live="polite"></div>
           </div>
@@ -401,7 +406,7 @@
           <div class="card mobile-card patrol-input-card">
             <div class="card-header">
               <div>
-                <h4>Input Checkpoint</h4>
+                <h4 data-i18n="patrol.input_checkpoint">Input Checkpoint</h4>
                 <div class="muted">Scan marker sesuai urutan rute</div>
               </div>
             </div>
@@ -410,7 +415,7 @@
               <button class="chip patrol-mode-chip" type="button" data-patrol-mode="nfc" aria-pressed="false">NFC Tag</button>
             </div>
             <div class="patrol-scan-panel" id="patrolScanPanelQr">
-              <button class="btn secondary full" id="btnPatrolScan" type="button">Buka Kamera Scan</button>
+              <button class="btn secondary full" id="btnPatrolScan" type="button" data-i18n="patrol.scan_camera">Buka Kamera Scan</button>
               <div class="muted" id="patrolScanStatus">Belum scan checkpoint.</div>
               <video id="patrolQrVideo" class="preview patrol-qr-video" autoplay muted playsinline></video>
               <input class="input" id="patrolScanData" type="text" placeholder="Hasil scan otomatis" readonly />
@@ -443,7 +448,7 @@
                 <div class="muted" id="patrolSelfieHint">Selfie opsional, menjadi wajib jika mode selfie aktif.</div>
               </article>
             </div>
-            <button class="btn primary full" id="btnPatrolSubmit" type="button">Validasi Checkpoint Berikutnya</button>
+            <button class="btn primary full" id="btnPatrolSubmit" type="button" data-i18n="patrol.validate_next">Validasi Checkpoint Berikutnya</button>
           </div>
 
           <div class="card mobile-card patrol-checkpoint-card">
@@ -490,7 +495,7 @@
             <path d="M12 2c-2.79 0-5 2.21-5 5 0 4.42 5 11 5 11s5-6.58 5-11c0-2.79-2.21-5-5-5zm0 7c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z" fill="currentColor"/>
           </svg>
         </span>
-        <span class="nav-label">Attendance</span>
+        <span class="nav-label" data-i18n="nav.attendance">Attendance</span>
       </button>
       <button class="nav-btn" data-tab="1" type="button">
         <span class="nav-icon" aria-hidden="true">
@@ -499,7 +504,7 @@
             <path d="M6 7h12M6 11h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
           </svg>
         </span>
-        <span class="nav-label">Izin</span>
+        <span class="nav-label" data-i18n="nav.leave">Izin</span>
       </button>
         <button class="nav-btn" data-tab="2" type="button">
           <span class="nav-icon" aria-hidden="true">
@@ -507,7 +512,7 @@
               <path d="M6 14h4v6H6zM10 10h4v10h-4zM14 6h4v14h-4z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
           </span>
-          <span class="nav-label">Laporan</span>
+          <span class="nav-label" data-i18n="nav.reports">Laporan</span>
         </button>
         <button class="nav-btn" data-tab="3" type="button">
           <span class="nav-icon" aria-hidden="true">
@@ -516,7 +521,7 @@
               <path d="M9 12l2 2 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
             </svg>
           </span>
-          <span class="nav-label">Patroli</span>
+          <span class="nav-label" data-i18n="nav.patrol">Patroli</span>
         </button>
         <form method="post" action="{{ url_for('logout') }}">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
@@ -528,7 +533,7 @@
               <path d="M13 5h4a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
           </span>
-          <span class="nav-label">Keluar</span>
+          <span class="nav-label" data-i18n="nav.logout">Keluar</span>
         </button>
       </form>
     </div>
@@ -591,14 +596,14 @@
 
   <div class="modal" id="changePasswordModal" aria-hidden="true">
     <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="changePasswordTitle">
-      <div class="modal-title" id="changePasswordTitle">Ganti Password</div>
+      <div class="modal-title" id="changePasswordTitle" data-i18n="modal.change_password">Ganti Password</div>
       <form id="changePasswordForm" class="stack">
         <input class="input" type="password" name="current_password" placeholder="Password saat ini" required />
         <input class="input" type="password" name="new_password" placeholder="Password baru" required />
         <input class="input" type="password" name="new_password2" placeholder="Ulangi password baru" required />
         <div class="inline">
-          <button class="btn primary btn-fixed-100" type="submit">Simpan</button>
-          <button class="btn secondary" type="button" id="btnCloseChangePassword">Batal</button>
+          <button class="btn primary btn-fixed-100" type="submit" data-i18n="common.save">Simpan</button>
+          <button class="btn secondary" type="button" id="btnCloseChangePassword" data-i18n="common.cancel">Batal</button>
         </div>
       </form>
       <div class="alert info" id="changePasswordAlert" style="display:none;"></div>
@@ -648,6 +653,7 @@
   </script>
   {% endif %}
 
+  <script src="{{ url_for('static', filename='js/i18n.js') }}"></script>
   <script src="{{ url_for('static', filename='js/dashboard_employee_mobile.js') }}"></script>
   <script src="{{ url_for('static', filename='js/change_password.js') }}"></script>
   <script src="{{ url_for('static', filename='js/dashboard_back_guard.js') }}"></script>

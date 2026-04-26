@@ -73,7 +73,11 @@
     </div>
     <div class="top-actions">
       <div class="top-actions-controls">
-        <button class="header-action-btn settings-btn" type="button" data-tab="6" aria-label="Settings">
+        <div data-lang-switch aria-label="Language">
+          <button class="mini-btn" type="button" data-lang-value="id" data-i18n="language.id" aria-pressed="false">ID</button>
+          <button class="mini-btn" type="button" data-lang-value="en" data-i18n="language.en" aria-pressed="false">EN</button>
+        </div>
+        <button class="header-action-btn settings-btn" type="button" data-tab="6" aria-label="Settings" data-i18n-aria-label="nav.settings">
           <span class="header-action-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none">
               <path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z" stroke="currentColor" stroke-width="1.5"/>
@@ -83,7 +87,7 @@
         </button>
         <form class="section-head-logout" method="post" action="{{ url_for('logout') }}">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-          <button class="header-action-btn logout-btn" type="submit" aria-label="Logout">
+          <button class="header-action-btn logout-btn" type="submit" aria-label="Logout" data-i18n-aria-label="nav.logout">
             <span class="header-action-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none">
                 <path d="M15 7.5V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h7a2 2 0 0 0 2-2v-1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
@@ -108,27 +112,27 @@
           <section class="kpi-section">
             <div class="kpi-grid">
               <article class="kpi-card kpi-primary">
-                <div class="kpi-label">Total Pegawai</div>
+                <div class="kpi-label" data-i18n="client.total_employees">Total Pegawai</div>
                 <div class="kpi-value">{{ total_employees }}</div>
-                <div class="kpi-meta">Pegawai terdaftar</div>
+                <div class="kpi-meta" data-i18n="client.registered_employees">Pegawai terdaftar</div>
               </article>
               <article class="kpi-card kpi-success">
-                <div class="kpi-label">Hadir Hari Ini</div>
+                <div class="kpi-label" data-i18n="client.present_today">Hadir Hari Ini</div>
                 <div class="kpi-value">{{ present_today }}</div>
-                <div class="kpi-meta">Sudah check-in</div>
+                <div class="kpi-meta" data-i18n="client.checked_in">Sudah check-in</div>
               </article>
               <article class="kpi-card kpi-warning">
-                <div class="kpi-label">Terlambat</div>
+                <div class="kpi-label" data-i18n="client.late">Terlambat</div>
                 <div class="kpi-value">{{ late_today }}</div>
                 <div class="kpi-meta">Melewati batas</div>
               </article>
               <article class="kpi-card kpi-danger">
-                <div class="kpi-label">Belum Hadir</div>
+                <div class="kpi-label" data-i18n="client.absent">Belum Hadir</div>
                 <div class="kpi-value">{{ absent_today }}</div>
                 <div class="kpi-meta">Tanpa izin</div>
               </article>
               <article class="kpi-card kpi-location">
-                <div class="kpi-label">Koordinat Site</div>
+                <div class="kpi-label" data-i18n="client.site_coordinates">Koordinat Site</div>
                 <div class="coord-value">
                   {% if site.latitude is not none and site.longitude is not none %}
                   <span>{{ "%.6f"|format(site.latitude) }}</span>
@@ -140,7 +144,7 @@
                 <div class="kpi-meta">Latitude dan Logitude</div>
               </article>
               <article class="kpi-card kpi-location kpi-device">
-                <div class="kpi-label">Lokasi Device</div>
+                <div class="kpi-label" data-i18n="client.device_location">Lokasi Device</div>
                 <div class="coord-value is-device" id="deviceCoords">-</div>
                 <div class="kpi-meta" id="deviceMeta">Belum diambil</div>
                 <button class="mini-btn kpi-action" type="button" id="refreshGps" aria-label="Refresh lokasi">
@@ -154,7 +158,7 @@
             <div class="panel-head">
               <div>
                 <h3>{{ site.name or "-" }}</h3>
-                <div class="panel-sub">Informasi Site {{ client.name if client else "-" }}</div>
+                <div class="panel-sub"><span data-i18n="client.site_info">Informasi Site</span> {{ client.name if client else "-" }}</div>
               </div>
             </div>
             <div class="site-meta">
@@ -176,7 +180,7 @@
               </div>
             </div>
             {% if can_manage_site %}
-            <button class="btn ghost site-edit-btn" type="button" data-modal-open="siteModal">Edit Site</button>
+            <button class="btn ghost site-edit-btn" type="button" data-modal-open="siteModal" data-i18n="client.edit_site">Edit Site</button>
             {% else %}
             <div class="panel-sub">Hanya Client Admin yang dapat mengubah data site.</div>
             {% endif %}
@@ -626,7 +630,7 @@
                       {{ row.check_in or "-" }} - {{ row.check_out or "-" }}
                     </td>
                     <td>
-                      {% if row.method in ["gps_selfie", "gps+selfie"] %}
+                      {% if row.method in ["gps_selfie"] %}
                         GPSLF
                       {% elif row.method == "gps" %}
                         GPS
@@ -1263,14 +1267,14 @@
 
   <div class="floating-nav bottom-nav-floating" id="floatingNav">
     <div class="drag-handle" id="navHandle" aria-hidden="true"></div>
-    <button class="nav-btn active" data-tab="0" type="button" aria-label="Utama">
+    <button class="nav-btn active" data-tab="0" type="button" aria-label="Utama" data-i18n-aria-label="nav.dashboard">
       <span class="nav-icon" aria-hidden="true">
         <svg viewBox="0 0 24 24" fill="none">
           <path d="M4 12 12 5l8 7v7a2 2 0 0 1-2 2h-3v-5H9v5H6a2 2 0 0 1-2-2v-7Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
         </svg>
       </span>
     </button>
-    <button class="nav-btn" data-tab="1" type="button" aria-label="Perizinan">
+    <button class="nav-btn" data-tab="1" type="button" aria-label="Perizinan" data-i18n-aria-label="nav.leave">
       <span class="nav-icon" aria-hidden="true">
         <svg viewBox="0 0 24 24" fill="none">
           <path d="M5 7h14M5 12h10M5 17h7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
@@ -1278,7 +1282,7 @@
         </svg>
       </span>
     </button>
-    <button class="nav-btn" data-tab="2" type="button" aria-label="Pegawai">
+    <button class="nav-btn" data-tab="2" type="button" aria-label="Pegawai" data-i18n-aria-label="nav.employee">
       <span class="nav-icon" aria-hidden="true">
         <svg viewBox="0 0 24 24" fill="none">
           <path d="M12 12a3 3 0 1 0-3-3 3 3 0 0 0 3 3Z" stroke="currentColor" stroke-width="1.6"/>
@@ -1286,7 +1290,7 @@
         </svg>
       </span>
     </button>
-    <button class="nav-btn" data-tab="3" type="button" aria-label="Attendance">
+    <button class="nav-btn" data-tab="3" type="button" aria-label="Attendance" data-i18n-aria-label="nav.attendance">
       <span class="nav-icon" aria-hidden="true">
         <svg viewBox="0 0 24 24" fill="none">
           <rect x="4" y="6" width="16" height="14" rx="2.5" stroke="currentColor" stroke-width="1.5"/>
@@ -1294,7 +1298,7 @@
         </svg>
       </span>
     </button>
-    <button class="nav-btn" data-tab="4" type="button" aria-label="Patroli">
+    <button class="nav-btn" data-tab="4" type="button" aria-label="Patroli" data-i18n-aria-label="nav.patrol">
       <span class="nav-icon" aria-hidden="true">
         <svg viewBox="0 0 24 24" fill="none">
           <path d="M12 4l5 2.25v5.75c0 3.5-2.3 6.9-5 8-2.7-1.1-5-4.5-5-8V6.25L12 4z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
@@ -1302,7 +1306,7 @@
         </svg>
       </span>
     </button>
-    <button class="nav-btn" data-tab="5" type="button" aria-label="Payroll">
+    <button class="nav-btn" data-tab="5" type="button" aria-label="Payroll" data-i18n-aria-label="nav.payroll">
       <span class="nav-icon" aria-hidden="true">
         <svg viewBox="0 0 24 24" fill="none">
           <path d="M6 7h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.5"/>
@@ -1395,8 +1399,8 @@
             </div>
           </div>
           <div class="form-actions">
-            <button class="btn ghost" type="button" data-modal-close="siteModal">Batal</button>
-            <button class="btn primary" type="submit">Simpan Perubahan</button>
+            <button class="btn ghost" type="button" data-modal-close="siteModal" data-i18n="common.cancel">Batal</button>
+            <button class="btn primary" type="submit" data-i18n="common.save">Simpan Perubahan</button>
           </div>
       </form>
     </div>
@@ -1530,6 +1534,7 @@
     </div>
   </div>
 
+  <script src="{{ url_for('static', filename='js/i18n.js') }}"></script>
   <script src="{{ url_for('static', filename='js/dashboard_theme.js') }}"></script>
   <script src="{{ url_for('static', filename='js/profile_photo.js') }}"></script>
   <script src="{{ url_for('static', filename='js/client_dashboard.js') }}"></script>
