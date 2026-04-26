@@ -452,11 +452,13 @@
     function showModal(modal) {
       if (!modal) return;
       modal.setAttribute('aria-hidden', 'false');
+      modal.classList.add('show');
     }
 
     function hideModal(modal) {
       if (!modal) return;
       modal.setAttribute('aria-hidden', 'true');
+      modal.classList.remove('show');
     }
 
     // Find the add-on button (look for the gear icon or "add-on" button)
