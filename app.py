@@ -174,6 +174,7 @@ def create_app() -> Flask:
             return {"permissions": {}}
         permissions = _get_role_permissions(user.role)
         permissions["view_calendar"] = bool(permissions.get("view_calendar")) and _calendar_feature_enabled(user)
+        permissions["view_ai_analysis"] = bool(permissions.get("view_ai_analysis")) and _ai_analysis_feature_enabled(user)
         return {"permissions": permissions}
 
     @app.context_processor
@@ -2985,6 +2986,306 @@ def create_app() -> Flask:
         except Exception:
             return jsonify(ok=False, message="Failed to generate summary report"), 500
 
+    @app.route("/admin/ai-analysis/summary", methods=["GET"])
+    @app.route("/api/admin/ai-analysis/summary", methods=["GET"])
+    def api_ai_analysis_summary():
+        user = _current_user()
+        forbidden = _require_api_role(user, ADMIN_ROLES)
+        if forbidden:
+            return forbidden
+        addon_block = _require_ai_analysis_feature(user)
+        if addon_block:
+            return addon_block
+        filters = _ai_scope_filters_for_user(_ai_analysis_filters_from_request(), user)
+        if filters["start_date"] > filters["end_date"]:
+            return jsonify(ok=False, message="Rentang tanggal tidak valid."), 400
+        payload = _ai_analysis_payload(filters)
+        return jsonify(ok=True, data=payload, filters=filters), 200
+
+    @app.route("/admin/ai-analysis/recalculate", methods=["POST"])
+    @app.route("/api/admin/ai-analysis/recalculate", methods=["POST"])
+    @app.route("/api/admin/ai-analysis/run", methods=["POST"])
+    def api_ai_analysis_run():
+        user = _current_user()
+        forbidden = _require_api_role(user, ADMIN_ROLES)
+        if forbidden:
+            return forbidden
+        addon_block = _require_ai_analysis_feature(user)
+        if addon_block:
+            return addon_block
+        filters = _ai_scope_filters_for_user(_ai_analysis_filters_from_request(), user)
+        if filters["start_date"] > filters["end_date"]:
+            return jsonify(ok=False, message="Rentang tanggal tidak valid."), 400
+        payload = _ai_analysis_payload(filters)
+        snapshot_id = _save_ai_analysis_snapshot(filters, payload, user.id)
+        return jsonify(ok=True, data=payload, snapshot_id=snapshot_id, filters=filters), 200
+
+    @app.route("/admin/ai-analysis/history", methods=["GET"])
+    @app.route("/api/admin/ai-analysis/history", methods=["GET"])
+    def api_ai_analysis_history():
+        user = _current_user()
+        forbidden = _require_api_role(user, ADMIN_ROLES)
+        if forbidden:
+            return forbidden
+        addon_block = _require_ai_analysis_feature(user)
+        if addon_block:
+            return addon_block
+        limit = _calendar_int(request.args.get("limit")) or 10
+        return jsonify(ok=True, data=_ai_analysis_history(min(limit, 50))), 200
+
+    @app.route("/admin/ai-analysis/config", methods=["GET", "POST"])
+    @app.route("/api/admin/ai-analysis/config", methods=["GET", "POST"])
+    def api_ai_analysis_config():
+        user = _current_user()
+        forbidden = _require_api_role(user, ADMIN_ROLES)
+        if forbidden:
+            return forbidden
+        addon_block = _require_ai_analysis_feature(user)
+        if addon_block:
+            return addon_block
+        if request.method == "GET":
+            return jsonify(ok=True, data=_ai_analysis_config(), defaults=AI_ANALYSIS_CONFIG_DEFAULTS), 200
+        data = request.get_json(silent=True) or {}
+        config = _save_ai_analysis_config(data, user)
+        return jsonify(ok=True, data=config), 200
+
+    @app.route("/admin/ai-analysis/cases", methods=["GET", "POST"])
+    @app.route("/api/admin/ai-analysis/cases", methods=["GET", "POST"])
+    def api_ai_analysis_cases():
+        user = _current_user()
+        forbidden = _require_api_role(user, ADMIN_ROLES)
+        if forbidden:
+            return forbidden
+        addon_block = _require_ai_analysis_feature(user)
+        if addon_block:
+            return addon_block
+        if request.method == "GET":
+            limit = _calendar_int(request.args.get("limit")) or 25
+            return jsonify(ok=True, data=_ai_cases(min(limit, 100))), 200
+        data = request.get_json(silent=True) or {}
+        if not (data.get("employee_email") or "").strip():
+            return jsonify(ok=False, message="employee_email wajib diisi."), 400
+        case_id = _create_ai_case(data, user)
+        return jsonify(ok=True, case=_ai_case_detail(case_id)), 200
+
+    @app.route("/admin/ai-analysis/cases/<int:case_id>/notes", methods=["POST"])
+    @app.route("/api/admin/ai-analysis/cases/<int:case_id>/notes", methods=["POST"])
+    def api_ai_analysis_case_notes(case_id: int):
+        user = _current_user()
+        forbidden = _require_api_role(user, ADMIN_ROLES)
+        if forbidden:
+            return forbidden
+        addon_block = _require_ai_analysis_feature(user)
+        if addon_block:
+            return addon_block
+        data = request.get_json(silent=True) or {}
+        if not _add_ai_case_note(case_id, data.get("note") or "", user):
+            return jsonify(ok=False, message="Case/note tidak valid."), 400
+        return jsonify(ok=True, case=_ai_case_detail(case_id)), 200
+
+    @app.route("/admin/ai-analysis/cases/<int:case_id>/status", methods=["POST"])
+    @app.route("/api/admin/ai-analysis/cases/<int:case_id>/status", methods=["POST"])
+    def api_ai_analysis_case_status(case_id: int):
+        user = _current_user()
+        forbidden = _require_api_role(user, ADMIN_ROLES)
+        if forbidden:
+            return forbidden
+        addon_block = _require_ai_analysis_feature(user)
+        if addon_block:
+            return addon_block
+        data = request.get_json(silent=True) or {}
+        if not _update_ai_case_status(case_id, data.get("case_status") or "", user, data.get("resolution_note")):
+            return jsonify(ok=False, message="Status case tidak valid."), 400
+        return jsonify(ok=True, case=_ai_case_detail(case_id)), 200
+
+    @app.route("/admin/ai-analysis/alerts/<int:alert_id>/review", methods=["POST"])
+    @app.route("/api/admin/ai-analysis/alerts/<int:alert_id>/review", methods=["POST"])
+    def api_ai_analysis_alert_review(alert_id: int):
+        user = _current_user()
+        forbidden = _require_api_role(user, ADMIN_ROLES)
+        if forbidden:
+            return forbidden
+        addon_block = _require_ai_analysis_feature(user)
+        if addon_block:
+            return addon_block
+        if not _review_ai_alert(alert_id, user):
+            return jsonify(ok=False, message="Alert tidak ditemukan."), 404
+        return jsonify(ok=True, alert_id=alert_id), 200
+
+    @app.route("/admin/ai-analysis/ranking", methods=["GET"])
+    @app.route("/api/admin/ai-analysis/ranking", methods=["GET"])
+    def api_ai_analysis_ranking():
+        user = _current_user()
+        forbidden = _require_api_role(user, ADMIN_ROLES)
+        if forbidden:
+            return forbidden
+        addon_block = _require_ai_analysis_feature(user)
+        if addon_block:
+            return addon_block
+        filters = _ai_scope_filters_for_user(_ai_analysis_filters_from_request(), user)
+        payload = _ai_analysis_payload(filters)
+        return jsonify(ok=True, data=payload.get("ranking", []), filters=filters), 200
+
+    @app.route("/admin/ai-analysis/late-employees", methods=["GET"])
+    @app.route("/api/admin/ai-analysis/late-employees", methods=["GET"])
+    def api_ai_analysis_late_employees():
+        user = _current_user()
+        forbidden = _require_api_role(user, ADMIN_ROLES)
+        if forbidden:
+            return forbidden
+        addon_block = _require_ai_analysis_feature(user)
+        if addon_block:
+            return addon_block
+        filters = _ai_scope_filters_for_user(_ai_analysis_filters_from_request(), user)
+        payload = _ai_analysis_payload(filters)
+        rows = [
+            row for row in payload.get("employee_analysis", [])
+            if row.get("late_category") in {"Frequent Late", "Chronic Late"}
+        ]
+        return jsonify(ok=True, data=rows, filters=filters), 200
+
+    @app.route("/admin/ai-analysis/absent-employees", methods=["GET"])
+    @app.route("/api/admin/ai-analysis/absent-employees", methods=["GET"])
+    def api_ai_analysis_absent_employees():
+        user = _current_user()
+        forbidden = _require_api_role(user, ADMIN_ROLES)
+        if forbidden:
+            return forbidden
+        addon_block = _require_ai_analysis_feature(user)
+        if addon_block:
+            return addon_block
+        filters = _ai_scope_filters_for_user(_ai_analysis_filters_from_request(), user)
+        payload = _ai_analysis_payload(filters)
+        return jsonify(ok=True, data=payload.get("high_absence", []), filters=filters), 200
+
+    @app.route("/admin/ai-analysis/employee/<int:employee_id>", methods=["GET"])
+    @app.route("/api/admin/ai-analysis/employee/<int:employee_id>", methods=["GET"])
+    def api_ai_analysis_employee_detail(employee_id: int):
+        user = _current_user()
+        forbidden = _require_api_role(user, ADMIN_ROLES)
+        if forbidden:
+            return forbidden
+        addon_block = _require_ai_analysis_feature(user)
+        if addon_block:
+            return addon_block
+        filters = _ai_scope_filters_for_user(_ai_analysis_filters_from_request(), user)
+        detail = _ai_employee_detail_by_user_id(employee_id, filters)
+        if not detail:
+            return jsonify(ok=False, message="Employee analysis tidak ditemukan."), 404
+        _log_audit_event(
+            "ai_analysis_employee_detail",
+            employee_id,
+            "VIEW",
+            user,
+            "AI Analysis employee detail opened.",
+            {"employee_id": employee_id, "rule_version": AI_ANALYSIS_RULE_VERSION},
+        )
+        return jsonify(ok=True, data=detail, filters=filters), 200
+
+    @app.route("/admin/ai-analysis/client/<int:client_id>", methods=["GET"])
+    @app.route("/api/admin/ai-analysis/client/<int:client_id>", methods=["GET"])
+    def api_ai_analysis_client_detail(client_id: int):
+        user = _current_user()
+        forbidden = _require_api_role(user, ADMIN_ROLES)
+        if forbidden:
+            return forbidden
+        addon_block = _require_ai_analysis_feature(user)
+        if addon_block:
+            return addon_block
+        filters = _ai_scope_filters_for_user(_ai_analysis_filters_from_request(), user)
+        filters["client_id"] = client_id
+        filters["site_id"] = None
+        payload = _ai_analysis_payload(filters)
+        return jsonify(ok=True, data={"summary": payload.get("summary", {}), "site_insights": payload.get("site_insights", [])}, filters=filters), 200
+
+    @app.route("/admin/ai-analysis/location/<int:site_id>", methods=["GET"])
+    @app.route("/api/admin/ai-analysis/location/<int:site_id>", methods=["GET"])
+    def api_ai_analysis_location_detail(site_id: int):
+        user = _current_user()
+        forbidden = _require_api_role(user, ADMIN_ROLES)
+        if forbidden:
+            return forbidden
+        addon_block = _require_ai_analysis_feature(user)
+        if addon_block:
+            return addon_block
+        filters = _ai_scope_filters_for_user(_ai_analysis_filters_from_request(), user)
+        filters["site_id"] = site_id
+        filters["client_id"] = None
+        payload = _ai_analysis_payload(filters)
+        return jsonify(ok=True, data={"summary": payload.get("summary", {}), "site_insights": payload.get("site_insights", [])}, filters=filters), 200
+
+    @app.route("/admin/ai-analysis/department/<int:department_id>", methods=["GET"])
+    @app.route("/api/admin/ai-analysis/department/<int:department_id>", methods=["GET"])
+    def api_ai_analysis_department_detail(department_id: int):
+        user = _current_user()
+        forbidden = _require_api_role(user, ADMIN_ROLES)
+        if forbidden:
+            return forbidden
+        addon_block = _require_ai_analysis_feature(user)
+        if addon_block:
+            return addon_block
+        return jsonify(
+            ok=True,
+            data={
+                "department_id": department_id,
+                "summary": {},
+                "message": "Department insight siap dihubungkan saat struktur department tersedia.",
+            },
+        ), 200
+
+    @app.route("/api/admin/ai-analysis/audit-detail", methods=["POST"])
+    def api_ai_analysis_audit_detail():
+        user = _current_user()
+        forbidden = _require_api_role(user, ADMIN_ROLES)
+        if forbidden:
+            return forbidden
+        addon_block = _require_ai_analysis_feature(user)
+        if addon_block:
+            return addon_block
+        data = request.get_json(silent=True) or {}
+        _log_audit_event(
+            "ai_analysis_employee_detail",
+            None,
+            "VIEW",
+            user,
+            "AI Analysis employee detail opened.",
+            {"employee_email": data.get("employee_email"), "rule_version": AI_ANALYSIS_RULE_VERSION},
+        )
+        return jsonify(ok=True), 200
+
+    @app.route("/admin/ai-analysis/export", methods=["GET"])
+    @app.route("/api/admin/ai-analysis/export", methods=["GET"])
+    def api_ai_analysis_export():
+        user = _current_user()
+        forbidden = _require_api_role(user, ADMIN_ROLES)
+        if forbidden:
+            return forbidden
+        addon_block = _require_ai_analysis_feature(user)
+        if addon_block:
+            return addon_block
+        filters = _ai_scope_filters_for_user(_ai_analysis_filters_from_request(), user)
+        if filters["start_date"] > filters["end_date"]:
+            return jsonify(ok=False, message="Rentang tanggal tidak valid."), 400
+        report_type = (request.args.get("report_type") or "discipline_ranking").strip().lower()
+        allowed = {"discipline_ranking", "frequent_late", "frequent_absence", "attendance_risk", "client_location", "monthly_summary", "employee_individual"}
+        if report_type not in allowed:
+            return jsonify(ok=False, message="report_type tidak valid."), 400
+        fmt = (request.args.get("format") or "csv").strip().lower()
+        payload = _ai_analysis_payload(filters)
+        rows = _ai_report_rows(report_type, payload)
+        filename_base = f"ai-analysis-{report_type}-{filters['start_date']}-{filters['end_date']}"
+        _log_audit_event(
+            "ai_analysis_export",
+            None,
+            "EXPORT",
+            user,
+            f"AI Analysis {report_type} exported.",
+            {"format": fmt, "rule_version": AI_ANALYSIS_RULE_VERSION, **filters},
+        )
+        if fmt == "pdf":
+            return _simple_pdf_response(f"{filename_base}.pdf", f"AI Analysis - {report_type}", rows)
+        return _csv_response(f"{filename_base}.csv", rows)
+
     @app.route("/api/reports/calendar", methods=["GET"])
     def reports_calendar():
         user = _current_user()
@@ -3745,6 +4046,7 @@ THEME_LABELS = {
 ROLE_PERMISSION_KEYS = [
     "view_overview",
     "view_calendar",
+    "view_ai_analysis",
     "manage_clients_view",
     "manage_clients_add",
     "manage_clients_actions",
@@ -3765,6 +4067,7 @@ ROLE_PERMISSION_KEYS = [
 ROLE_PERMISSION_LABELS = {
     "view_overview": "Overview",
     "view_calendar": "Calendar",
+    "view_ai_analysis": "AI Analysis",
     "manage_clients_view": "Clients: Lihat",
     "manage_clients_add": "Clients: Tambah",
     "manage_clients_actions": "Clients: Aksi (Edit/Hapus)",
@@ -4203,6 +4506,7 @@ def _permission_for_admin_endpoint(endpoint: str | None) -> str | None:
         "admin.calendar_notes_create": "view_calendar",
         "admin.calendar_notes_update": "view_calendar",
         "admin.calendar_notes_delete": "view_calendar",
+        "admin.ai_analysis": "view_ai_analysis",
         "admin.clients": "manage_clients_view",
         "admin.client_profile": "manage_clients_view",
         "admin.clients_create": "manage_clients_add",
@@ -9308,6 +9612,136 @@ def _ensure_calendar_tables(conn: sqlite3.Connection) -> None:
     _ensure_notifications_table(conn)
 
 
+def _ensure_ai_analysis_tables(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS ai_analysis_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            analysis_date TEXT NOT NULL,
+            range_start TEXT NOT NULL,
+            range_end TEXT NOT NULL,
+            client_id INTEGER,
+            site_id INTEGER,
+            summary_json TEXT NOT NULL,
+            insights_json TEXT NOT NULL,
+            risks_json TEXT NOT NULL,
+            recommendations_json TEXT NOT NULL,
+            alerts_json TEXT,
+            rule_version TEXT,
+            created_by INTEGER,
+            created_at TEXT NOT NULL,
+            updated_at TEXT
+        )
+        """
+    )
+    _ensure_column(conn, "ai_analysis_snapshots", "alerts_json", "alerts_json TEXT")
+    _ensure_column(conn, "ai_analysis_snapshots", "rule_version", "rule_version TEXT")
+    _ensure_column(conn, "ai_analysis_snapshots", "updated_at", "updated_at TEXT")
+    for column, definition in {
+        "employee_id": "employee_id INTEGER",
+        "total_work_days": "total_work_days INTEGER",
+        "present_days": "present_days INTEGER",
+        "late_days": "late_days INTEGER",
+        "absent_days": "absent_days INTEGER",
+        "total_late_minutes": "total_late_minutes INTEGER",
+        "early_leave_days": "early_leave_days INTEGER",
+        "missing_checkout_days": "missing_checkout_days INTEGER",
+        "attendance_rate": "attendance_rate REAL",
+        "absence_rate": "absence_rate REAL",
+        "discipline_score": "discipline_score REAL",
+        "grade": "grade TEXT",
+        "risk_level": "risk_level TEXT",
+        "insight_text": "insight_text TEXT",
+        "recommendation_text": "recommendation_text TEXT",
+    }.items():
+        _ensure_column(conn, "ai_analysis_snapshots", column, definition)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ai_analysis_created ON ai_analysis_snapshots(created_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ai_analysis_scope ON ai_analysis_snapshots(client_id, site_id, analysis_date)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ai_analysis_employee ON ai_analysis_snapshots(employee_id, range_start, range_end)")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS ai_analysis_configs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            config_key TEXT UNIQUE NOT NULL,
+            config_value TEXT NOT NULL,
+            description TEXT,
+            updated_by INTEGER,
+            created_at TEXT,
+            updated_at TEXT
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS ai_analysis_alerts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            employee_id INTEGER,
+            employee_email TEXT,
+            employee_name TEXT,
+            department_id INTEGER,
+            client_id INTEGER,
+            location_id INTEGER,
+            site_id INTEGER,
+            alert_type TEXT NOT NULL,
+            alert_level TEXT NOT NULL,
+            title TEXT NOT NULL,
+            description TEXT,
+            metric_value REAL,
+            threshold_value REAL,
+            status TEXT NOT NULL DEFAULT 'open',
+            assigned_to INTEGER,
+            reviewed_by INTEGER,
+            reviewed_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ai_alerts_status ON ai_analysis_alerts(status)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ai_alerts_employee ON ai_analysis_alerts(employee_email)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ai_alerts_scope ON ai_analysis_alerts(client_id, site_id, created_at)")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS ai_analysis_cases (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            employee_id INTEGER,
+            employee_email TEXT NOT NULL,
+            employee_name TEXT,
+            alert_id INTEGER,
+            alert_type TEXT,
+            case_title TEXT NOT NULL,
+            case_status TEXT NOT NULL DEFAULT 'open',
+            priority TEXT NOT NULL DEFAULT 'medium',
+            assigned_to INTEGER,
+            resolution_note TEXT,
+            created_by INTEGER,
+            created_at TEXT NOT NULL,
+            updated_at TEXT,
+            FOREIGN KEY (alert_id) REFERENCES ai_analysis_alerts(id) ON DELETE SET NULL
+        )
+        """
+    )
+    _ensure_column(conn, "ai_analysis_cases", "employee_id", "employee_id INTEGER")
+    _ensure_column(conn, "ai_analysis_cases", "alert_id", "alert_id INTEGER")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS ai_analysis_case_notes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            case_id INTEGER NOT NULL,
+            note TEXT NOT NULL,
+            created_by INTEGER,
+            created_at TEXT NOT NULL,
+            updated_at TEXT,
+            FOREIGN KEY (case_id) REFERENCES ai_analysis_cases(id) ON DELETE CASCADE
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ai_cases_employee ON ai_analysis_cases(employee_email)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ai_cases_status ON ai_analysis_cases(case_status)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ai_cases_alert ON ai_analysis_cases(alert_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ai_case_notes_case ON ai_analysis_case_notes(case_id)")
+
+
 def _init_db() -> None:
     conn = _db_connect()
     try:
@@ -9657,6 +10091,7 @@ def _init_db() -> None:
             "CREATE INDEX IF NOT EXISTS idx_logs_client_branch ON logs(client_id, branch_id)"
         )
         _ensure_calendar_tables(conn)
+        _ensure_ai_analysis_tables(conn)
 
         conn.execute(
             """
@@ -10595,6 +11030,23 @@ def _calendar_feature_enabled(user: User | None) -> bool:
     if ADDON_CALENDAR in _global_addons():
         return True
     return _admin_enterprise_addon_enabled(user, ADDON_CALENDAR)
+
+
+def _ai_analysis_feature_enabled(user: User | None) -> bool:
+    if not user or user.role not in ADMIN_ROLES:
+        return False
+    return ADDON_AI in _global_addons()
+
+
+def _require_ai_analysis_feature(user: User | None):
+    if not user or user.role not in ADMIN_ROLES:
+        return _json_forbidden()
+    if not _ai_analysis_feature_enabled(user):
+        return (
+            jsonify(ok=False, message="AI Analysis membutuhkan add-on AI aktif."),
+            403,
+        )
+    return None
 
 
 def _require_calendar_feature(user: User | None):
@@ -11884,6 +12336,1327 @@ def _csv_response(filename: str, rows: list[dict]) -> Response:
     return Response(
         buffer.getvalue(),
         mimetype="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+def _ai_analysis_filters_from_request() -> dict:
+    start_date = _normalize_date_input(request.args.get("start_date"))
+    end_date = _normalize_date_input(request.args.get("end_date"))
+    if not start_date or not end_date:
+        end_dt = datetime.strptime(_today_key(), "%Y-%m-%d").date()
+        start_dt = end_dt - timedelta(days=29)
+        start_date = start_dt.strftime("%Y-%m-%d")
+        end_date = end_dt.strftime("%Y-%m-%d")
+    return {
+        "start_date": start_date,
+        "end_date": end_date,
+        "client_id": _calendar_int(request.args.get("client_id")),
+        "site_id": _calendar_int(request.args.get("site_id")),
+    }
+
+
+def _ai_scope_filters_for_user(filters: dict, user: User | None) -> dict:
+    scoped = dict(filters)
+    if user and user.role == "supervisor":
+        if user.site_id:
+            scoped["site_id"] = user.site_id
+            scoped["client_id"] = None
+        elif user.client_id:
+            scoped["client_id"] = user.client_id
+    return scoped
+
+
+def _ai_rate(numerator: int | float, denominator: int | float) -> float:
+    return round((float(numerator) / float(denominator) * 100), 1) if denominator else 0.0
+
+
+AI_ANALYSIS_RULE_VERSION = "rule-based-v1.2"
+
+AI_ANALYSIS_CONFIG_DEFAULTS = {
+    "frequent_late_threshold": ("5", "Jumlah telat untuk kategori Frequent Late."),
+    "chronic_late_threshold": ("10", "Jumlah telat untuk kategori Chronic Late."),
+    "frequent_absence_threshold": ("2", "Jumlah absen untuk kategori Risk."),
+    "critical_absence_threshold": ("4", "Jumlah absen untuk kategori Critical."),
+    "late_penalty_per_day": ("2", "Penalty score per hari telat."),
+    "late_minute_penalty": ("0.05", "Penalty score per menit telat."),
+    "absence_penalty_per_day": ("8", "Penalty score per absen tanpa keterangan."),
+    "early_leave_penalty_per_day": ("3", "Penalty score per pulang cepat."),
+    "missing_checkout_penalty_per_day": ("2", "Penalty score per missing checkout."),
+    "grade_a_min": ("90", "Minimum score grade A."),
+    "grade_b_min": ("80", "Minimum score grade B."),
+    "grade_c_min": ("70", "Minimum score grade C."),
+    "grade_d_min": ("60", "Minimum score grade D."),
+    "alert_late_threshold": ("3", "Batas alert telat pada periode aktif."),
+    "alert_absence_threshold": ("2", "Batas alert absen pada periode aktif."),
+    "alert_score_drop_threshold": ("15", "Batas penurunan average score."),
+    "alert_site_late_rate": ("25", "Batas late rate lokasi."),
+    "alert_site_absence_rate": ("10", "Batas absence rate lokasi."),
+}
+
+
+class AttendanceMetricService:
+    @staticmethod
+    def build_employee_rows(
+        attendance_rows: list[dict],
+        absent_rows: list[dict],
+        schedule_rows: list[dict],
+        workload_rows: list[dict],
+        config: dict | None = None,
+    ) -> list[dict]:
+        return _ai_employee_analysis_rows(attendance_rows, absent_rows, schedule_rows, workload_rows, config)
+
+
+class DisciplineScoreService:
+    @staticmethod
+    def grade(score: float, config: dict | None = None) -> str:
+        return _ai_discipline_grade(score, config)
+
+    @staticmethod
+    def category(score: float, absent_days: int) -> str:
+        return _ai_discipline_category(score, absent_days)
+
+
+class InsightGeneratorService:
+    @staticmethod
+    def employee(row: dict) -> str:
+        return _ai_employee_insight(row)
+
+
+class RecommendationService:
+    @staticmethod
+    def employee(row: dict) -> list[str]:
+        return _ai_employee_recommendations(row)
+
+
+class RiskAlertService:
+    @staticmethod
+    def build(employee_rows: list[dict], site_rows: list[dict], comparison: dict, config: dict | None = None) -> list[dict]:
+        return _ai_alerts_payload(employee_rows, site_rows, comparison, config)
+
+
+class AnalysisSnapshotService:
+    @staticmethod
+    def save(filters: dict, payload: dict, user_id: int | None) -> int:
+        return _save_ai_analysis_snapshot(filters, payload, user_id)
+
+    @staticmethod
+    def history(limit: int = 10) -> list[dict]:
+        return _ai_analysis_history(limit)
+
+
+class AIAnalysisService:
+    @staticmethod
+    def payload(filters: dict, include_comparison: bool = True) -> dict:
+        return _ai_analysis_payload(filters, include_comparison=include_comparison)
+
+
+def _ai_config_value(config: dict, key: str, cast=float):
+    default = AI_ANALYSIS_CONFIG_DEFAULTS[key][0]
+    value = config.get(key, default)
+    try:
+        return cast(value)
+    except (TypeError, ValueError):
+        return cast(default)
+
+
+def _ai_analysis_config() -> dict:
+    conn = _db_connect()
+    try:
+        _ensure_ai_analysis_tables(conn)
+        rows = conn.execute("SELECT config_key, config_value FROM ai_analysis_configs").fetchall()
+        values = {key: default for key, (default, _description) in AI_ANALYSIS_CONFIG_DEFAULTS.items()}
+        values.update({row["config_key"]: row["config_value"] for row in rows})
+        return values
+    finally:
+        conn.close()
+
+
+def _save_ai_analysis_config(updates: dict, user: User | None) -> dict:
+    allowed = set(AI_ANALYSIS_CONFIG_DEFAULTS)
+    now = _now_ts()
+    clean_updates = {}
+    for key, value in updates.items():
+        if key not in allowed:
+            continue
+        try:
+            number_value = float(value)
+        except (TypeError, ValueError):
+            continue
+        clean_updates[key] = str(max(0, number_value))
+    conn = _db_connect()
+    try:
+        _ensure_ai_analysis_tables(conn)
+        for key, value in clean_updates.items():
+            description = AI_ANALYSIS_CONFIG_DEFAULTS[key][1]
+            conn.execute(
+                """
+                INSERT INTO ai_analysis_configs (
+                    config_key, config_value, description, updated_by, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(config_key) DO UPDATE SET
+                    config_value = excluded.config_value,
+                    description = excluded.description,
+                    updated_by = excluded.updated_by,
+                    updated_at = excluded.updated_at
+                """,
+                (key, value, description, user.id if user else None, now, now),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+    if clean_updates:
+        _log_audit_event(
+            "ai_analysis_config",
+            None,
+            "UPDATE",
+            user,
+            "AI Analysis threshold configuration updated.",
+            {"keys": sorted(clean_updates)},
+        )
+    return _ai_analysis_config()
+
+
+def _ai_severity(score: float) -> str:
+    if score >= 70:
+        return "critical"
+    if score >= 40:
+        return "warning"
+    return "info"
+
+
+def _ai_late_category(late_days: int, config: dict | None = None) -> str:
+    config = config or {}
+    chronic_threshold = int(_ai_config_value(config, "chronic_late_threshold", int))
+    frequent_threshold = int(_ai_config_value(config, "frequent_late_threshold", int))
+    if late_days >= chronic_threshold:
+        return "Chronic Late"
+    if late_days >= frequent_threshold:
+        return "Frequent Late"
+    if late_days >= 3:
+        return "Attention"
+    return "Normal"
+
+
+def _ai_absence_category(absent_days: int, config: dict | None = None) -> str:
+    config = config or {}
+    critical_threshold = int(_ai_config_value(config, "critical_absence_threshold", int))
+    frequent_threshold = int(_ai_config_value(config, "frequent_absence_threshold", int))
+    if absent_days >= critical_threshold:
+        return "Critical"
+    if absent_days >= frequent_threshold:
+        return "Risk"
+    if absent_days == 1:
+        return "Attention"
+    return "Normal"
+
+
+def _ai_discipline_grade(score: float, config: dict | None = None) -> str:
+    config = config or {}
+    if score >= _ai_config_value(config, "grade_a_min"):
+        return "A"
+    if score >= _ai_config_value(config, "grade_b_min"):
+        return "B"
+    if score >= _ai_config_value(config, "grade_c_min"):
+        return "C"
+    if score >= _ai_config_value(config, "grade_d_min"):
+        return "D"
+    return "E"
+
+
+def _ai_discipline_category(score: float, absent_days: int) -> str:
+    if score < 60 or absent_days >= 4:
+        return "Critical HR Action Required"
+    if score < 70 or absent_days >= 2:
+        return "High Risk"
+    if score < 80:
+        return "Needs Attention"
+    if score < 90:
+        return "Stable Discipline"
+    return "Excellent Discipline"
+
+
+def _ai_employee_insight(row: dict) -> str:
+    if row["late_category"] in {"Frequent Late", "Chronic Late"}:
+        return "Pegawai ini memiliki pola keterlambatan tinggi pada periode ini."
+    if row["absence_category"] in {"Risk", "Critical"}:
+        return "Pegawai ini memiliki risiko kedisiplinan karena absen tanpa keterangan melebihi batas."
+    if row["discipline_grade"] == "A":
+        return "Pegawai memiliki konsistensi attendance sangat baik."
+    if row["discipline_grade"] in {"B", "C"}:
+        return "Disiplin pegawai masih stabil, dengan beberapa area yang perlu dimonitor."
+    return "Pegawai membutuhkan tindak lanjut HR berdasarkan data attendance periode ini."
+
+
+def _ai_employee_recommendations(row: dict) -> list[str]:
+    recommendations: list[str] = []
+    if row["late_category"] == "Attention":
+        recommendations.append("Lakukan reminder dan coaching ringan oleh supervisor dalam 7 hari.")
+    if row["late_category"] in {"Frequent Late", "Chronic Late"}:
+        recommendations.append("Review kecocokan jadwal shift dengan lokasi penempatan.")
+    if row["absence_category"] in {"Attention", "Risk"}:
+        recommendations.append("Lakukan HR check-in untuk memahami penyebab absen tanpa keterangan.")
+    if row["absence_category"] == "Critical":
+        recommendations.append("Pertimbangkan tindakan sesuai policy setelah verifikasi dan dokumentasi HR.")
+    if row["missing_checkout_days"]:
+        recommendations.append("Ingatkan employee untuk menyelesaikan checkout agar data attendance lengkap.")
+    if row["discipline_score"] >= 95:
+        recommendations.append("Pertimbangkan recognition untuk konsistensi attendance yang sangat baik.")
+    return recommendations or ["Pertahankan monitoring rutin; belum ada tindakan khusus yang diperlukan."]
+
+
+def _ai_employee_analysis_rows(
+    attendance_rows: list[dict],
+    absent_rows: list[dict],
+    schedule_rows: list[dict],
+    workload_rows: list[dict],
+    config: dict | None = None,
+) -> list[dict]:
+    employees: dict[str, dict] = {}
+    config = config or {}
+
+    def ensure_employee(email: str | None, name: str | None = None) -> dict:
+        key = (email or "").strip().lower()
+        if not key:
+            key = (name or "unknown").strip().lower()
+        if key not in employees:
+            employees[key] = {
+                "employee_email": email or "-",
+                "employee_name": name or email or "-",
+                "work_days": 0,
+                "present_days": 0,
+                "late_days": 0,
+                "unexcused_absent_days": 0,
+                "leave_days": 0,
+                "early_leave_days": 0,
+                "missing_checkout_days": 0,
+                "total_late_minutes": 0,
+                "scheduled_days": 0,
+                "tasks_total": 0,
+                "tasks_done": 0,
+                "urgent_open": 0,
+            }
+        elif name and employees[key]["employee_name"] in {"-", employees[key]["employee_email"]}:
+            employees[key]["employee_name"] = name
+        return employees[key]
+
+    for row in schedule_rows:
+        item = ensure_employee(row.get("employee_email"), row.get("employee_name"))
+        item["work_days"] += 1
+        item["scheduled_days"] += 1
+        status = row.get("attendance_status")
+        if status in {"on_time", "late", "early_leave"}:
+            item["present_days"] += 1
+        if status == "late":
+            item["late_days"] += 1
+        if status == "absent":
+            item["unexcused_absent_days"] += 1
+        if status == "early_leave":
+            item["early_leave_days"] += 1
+        if row.get("checkin_time") and not row.get("checkout_time"):
+            item["missing_checkout_days"] += 1
+        item["total_late_minutes"] += int(row.get("late_minutes") or 0)
+
+    if not schedule_rows:
+        for row in attendance_rows:
+            item = ensure_employee(row.get("employee_email"), row.get("employee_name"))
+            item["work_days"] += 1
+            item["present_days"] += 1
+            if row.get("status") == "LATE":
+                item["late_days"] += 1
+        for row in absent_rows:
+            item = ensure_employee(row.get("employee_email"), row.get("employee_name"))
+            item["work_days"] += 1
+            if row.get("status") == "ON_LEAVE":
+                item["leave_days"] += 1
+            elif row.get("status") == "ABSENT":
+                item["unexcused_absent_days"] += 1
+
+    for row in workload_rows:
+        item = ensure_employee(row.get("employee_email"), row.get("employee_name"))
+        item["scheduled_days"] = max(item["scheduled_days"], int(row.get("scheduled_days") or 0))
+        item["tasks_total"] = int(row.get("tasks_total") or 0)
+        item["tasks_done"] = int(row.get("tasks_done") or 0)
+        item["urgent_open"] = int(row.get("urgent_open") or 0)
+
+    result = []
+    for item in employees.values():
+        score = 100.0
+        score -= item["late_days"] * _ai_config_value(config, "late_penalty_per_day")
+        score -= item["total_late_minutes"] * _ai_config_value(config, "late_minute_penalty")
+        score -= item["unexcused_absent_days"] * _ai_config_value(config, "absence_penalty_per_day")
+        score -= item["early_leave_days"] * _ai_config_value(config, "early_leave_penalty_per_day")
+        score -= item["missing_checkout_days"] * _ai_config_value(config, "missing_checkout_penalty_per_day")
+        score = round(max(0.0, min(100.0, score)), 1)
+        item["attendance_rate"] = _ai_rate(item["present_days"], item["work_days"])
+        item["absence_rate"] = _ai_rate(item["unexcused_absent_days"], item["work_days"])
+        item["late_rate"] = _ai_rate(item["late_days"], item["work_days"])
+        item["discipline_score"] = score
+        item["discipline_grade"] = _ai_discipline_grade(score, config)
+        item["late_category"] = _ai_late_category(item["late_days"], config)
+        item["absence_category"] = _ai_absence_category(item["unexcused_absent_days"], config)
+        item["discipline_category"] = _ai_discipline_category(score, item["unexcused_absent_days"])
+        item["insight"] = _ai_employee_insight(item)
+        item["recommendations"] = _ai_employee_recommendations(item)
+        result.append(item)
+    return sorted(result, key=lambda row: (row["discipline_score"], -row["unexcused_absent_days"], -row["late_days"], row["employee_name"]))
+
+
+def _ai_week_key(date_value: str | None) -> str:
+    try:
+        dt = datetime.strptime(date_value or "", "%Y-%m-%d").date()
+    except ValueError:
+        return "Unknown"
+    year, week, _ = dt.isocalendar()
+    return f"{year}-W{week:02d}"
+
+
+def _ai_grade_distribution(employee_rows: list[dict]) -> list[dict]:
+    grades = {grade: 0 for grade in ["A", "B", "C", "D", "E"]}
+    for row in employee_rows:
+        grade = row.get("discipline_grade") or "E"
+        grades[grade] = grades.get(grade, 0) + 1
+    return [{"label": grade, "value": total} for grade, total in grades.items()]
+
+
+def _ai_trend_rows(schedule_rows: list[dict], absent_rows: list[dict]) -> dict:
+    trend: dict[str, dict] = {}
+    for row in schedule_rows:
+        week = _ai_week_key(row.get("date"))
+        trend.setdefault(week, {"label": week, "late": 0, "absent": 0})
+        if row.get("attendance_status") == "late":
+            trend[week]["late"] += 1
+        if row.get("attendance_status") == "absent":
+            trend[week]["absent"] += 1
+    if not schedule_rows:
+        for row in absent_rows:
+            if row.get("status") != "ABSENT":
+                continue
+            week = _ai_week_key(row.get("date"))
+            trend.setdefault(week, {"label": week, "late": 0, "absent": 0})
+            trend[week]["absent"] += 1
+    rows = [trend[key] for key in sorted(trend)]
+    return {
+        "late_weekly": [{"label": row["label"], "value": row["late"]} for row in rows],
+        "absent_weekly": [{"label": row["label"], "value": row["absent"]} for row in rows],
+    }
+
+
+def _ai_site_insights(schedule_rows: list[dict]) -> list[dict]:
+    sites: dict[str, dict] = {}
+    for row in schedule_rows:
+        key = row.get("site_name") or "-"
+        item = sites.setdefault(key, {
+            "site_name": key,
+            "client_name": row.get("client_name") or "-",
+            "scheduled": 0,
+            "present": 0,
+            "late": 0,
+            "absent": 0,
+            "early_leave": 0,
+            "total_late_minutes": 0,
+            "shifts": {},
+        })
+        item["scheduled"] += 1
+        status = row.get("attendance_status")
+        if status in {"on_time", "late", "early_leave"}:
+            item["present"] += 1
+        if status == "late":
+            item["late"] += 1
+        if status == "absent":
+            item["absent"] += 1
+        if status == "early_leave":
+            item["early_leave"] += 1
+        item["total_late_minutes"] += int(row.get("late_minutes") or 0)
+        shift = row.get("shift_name") or "-"
+        item["shifts"][shift] = item["shifts"].get(shift, 0) + (1 if status in {"late", "absent", "early_leave"} else 0)
+    result = []
+    for item in sites.values():
+        shifts = item.pop("shifts")
+        item["attendance_rate"] = _ai_rate(item["present"], item["scheduled"])
+        item["late_rate"] = _ai_rate(item["late"], item["scheduled"])
+        item["absence_rate"] = _ai_rate(item["absent"], item["scheduled"])
+        item["risk_score"] = round(item["late_rate"] + item["absence_rate"] * 1.5 + item["early_leave"] * 2, 1)
+        item["problem_shift"] = max(shifts.items(), key=lambda pair: pair[1])[0] if shifts else "-"
+        item["recommendation"] = (
+            "Audit transport/lokasi/client dan review jam shift."
+            if item["risk_score"] >= 25
+            else "Monitoring rutin lokasi masih memadai."
+        )
+        result.append(item)
+    return sorted(result, key=lambda row: row["risk_score"], reverse=True)
+
+
+def _ai_dashboard_payload(
+    employee_rows: list[dict],
+    schedule_rows: list[dict],
+    absent_rows: list[dict],
+) -> dict:
+    trend = _ai_trend_rows(schedule_rows, absent_rows)
+    top_late = sorted(employee_rows, key=lambda row: (row.get("late_days") or 0, row.get("total_late_minutes") or 0), reverse=True)[:10]
+    top_absent = sorted(employee_rows, key=lambda row: row.get("unexcused_absent_days") or 0, reverse=True)[:10]
+    site_rows = _ai_site_insights(schedule_rows)
+    return {
+        "trend_late_weekly": trend["late_weekly"],
+        "trend_absent_weekly": trend["absent_weekly"],
+        "score_distribution": _ai_grade_distribution(employee_rows),
+        "top_late_employees": [
+            {"label": row.get("employee_name"), "value": row.get("late_days") or 0}
+            for row in top_late
+        ],
+        "top_absent_employees": [
+            {"label": row.get("employee_name"), "value": row.get("unexcused_absent_days") or 0}
+            for row in top_absent
+        ],
+        "site_risk": [
+            {"label": row.get("site_name"), "value": row.get("risk_score") or 0}
+            for row in site_rows[:10]
+        ],
+        "attendance_rate_by_location": [
+            {"label": row.get("site_name"), "value": row.get("attendance_rate") or 0}
+            for row in site_rows[:10]
+        ],
+    }
+
+
+def _ai_employee_drilldowns(
+    employee_rows: list[dict],
+    schedule_rows: list[dict],
+) -> dict:
+    timelines: dict[str, list[dict]] = {}
+    for row in schedule_rows:
+        email = (row.get("employee_email") or "").strip().lower()
+        if not email:
+            continue
+        timelines.setdefault(email, []).append({
+            "date": row.get("date"),
+            "status": row.get("attendance_status"),
+            "checkin_time": row.get("checkin_time"),
+            "checkout_time": row.get("checkout_time"),
+            "late_minutes": row.get("late_minutes") or 0,
+            "site_name": row.get("site_name"),
+            "shift_name": row.get("shift_name"),
+        })
+    drilldowns = {}
+    for row in employee_rows:
+        email = (row.get("employee_email") or "").strip().lower()
+        timeline = sorted(timelines.get(email, []), key=lambda item: item.get("date") or "")
+        checkin_times = [
+            item.get("checkin_time")
+            for item in timeline
+            if item.get("checkin_time")
+        ]
+        drilldowns[email] = {
+            "employee": row,
+            "timeline": timeline[-20:],
+            "late_days": [item for item in timeline if item.get("status") == "late"],
+            "absent_days": [item for item in timeline if item.get("status") == "absent"],
+            "checkin_pattern": checkin_times[-10:],
+            "score_history": [],
+        }
+    return drilldowns
+
+
+def _ai_previous_period(filters: dict) -> dict:
+    start_dt = datetime.strptime(filters["start_date"], "%Y-%m-%d").date()
+    end_dt = datetime.strptime(filters["end_date"], "%Y-%m-%d").date()
+    days = (end_dt - start_dt).days + 1
+    prev_end = start_dt - timedelta(days=1)
+    prev_start = prev_end - timedelta(days=days - 1)
+    return {
+        "start_date": prev_start.strftime("%Y-%m-%d"),
+        "end_date": prev_end.strftime("%Y-%m-%d"),
+        "client_id": filters.get("client_id"),
+        "site_id": filters.get("site_id"),
+    }
+
+
+def _ai_comparison_payload(filters: dict, current_summary: dict, current_employees: list[dict]) -> dict:
+    prev_filters = _ai_previous_period(filters)
+    try:
+        previous = _ai_analysis_payload(prev_filters, include_comparison=False)
+    except Exception:
+        previous = {"summary": {}, "employee_analysis": []}
+    previous_summary = previous.get("summary", {})
+    previous_by_email = {
+        (row.get("employee_email") or "").strip().lower(): row
+        for row in previous.get("employee_analysis", [])
+    }
+    improved = []
+    declined = []
+    for row in current_employees:
+        email = (row.get("employee_email") or "").strip().lower()
+        prev = previous_by_email.get(email)
+        if not prev:
+            continue
+        delta = round(float(row.get("discipline_score") or 0) - float(prev.get("discipline_score") or 0), 1)
+        item = {
+            "employee_email": row.get("employee_email"),
+            "employee_name": row.get("employee_name"),
+            "previous_score": prev.get("discipline_score"),
+            "current_score": row.get("discipline_score"),
+            "delta": delta,
+        }
+        if delta >= 5:
+            improved.append(item)
+        if delta <= -5:
+            declined.append(item)
+    return {
+        "previous_period": previous_summary.get("period"),
+        "attendance_rate_delta": round(float(current_summary.get("attendance_rate") or 0) - float(previous_summary.get("attendance_rate") or 0), 1),
+        "late_rate_delta": round(float(current_summary.get("late_rate") or 0) - float(previous_summary.get("late_rate") or 0), 1),
+        "average_score_delta": round(float(current_summary.get("average_discipline_score") or 0) - float(previous_summary.get("average_discipline_score") or 0), 1),
+        "improvement_list": sorted(improved, key=lambda row: row["delta"], reverse=True)[:10],
+        "declining_list": sorted(declined, key=lambda row: row["delta"])[:10],
+    }
+
+
+def _ai_alerts_payload(
+    employee_rows: list[dict],
+    site_rows: list[dict],
+    comparison: dict,
+    config: dict | None = None,
+) -> list[dict]:
+    alerts = []
+    config = config or {}
+    late_threshold = int(_ai_config_value(config, "alert_late_threshold", int))
+    absence_threshold = int(_ai_config_value(config, "alert_absence_threshold", int))
+    score_drop_threshold = _ai_config_value(config, "alert_score_drop_threshold")
+    site_late_rate = _ai_config_value(config, "alert_site_late_rate")
+    site_absence_rate = _ai_config_value(config, "alert_site_absence_rate")
+    for row in employee_rows:
+        if (row.get("late_days") or 0) >= late_threshold:
+            alerts.append({
+                "level": "warning" if (row.get("late_days") or 0) < 6 else "high_risk",
+                "type": "late_frequency",
+                "title": f"{row.get('employee_name')} sering telat",
+                "message": f"{row.get('late_days')} hari telat pada periode ini.",
+                "employee_email": row.get("employee_email"),
+                "employee_name": row.get("employee_name"),
+                "metric_value": row.get("late_days") or 0,
+                "threshold_value": late_threshold,
+                "actions": ["mark_reviewed", "assign_supervisor", "create_coaching_task"],
+            })
+        if (row.get("unexcused_absent_days") or 0) >= absence_threshold:
+            alerts.append({
+                "level": "high_risk" if (row.get("unexcused_absent_days") or 0) < 4 else "critical",
+                "type": "absence_frequency",
+                "title": f"{row.get('employee_name')} absen berulang",
+                "message": f"{row.get('unexcused_absent_days')} absen tanpa keterangan pada periode ini.",
+                "employee_email": row.get("employee_email"),
+                "employee_name": row.get("employee_name"),
+                "metric_value": row.get("unexcused_absent_days") or 0,
+                "threshold_value": absence_threshold,
+                "actions": ["mark_reviewed", "assign_hr", "add_note", "export_evidence"],
+            })
+        if row.get("discipline_category") == "Critical HR Action Required":
+            alerts.append({
+                "level": "critical",
+                "type": "critical_employee",
+                "title": f"{row.get('employee_name')} masuk kategori critical",
+                "message": f"Discipline score {row.get('discipline_score')} membutuhkan review HR.",
+                "employee_email": row.get("employee_email"),
+                "employee_name": row.get("employee_name"),
+                "metric_value": row.get("discipline_score") or 0,
+                "threshold_value": 60,
+                "actions": ["assign_hr", "add_note", "create_coaching_task", "export_evidence"],
+            })
+    for site in site_rows:
+        if (site.get("late_rate") or 0) > site_late_rate:
+            alerts.append({
+                "level": "high_risk",
+                "type": "site_late_rate",
+                "title": f"Late rate tinggi di {site.get('site_name')}",
+                "message": f"Late rate {site.get('late_rate')}% pada lokasi ini.",
+                "client_name": site.get("client_name"),
+                "site_name": site.get("site_name"),
+                "metric_value": site.get("late_rate") or 0,
+                "threshold_value": site_late_rate,
+                "actions": ["mark_reviewed", "assign_supervisor", "add_note"],
+            })
+        if (site.get("absence_rate") or 0) > site_absence_rate:
+            alerts.append({
+                "level": "warning",
+                "type": "site_absence_rate",
+                "title": f"Absence rate tinggi di {site.get('site_name')}",
+                "message": f"Absence rate {site.get('absence_rate')}% pada lokasi ini.",
+                "client_name": site.get("client_name"),
+                "site_name": site.get("site_name"),
+                "metric_value": site.get("absence_rate") or 0,
+                "threshold_value": site_absence_rate,
+                "actions": ["mark_reviewed", "assign_hr", "add_note"],
+            })
+    if (comparison.get("average_score_delta") or 0) < -score_drop_threshold:
+        alerts.append({
+            "level": "high_risk",
+            "type": "score_decline",
+            "title": "Average discipline score turun signifikan",
+            "message": f"Score turun {abs(comparison.get('average_score_delta'))} poin dibanding periode sebelumnya.",
+            "metric_value": abs(comparison.get("average_score_delta") or 0),
+            "threshold_value": score_drop_threshold,
+            "actions": ["mark_reviewed", "assign_hr", "export_evidence"],
+        })
+    order = {"critical": 0, "high_risk": 1, "warning": 2, "info": 3}
+    return sorted(alerts, key=lambda row: order.get(row.get("level"), 9))[:25]
+
+
+def _ai_predictive_readiness_payload(summary: dict, employee_rows: list[dict], site_rows: list[dict]) -> dict:
+    data_points = sum(int(row.get("work_days") or 0) for row in employee_rows)
+    minimum_points = 500
+    top_risk = sorted(
+        employee_rows,
+        key=lambda row: (
+            float(row.get("discipline_score") or 100),
+            -int(row.get("unexcused_absent_days") or 0),
+            -int(row.get("late_days") or 0),
+        ),
+    )[:5]
+    return {
+        "mode": "rule_based_foundation",
+        "ml_enabled": False,
+        "data_points": data_points,
+        "minimum_recommended_points": minimum_points,
+        "readiness_percent": min(100, round(_ai_rate(data_points, minimum_points), 1)),
+        "status": "ready_for_experiment" if data_points >= minimum_points else "collect_more_data",
+        "next_upgrade_notes": [
+            "Predictive AI belum diaktifkan agar hasil tetap transparan dan bisa diaudit.",
+            "Struktur payload sudah memisahkan risk, recommendation, site insight, dan score history untuk upgrade ML nanti.",
+            "Kumpulkan histori attendance lintas periode sebelum membuat prediksi absen/telat.",
+        ],
+        "rule_based_risk_preview": [
+            {
+                "employee_email": row.get("employee_email"),
+                "employee_name": row.get("employee_name"),
+                "risk_level": row.get("discipline_category"),
+                "score": row.get("discipline_score"),
+            }
+            for row in top_risk
+        ],
+        "site_forecast_foundation": [
+            {
+                "site_name": row.get("site_name"),
+                "client_name": row.get("client_name"),
+                "risk_score": row.get("risk_score"),
+                "recommendation": row.get("recommendation"),
+            }
+            for row in site_rows[:5]
+        ],
+        "current_period": summary.get("period"),
+    }
+
+
+def _ai_analysis_payload(filters: dict, include_comparison: bool = True) -> dict:
+    start_date = filters["start_date"]
+    end_date = filters["end_date"]
+    if start_date > end_date:
+        raise ValueError("Rentang tanggal tidak valid.")
+    client_id = filters.get("client_id")
+    site_id = filters.get("site_id")
+    schedule_filters = {
+        "start_date": start_date,
+        "end_date": end_date,
+        "client_id": None if site_id else client_id,
+        "site_id": site_id,
+        "employee_id": None,
+    }
+    attendance_rows = _generate_attendance_report(start_date, end_date, client_id)
+    late_rows = _generate_late_report(start_date, end_date, client_id)
+    absent_rows = _generate_absent_report(start_date, end_date, client_id)
+    if site_id:
+        attendance_rows = [row for row in attendance_rows if int(row.get("site_id") or 0) == int(site_id)] if attendance_rows and "site_id" in attendance_rows[0] else attendance_rows
+        late_rows = [row for row in late_rows if int(row.get("site_id") or 0) == int(site_id)] if late_rows and "site_id" in late_rows[0] else late_rows
+        absent_rows = [row for row in absent_rows if int(row.get("site_id") or 0) == int(site_id)] if absent_rows and "site_id" in absent_rows[0] else absent_rows
+    schedule_rows = _calendar_schedule_report_rows(schedule_filters)
+    task_rows = _calendar_task_completion_report(schedule_filters)
+    workload_rows = _calendar_workload_report(schedule_filters)
+    config = _ai_analysis_config()
+    employee_analysis = _ai_employee_analysis_rows(attendance_rows, absent_rows, schedule_rows, workload_rows, config)
+
+    total_checkins = len(attendance_rows)
+    total_late = len(late_rows)
+    total_absent = len([row for row in absent_rows if row.get("status") == "ABSENT"])
+    total_leave = len([row for row in absent_rows if row.get("status") == "ON_LEAVE"])
+    expected = total_checkins + total_absent + total_leave
+    tasks_total = len(task_rows)
+    tasks_done = len([row for row in task_rows if row.get("status") == "done"])
+    urgent_open = len([row for row in task_rows if row.get("priority") == "urgent" and row.get("status") not in {"done", "cancelled"}])
+    overdue_tasks = [
+        row for row in task_rows
+        if row.get("due_date") and row.get("due_date") < _today_key() and row.get("status") not in {"done", "cancelled"}
+    ]
+    pending_manual = 0
+    conn = _db_connect()
+    try:
+        if _table_exists(conn, "manual_attendance_requests"):
+            pending_manual = int(conn.execute(
+                """
+                SELECT COUNT(*) AS total
+                FROM manual_attendance_requests
+                WHERE status = 'pending' AND date BETWEEN ? AND ?
+                """,
+                (start_date, end_date),
+            ).fetchone()["total"] or 0)
+    finally:
+        conn.close()
+
+    insights = [
+        {
+            "title": "Attendance Health",
+            "value": f"{_ai_rate(total_checkins, expected)}%",
+            "description": f"{total_checkins} check-in dari {expected} ekspektasi kehadiran.",
+            "severity": _ai_severity(100 - _ai_rate(total_checkins, expected)),
+        },
+        {
+            "title": "Late Pattern",
+            "value": f"{_ai_rate(total_late, total_checkins)}%",
+            "description": f"{total_late} keterlambatan dari {total_checkins} check-in.",
+            "severity": _ai_severity(_ai_rate(total_late, total_checkins)),
+        },
+        {
+            "title": "Task Completion",
+            "value": f"{_ai_rate(tasks_done, tasks_total)}%",
+            "description": f"{tasks_done} selesai dari {tasks_total} task calendar.",
+            "severity": _ai_severity(100 - _ai_rate(tasks_done, tasks_total)) if tasks_total else "info",
+        },
+    ]
+    frequent_late_employees = [
+        row for row in employee_analysis
+        if row.get("late_category") in {"Frequent Late", "Chronic Late"}
+    ]
+    frequent_absent_employees = [
+        row for row in employee_analysis
+        if row.get("absence_category") in {"Risk", "Critical"}
+    ]
+    high_risk_employees = [
+        row for row in employee_analysis
+        if row.get("discipline_category") in {"High Risk", "Critical HR Action Required"}
+    ]
+    if employee_analysis:
+        average_score = round(sum(float(row.get("discipline_score") or 0) for row in employee_analysis) / len(employee_analysis), 1)
+        insights.append({
+            "title": "Discipline Score",
+            "value": f"{average_score}",
+            "description": f"Rata-rata score dari {len(employee_analysis)} employee yang dianalisis.",
+            "severity": _ai_severity(100 - average_score),
+        })
+    if frequent_late_employees:
+        insights.append({
+            "title": "Frequent Late Employee",
+            "value": str(len(frequent_late_employees)),
+            "description": "Employee dengan kategori Frequent Late atau Chronic Late pada periode ini.",
+            "severity": "warning",
+        })
+    if high_risk_employees:
+        insights.append({
+            "title": "Employee Risk Insight",
+            "value": str(len(high_risk_employees)),
+            "description": "Employee masuk kategori High Risk atau Critical HR Action Required.",
+            "severity": "critical",
+        })
+    risks: list[dict] = []
+    if total_absent:
+        risks.append({
+            "type": "attendance_absent",
+            "title": "Absent risk",
+            "message": f"{total_absent} slot kerja tercatat absent pada periode ini.",
+            "severity": _ai_severity(_ai_rate(total_absent, expected)),
+        })
+    if urgent_open:
+        risks.append({
+            "type": "urgent_task",
+            "title": "Urgent task terbuka",
+            "message": f"{urgent_open} urgent task belum selesai.",
+            "severity": "critical",
+        })
+    if overdue_tasks:
+        risks.append({
+            "type": "overdue_task",
+            "title": "Task overdue",
+            "message": f"{len(overdue_tasks)} task melewati deadline.",
+            "severity": "warning",
+        })
+    if pending_manual:
+        risks.append({
+            "type": "manual_pending",
+            "title": "Manual attendance pending",
+            "message": f"{pending_manual} pengajuan manual attendance menunggu keputusan.",
+            "severity": "warning",
+        })
+    overloaded = [row for row in workload_rows if int(row.get("scheduled_days") or 0) >= 20 or int(row.get("urgent_open") or 0) >= 3]
+    if overloaded:
+        risks.append({
+            "type": "workload",
+            "title": "Workload tinggi",
+            "message": f"{len(overloaded)} employee punya beban jadwal/task tinggi.",
+            "severity": "warning",
+        })
+    for row in high_risk_employees[:5]:
+        risks.append({
+            "type": "employee_discipline",
+            "title": f"Risk employee: {row.get('employee_name')}",
+            "message": f"Score {row.get('discipline_score')} ({row.get('discipline_category')}). {row.get('insight')}",
+            "severity": "critical" if row.get("discipline_grade") == "E" else "warning",
+        })
+    recommendations = []
+    if total_late:
+        recommendations.append("Review shift dan grace period untuk employee/site dengan late rate tinggi.")
+    if total_absent:
+        recommendations.append("Prioritaskan follow-up absent tanpa leave agar coverage site tetap aman.")
+    if overdue_tasks or urgent_open:
+        recommendations.append("Re-assign atau eskalasi urgent/overdue task ke supervisor terkait.")
+    if pending_manual:
+        recommendations.append("Bersihkan antrean approval manual attendance sebelum payroll/reporting dipakai.")
+    if frequent_late_employees:
+        recommendations.append("Lakukan coaching oleh supervisor untuk employee dengan kategori Frequent Late/Chronic Late.")
+    if frequent_absent_employees:
+        recommendations.append("Jadwalkan HR check-in untuk employee dengan absen tanpa keterangan berulang.")
+    if high_risk_employees:
+        recommendations.append("Prioritaskan review HR untuk employee kategori High Risk/Critical sebelum keputusan operasional dibuat.")
+    if not recommendations:
+        recommendations.append("Kondisi operasional stabil. Pertahankan monitoring harian dan audit berkala.")
+    summary = {
+        "period": f"{start_date} to {end_date}",
+        "client_id": client_id,
+        "site_id": site_id,
+        "attendance_rate": _ai_rate(total_checkins, expected),
+        "late_rate": _ai_rate(total_late, total_checkins),
+        "absent_count": total_absent,
+        "leave_count": total_leave,
+        "schedule_count": len(schedule_rows),
+        "tasks_total": tasks_total,
+        "tasks_done": tasks_done,
+        "urgent_open": urgent_open,
+        "overdue_tasks": len(overdue_tasks),
+        "pending_manual": pending_manual,
+        "workload_rows": len(workload_rows),
+        "employees_analyzed": len(employee_analysis),
+        "average_discipline_score": round(sum(float(row.get("discipline_score") or 0) for row in employee_analysis) / len(employee_analysis), 1) if employee_analysis else 0,
+        "frequent_late_employees": len(frequent_late_employees),
+        "frequent_absent_employees": len(frequent_absent_employees),
+        "high_risk_employees": len(high_risk_employees),
+        "best_discipline_employee": max(employee_analysis, key=lambda row: row.get("discipline_score") or 0).get("employee_name") if employee_analysis else "-",
+        "worst_discipline_employee": min(employee_analysis, key=lambda row: row.get("discipline_score") or 100).get("employee_name") if employee_analysis else "-",
+    }
+    site_insights = _ai_site_insights(schedule_rows)
+    comparison = _ai_comparison_payload(filters, summary, employee_analysis) if include_comparison else {
+        "previous_period": None,
+        "attendance_rate_delta": 0,
+        "late_rate_delta": 0,
+        "average_score_delta": 0,
+        "improvement_list": [],
+        "declining_list": [],
+    }
+    alerts = _ai_alerts_payload(employee_analysis, site_insights, comparison, config)
+    return {
+        "summary": summary,
+        "insights": insights,
+        "risks": risks,
+        "recommendations": recommendations,
+        "employee_analysis": employee_analysis[:25],
+        "dashboard": _ai_dashboard_payload(employee_analysis, schedule_rows, absent_rows),
+        "ranking": sorted(employee_analysis, key=lambda row: row.get("discipline_score") or 0, reverse=True)[:25],
+        "watchlist": [
+            row for row in employee_analysis
+            if row.get("discipline_category") in {"Needs Attention", "High Risk", "Critical HR Action Required"}
+        ][:25],
+        "chronic_late": [
+            row for row in employee_analysis
+            if row.get("late_category") == "Chronic Late"
+        ][:25],
+        "high_absence": [
+            row for row in employee_analysis
+            if row.get("absence_category") in {"Risk", "Critical"}
+        ][:25],
+        "site_insights": site_insights[:20],
+        "employee_drilldowns": _ai_employee_drilldowns(employee_analysis, schedule_rows),
+        "comparison": comparison,
+        "alerts": alerts,
+        "predictive_readiness": _ai_predictive_readiness_payload(summary, employee_analysis, site_insights),
+        "config": config,
+        "rule_version": AI_ANALYSIS_RULE_VERSION,
+        "fairness_notice": "AI Analysis adalah alat bantu HR berbasis data attendance, bukan keputusan otomatis final. Cuti/izin resmi tidak dihitung sebagai absen buruk.",
+        "workload": workload_rows[:10],
+        "generated_at": _now_ts(),
+    }
+
+
+def _ai_employee_detail_by_user_id(employee_id: int, filters: dict) -> dict | None:
+    user_row = _get_user_by_id(employee_id)
+    if not user_row:
+        return None
+    email = (user_row["email"] or "").strip().lower()
+    if not email:
+        return None
+    payload = _ai_analysis_payload(filters)
+    drilldowns = payload.get("employee_drilldowns", {})
+    detail = drilldowns.get(email)
+    if detail:
+        return detail
+    employee = next(
+        (
+            row for row in payload.get("employee_analysis", [])
+            if (row.get("employee_email") or "").strip().lower() == email
+        ),
+        None,
+    )
+    if not employee:
+        return None
+    return {"employee": employee, "timeline": [], "late_days": [], "absent_days": [], "checkin_pattern": [], "score_history": []}
+
+
+def _persist_ai_analysis_alerts(filters: dict, payload: dict, user_id: int | None) -> list[int]:
+    alerts = payload.get("alerts") or []
+    if not alerts:
+        return []
+    now = _now_ts()
+    alert_ids: list[int] = []
+    conn = _db_connect()
+    try:
+        _ensure_ai_analysis_tables(conn)
+        for alert in alerts:
+            employee_id = None
+            employee_email = (alert.get("employee_email") or "").strip().lower()
+            if employee_email:
+                employee = _get_user_by_email(employee_email)
+                employee_id = int(employee["id"]) if employee else None
+            cur = conn.execute(
+                """
+                INSERT INTO ai_analysis_alerts (
+                    employee_id, employee_email, employee_name, client_id, site_id,
+                    alert_type, alert_level, title, description, metric_value,
+                    threshold_value, status, assigned_to, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)
+                """,
+                (
+                    employee_id,
+                    employee_email or None,
+                    alert.get("employee_name"),
+                    filters.get("client_id"),
+                    filters.get("site_id"),
+                    alert.get("type") or "analysis_alert",
+                    alert.get("level") or "info",
+                    alert.get("title") or "AI Analysis alert",
+                    alert.get("message"),
+                    alert.get("metric_value"),
+                    alert.get("threshold_value"),
+                    user_id,
+                    now,
+                    now,
+                ),
+            )
+            alert_ids.append(int(cur.lastrowid))
+        conn.commit()
+    finally:
+        conn.close()
+    return alert_ids
+
+
+def _review_ai_alert(alert_id: int, user: User | None) -> bool:
+    conn = _db_connect()
+    try:
+        _ensure_ai_analysis_tables(conn)
+        cur = conn.execute(
+            """
+            UPDATE ai_analysis_alerts
+            SET status = 'reviewed', reviewed_by = ?, reviewed_at = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (user.id if user else None, _now_ts(), _now_ts(), alert_id),
+        )
+        conn.commit()
+        reviewed = cur.rowcount > 0
+    finally:
+        conn.close()
+    if reviewed:
+        _log_audit_event("ai_analysis_alert", alert_id, "REVIEW", user, "AI Analysis alert marked as reviewed.")
+    return reviewed
+
+
+def _save_ai_analysis_snapshot(filters: dict, payload: dict, user_id: int | None) -> int:
+    snapshot_id = 0
+    conn = _db_connect()
+    try:
+        _ensure_ai_analysis_tables(conn)
+        cur = conn.execute(
+            """
+            INSERT INTO ai_analysis_snapshots (
+                analysis_date, range_start, range_end, client_id, site_id,
+                summary_json, insights_json, risks_json, recommendations_json,
+                alerts_json, rule_version, created_by, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                _today_key(),
+                filters["start_date"],
+                filters["end_date"],
+                filters.get("client_id"),
+                filters.get("site_id"),
+                json.dumps(payload.get("summary", {}), ensure_ascii=True),
+                json.dumps(payload.get("insights", []), ensure_ascii=True),
+                json.dumps(payload.get("risks", []), ensure_ascii=True),
+                json.dumps(payload.get("recommendations", []), ensure_ascii=True),
+                json.dumps(payload.get("alerts", []), ensure_ascii=True),
+                payload.get("rule_version") or AI_ANALYSIS_RULE_VERSION,
+                user_id,
+                _now_ts(),
+                _now_ts(),
+            ),
+        )
+        snapshot_id = int(cur.lastrowid)
+        conn.commit()
+    finally:
+        conn.close()
+    alert_ids = _persist_ai_analysis_alerts(filters, payload, user_id)
+    for index, alert_id in enumerate(alert_ids):
+        if index < len(payload.get("alerts", [])):
+            payload["alerts"][index]["id"] = alert_id
+    actor_row = _get_user_by_id(user_id) if user_id else None
+    _log_audit_event(
+        "ai_analysis_snapshot",
+        snapshot_id,
+        "CREATE",
+        _user_row_to_user(actor_row, "silver_line") if actor_row else None,
+        "AI Analysis snapshot generated.",
+        {
+            "range_start": filters["start_date"],
+            "range_end": filters["end_date"],
+            "client_id": filters.get("client_id"),
+            "site_id": filters.get("site_id"),
+            "rule_version": payload.get("rule_version") or AI_ANALYSIS_RULE_VERSION,
+        },
+    )
+    return snapshot_id
+
+
+def _ai_analysis_history(limit: int = 10) -> list[dict]:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "ai_analysis_snapshots"):
+            return []
+        rows = conn.execute(
+            """
+            SELECT id, analysis_date, range_start, range_end, client_id, site_id,
+                   summary_json, risks_json, created_at
+            FROM ai_analysis_snapshots
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        history = []
+        for row in rows:
+            item = dict(row)
+            for key in ("summary_json", "risks_json"):
+                try:
+                    item[key.replace("_json", "")] = json.loads(item.get(key) or "{}")
+                except json.JSONDecodeError:
+                    item[key.replace("_json", "")] = {} if key == "summary_json" else []
+                item.pop(key, None)
+            history.append(item)
+        return history
+    finally:
+        conn.close()
+
+
+AI_CASE_STATUSES = {"open", "in_review", "coaching_scheduled", "resolved", "escalated", "closed"}
+AI_CASE_PRIORITIES = {"low", "medium", "high", "critical"}
+
+
+def _ai_cases(limit: int = 25) -> list[dict]:
+    conn = _db_connect()
+    try:
+        _ensure_ai_analysis_tables(conn)
+        rows = conn.execute(
+            """
+            SELECT c.*, u.name AS created_by_name, assignee.name AS assigned_to_name,
+                   COUNT(n.id) AS note_count
+            FROM ai_analysis_cases c
+            LEFT JOIN users u ON u.id = c.created_by
+            LEFT JOIN users assignee ON assignee.id = c.assigned_to
+            LEFT JOIN ai_analysis_case_notes n ON n.case_id = c.id
+            GROUP BY c.id
+            ORDER BY c.updated_at DESC, c.created_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def _ai_case_detail(case_id: int) -> dict | None:
+    conn = _db_connect()
+    try:
+        _ensure_ai_analysis_tables(conn)
+        row = conn.execute("SELECT * FROM ai_analysis_cases WHERE id = ?", (case_id,)).fetchone()
+        if not row:
+            return None
+        case = dict(row)
+        case["notes"] = [
+            dict(note)
+            for note in conn.execute(
+                """
+                SELECT n.*, u.name AS author_name, u.email AS author_email
+                FROM ai_analysis_case_notes n
+                LEFT JOIN users u ON u.id = n.created_by
+                WHERE n.case_id = ?
+                ORDER BY n.created_at DESC
+                """,
+                (case_id,),
+            ).fetchall()
+        ]
+        return case
+    finally:
+        conn.close()
+
+
+def _create_ai_case(data: dict, user: User) -> int:
+    employee_email = (data.get("employee_email") or "").strip().lower()
+    employee_name = (data.get("employee_name") or employee_email or "-").strip()
+    title = (data.get("case_title") or f"AI risk follow-up - {employee_name}").strip()
+    status = (data.get("case_status") or "open").strip().lower()
+    priority = (data.get("priority") or "medium").strip().lower()
+    if status not in AI_CASE_STATUSES:
+        status = "open"
+    if priority not in AI_CASE_PRIORITIES:
+        priority = "medium"
+    now = _now_ts()
+    conn = _db_connect()
+    try:
+        _ensure_ai_analysis_tables(conn)
+        cur = conn.execute(
+            """
+            INSERT INTO ai_analysis_cases (
+                employee_email, employee_name, alert_type, case_title, case_status,
+                priority, assigned_to, created_by, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                employee_email,
+                employee_name,
+                data.get("alert_type"),
+                title,
+                status,
+                priority,
+                _calendar_int(data.get("assigned_to")),
+                user.id,
+                now,
+                now,
+            ),
+        )
+        case_id = int(cur.lastrowid)
+        note = (data.get("note") or "").strip()
+        if note:
+            conn.execute(
+                """
+                INSERT INTO ai_analysis_case_notes (case_id, note, created_by, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (case_id, note, user.id, now, now),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+    _log_audit_event("ai_analysis_case", case_id, "CREATE", user, "AI Analysis case created.", {"employee_email": employee_email})
+    return case_id
+
+
+def _update_ai_case_status(case_id: int, status: str, user: User, resolution_note: str | None = None) -> bool:
+    status = (status or "").strip().lower()
+    if status not in AI_CASE_STATUSES:
+        return False
+    conn = _db_connect()
+    try:
+        _ensure_ai_analysis_tables(conn)
+        cur = conn.execute(
+            """
+            UPDATE ai_analysis_cases
+            SET case_status = ?, resolution_note = COALESCE(?, resolution_note), updated_at = ?
+            WHERE id = ?
+            """,
+            (status, resolution_note, _now_ts(), case_id),
+        )
+        conn.commit()
+        updated = cur.rowcount > 0
+    finally:
+        conn.close()
+    if updated:
+        _log_audit_event("ai_analysis_case", case_id, "UPDATE_STATUS", user, f"AI Analysis case status changed to {status}.")
+    return updated
+
+
+def _add_ai_case_note(case_id: int, note: str, user: User) -> bool:
+    note = (note or "").strip()
+    if not note:
+        return False
+    now = _now_ts()
+    conn = _db_connect()
+    try:
+        _ensure_ai_analysis_tables(conn)
+        exists = conn.execute("SELECT 1 FROM ai_analysis_cases WHERE id = ?", (case_id,)).fetchone()
+        if not exists:
+            return False
+        conn.execute(
+            """
+            INSERT INTO ai_analysis_case_notes (case_id, note, created_by, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (case_id, note, user.id, now, now),
+        )
+        conn.execute("UPDATE ai_analysis_cases SET updated_at = ? WHERE id = ?", (now, case_id))
+        conn.commit()
+    finally:
+        conn.close()
+    _log_audit_event("ai_analysis_case_note", case_id, "CREATE", user, "AI Analysis case note added.")
+    return True
+
+
+def _ai_report_rows(report_type: str, payload: dict) -> list[dict]:
+    if report_type == "discipline_ranking":
+        return payload.get("ranking", [])
+    if report_type == "frequent_late":
+        return [
+            row for row in payload.get("employee_analysis", [])
+            if row.get("late_category") in {"Frequent Late", "Chronic Late"}
+        ]
+    if report_type == "frequent_absence":
+        return payload.get("high_absence", [])
+    if report_type == "attendance_risk":
+        return payload.get("watchlist", [])
+    if report_type == "client_location":
+        return payload.get("site_insights", [])
+    if report_type == "monthly_summary":
+        return [payload.get("summary", {})]
+    return payload.get("employee_analysis", [])
+
+
+def _simple_pdf_response(filename: str, title: str, rows: list[dict]) -> Response:
+    lines = [title, ""]
+    for row in rows[:60]:
+        lines.append(" | ".join(f"{key}: {value}" for key, value in list(row.items())[:8]))
+    text = "\n".join(lines) or "Tidak ada data."
+    escaped = text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+    stream = f"BT /F1 10 Tf 36 780 Td 12 TL ({escaped[:3200]}) Tj ET"
+    objects = [
+        "1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj",
+        "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj",
+        "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >> endobj",
+        "4 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj",
+        f"5 0 obj << /Length {len(stream.encode('latin-1', errors='ignore'))} >> stream\n{stream}\nendstream endobj",
+    ]
+    body = "%PDF-1.4\n" + "\n".join(objects) + "\n"
+    offsets = []
+    cursor = len("%PDF-1.4\n")
+    for obj in objects:
+        offsets.append(cursor)
+        cursor += len(obj) + 1
+    xref_start = len(body)
+    xref = "xref\n0 6\n0000000000 65535 f \n" + "".join(f"{offset:010d} 00000 n \n" for offset in offsets)
+    trailer = f"trailer << /Root 1 0 R /Size 6 >>\nstartxref\n{xref_start}\n%%EOF"
+    return Response(
+        (body + xref + trailer).encode("latin-1", errors="ignore"),
+        mimetype="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
@@ -13936,6 +15709,13 @@ def admin_bp() -> Blueprint:
                 feature="HRIS Calendar",
                 message="Calendar membutuhkan add-on Calendar aktif atau paket HRIS Enterprise.",
             )
+        if (request.endpoint or "").startswith("admin.ai_analysis") and not _ai_analysis_feature_enabled(user):
+            return render_template(
+                "dashboard/upgrade_prompt.html",
+                user=user,
+                feature="AI Analysis",
+                message="AI Analysis membutuhkan add-on AI aktif.",
+            )
 
     @bp.route("/", methods=["GET"])
     def overview():
@@ -14055,6 +15835,22 @@ def admin_bp() -> Blueprint:
             calendar_upcoming_events=calendar_upcoming_events,
             calendar_alerts=calendar_alerts,
             calendar_enabled=calendar_enabled,
+        )
+
+    @bp.route("/ai-analysis", methods=["GET"])
+    def ai_analysis():
+        user = _current_user()
+        today_dt = datetime.strptime(_today_key(), "%Y-%m-%d").date()
+        default_start = (today_dt - timedelta(days=29)).strftime("%Y-%m-%d")
+        default_end = today_dt.strftime("%Y-%m-%d")
+        return render_template(
+            "dashboard/admin_ai_analysis.html",
+            user=user,
+            clients=_clients(),
+            sites=_list_sites(),
+            default_start=default_start,
+            default_end=default_end,
+            history=_ai_analysis_history(5),
         )
 
     @bp.route("/calendar", methods=["GET"])

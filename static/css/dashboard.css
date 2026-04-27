@@ -729,6 +729,114 @@ html[data-theme="light"] .site-placeholder{
   gap:12px;
   margin-bottom:16px;
 }
+.ai-analysis-shell{
+  display:grid;
+  gap:16px;
+}
+.ai-analysis-grid{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:16px;
+}
+.ai-analysis-filters{
+  margin-top:12px;
+}
+.ai-kpi-grid{
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:10px;
+}
+.ai-kpi-grid div,
+.ai-list-item{
+  border:1px solid var(--border);
+  border-radius:10px;
+  padding:10px;
+  background:rgba(15,23,42,.35);
+}
+.ai-kpi-grid strong{
+  display:block;
+  font-size:22px;
+}
+.ai-kpi-grid span,
+.ai-list-item span{
+  display:block;
+  color:var(--muted);
+  font-size:12px;
+  line-height:1.35;
+  margin-top:3px;
+}
+.ai-list{
+  display:grid;
+  gap:8px;
+}
+.ai-chart-pair{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:14px;
+}
+.ai-bars{
+  display:grid;
+  gap:8px;
+  margin-top:8px;
+}
+.ai-bar-row{
+  display:grid;
+  grid-template-columns:minmax(74px, 1fr) minmax(90px, 2fr) 42px;
+  gap:8px;
+  align-items:center;
+  font-size:12px;
+}
+.ai-bar-row > span{
+  color:var(--muted);
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.ai-bar-row > div{
+  min-height:10px;
+  border:1px solid var(--border);
+  border-radius:999px;
+  overflow:hidden;
+  background:rgba(15,23,42,.32);
+}
+.ai-bar-row i{
+  display:block;
+  height:10px;
+  border-radius:999px;
+  background:linear-gradient(90deg, var(--accent), var(--accent2));
+}
+.ai-bar-row strong{
+  text-align:right;
+  font-size:12px;
+}
+.ai-click-row{
+  cursor:pointer;
+}
+.ai-click-row:hover{
+  background:rgba(56,189,248,.08);
+}
+.ai-list-item.warning{
+  border-color:rgba(251,191,36,.55);
+}
+.ai-list-item.error{
+  border-color:rgba(248,113,113,.6);
+}
+html[data-theme="light"] .ai-kpi-grid div,
+html[data-theme="light"] .ai-list-item,
+html[data-theme="light"] .ai-bar-row > div{
+  background:rgba(255,255,255,.55);
+}
+@media (max-width:900px){
+  .ai-analysis-grid{
+    grid-template-columns:1fr;
+  }
+  .ai-kpi-grid{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+  }
+  .ai-chart-pair{
+    grid-template-columns:1fr;
+  }
+}
 .section-head{
   display:flex;
   align-items:flex-end;

@@ -1,0 +1,741 @@
+{% extends "dashboard/base.html" %}
+{% set active = "ai_analysis" %}
+{% set heading = "AI Analysis" %}
+{% set subtitle = "Analisis operasional HRIS berbasis attendance, schedule, task, dan approval" %}
+
+{% block body %}
+<section class="ai-analysis-shell">
+  <div class="card">
+    <div class="section-head">
+      <div>
+        <h3>AI Analysis</h3>
+        <p>Insight otomatis untuk risiko attendance, workload, task, dan approval.</p>
+      </div>
+      <button class="btn primary" type="button" id="aiRunSnapshot">Generate Snapshot</button>
+    </div>
+    <div class="form-grid ai-analysis-filters">
+      <div class="form-row"><label class="label">Mulai</label><input class="input" type="date" id="aiStartDate" value="{{ default_start }}" /></div>
+      <div class="form-row"><label class="label">Sampai</label><input class="input" type="date" id="aiEndDate" value="{{ default_end }}" /></div>
+      <div class="form-row"><label class="label">Client</label><select class="input" id="aiClientId"><option value="">Semua client</option>{% for client in clients %}<option value="{{ client.id }}">{{ client.name }}</option>{% endfor %}</select></div>
+      <div class="form-row"><label class="label">Site</label><select class="input" id="aiSiteId"><option value="">Semua site</option>{% for site in sites %}<option value="{{ site.id }}">{{ site.client_name or '-' }} - {{ site.name }}</option>{% endfor %}</select></div>
+    </div>
+    <div class="btn-row">
+      <button class="btn secondary" type="button" id="aiLoadSummary">Preview Analysis</button>
+    </div>
+    <div class="alert info" id="aiAnalysisAlert" style="display:none;"></div>
+    <div class="alert info ai-fairness-note" id="aiFairnessNotice">
+      AI Analysis adalah alat bantu HR berbasis data attendance, bukan keputusan otomatis final.
+    </div>
+  </div>
+
+  <div class="ai-analysis-grid">
+    <article class="card">
+      <div class="section-head">
+        <div>
+          <h3>Threshold Configuration</h3>
+          <p>Rule scoring dan alert bisa disesuaikan oleh HR/Admin.</p>
+        </div>
+        <button class="btn secondary" type="button" id="aiSaveConfig">Simpan Config</button>
+      </div>
+      <div class="form-grid ai-config-grid" id="aiConfigGrid"></div>
+    </article>
+    <article class="card">
+      <div class="section-head">
+        <div>
+          <h3>Reports & Export</h3>
+          <p>Export report terfilter untuk audit dan evidence.</p>
+        </div>
+      </div>
+      <div class="form-grid ai-export-grid">
+        <div class="form-row"><label class="label">Report</label><select class="input" id="aiExportType">
+          <option value="discipline_ranking">Discipline Ranking</option>
+          <option value="frequent_late">Frequent Late</option>
+          <option value="frequent_absence">Frequent Absence</option>
+          <option value="attendance_risk">Attendance Risk</option>
+          <option value="client_location">Client/Location Discipline</option>
+          <option value="monthly_summary">Monthly AI Summary</option>
+          <option value="employee_individual">Employee Individual</option>
+        </select></div>
+        <div class="form-row"><label class="label">Format</label><select class="input" id="aiExportFormat">
+          <option value="csv">Excel CSV</option>
+          <option value="pdf">PDF</option>
+        </select></div>
+      </div>
+      <div class="btn-row">
+        <button class="btn primary" type="button" id="aiExportReport">Export Report</button>
+      </div>
+    </article>
+  </div>
+
+  <div class="ai-analysis-grid">
+    <article class="card">
+      <h4>Summary</h4>
+      <div class="ai-kpi-grid" id="aiSummaryCards">
+        <div class="muted">Belum ada data.</div>
+      </div>
+    </article>
+    <article class="card">
+      <h4>Recommendations</h4>
+      <div class="ai-list" id="aiRecommendations">
+        <div class="muted">Generate analysis untuk melihat rekomendasi.</div>
+      </div>
+    </article>
+  </div>
+
+  <div class="ai-analysis-grid">
+    <article class="card">
+      <h4>Insights</h4>
+      <div class="ai-list" id="aiInsights"></div>
+    </article>
+    <article class="card">
+      <h4>Risks</h4>
+      <div class="ai-list" id="aiRisks"></div>
+    </article>
+  </div>
+
+  <div class="ai-analysis-grid">
+    <article class="card">
+      <h4>Weekly Trends</h4>
+      <div class="ai-chart-pair">
+        <div>
+          <div class="label">Late per week</div>
+          <div class="ai-bars" id="aiLateTrend"></div>
+        </div>
+        <div>
+          <div class="label">Absent per week</div>
+          <div class="ai-bars" id="aiAbsentTrend"></div>
+        </div>
+      </div>
+    </article>
+    <article class="card">
+      <h4>Score & Location</h4>
+      <div class="ai-chart-pair">
+        <div>
+          <div class="label">Score distribution</div>
+          <div class="ai-bars" id="aiScoreDistribution"></div>
+        </div>
+        <div>
+          <div class="label">Site risk</div>
+          <div class="ai-bars" id="aiSiteRisk"></div>
+        </div>
+      </div>
+    </article>
+  </div>
+
+  <div class="ai-analysis-grid">
+    <article class="card">
+      <h4>Risk Alerts</h4>
+      <div class="ai-list" id="aiAlerts"></div>
+    </article>
+    <article class="card">
+      <h4>Period Comparison</h4>
+      <div class="ai-kpi-grid" id="aiComparisonCards">
+        <div class="muted">Belum ada comparison.</div>
+      </div>
+      <div class="ai-list" id="aiComparisonLists" style="margin-top:10px;"></div>
+    </article>
+  </div>
+
+  <div class="card">
+    <div class="section-head">
+      <div>
+        <h3>Predictive AI Readiness</h3>
+        <p>Phase 19 disiapkan sebagai pondasi upgrade ML, tetapi keputusan tetap rule-based dan transparan.</p>
+      </div>
+    </div>
+    <div class="ai-kpi-grid" id="aiPredictiveCards">
+      <div class="muted">Belum ada readiness data.</div>
+    </div>
+    <div class="ai-list" id="aiPredictiveNotes" style="margin-top:10px;"></div>
+  </div>
+
+  <div class="card">
+    <div class="section-head">
+      <div>
+        <h3>Employee Workload Signals</h3>
+        <p>Top employee berdasarkan schedule, late/absent, dan urgent task.</p>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table class="table" aria-label="AI workload signals">
+        <thead>
+          <tr>
+            <th>Employee</th>
+            <th>Scheduled</th>
+            <th>Late</th>
+            <th>Absent</th>
+            <th>Tasks</th>
+            <th>Done</th>
+            <th>Urgent</th>
+          </tr>
+        </thead>
+        <tbody id="aiWorkloadRows">
+          <tr><td colspan="7" class="muted">Belum ada data.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="section-head">
+      <div>
+        <h3>AI Case Management</h3>
+        <p>Catatan HR/Supervisor untuk follow-up risk employee. Tidak tampil ke employee.</p>
+      </div>
+      <button class="btn secondary" type="button" id="aiRefreshCases">Refresh Cases</button>
+    </div>
+    <div class="table-wrap">
+      <table class="table" aria-label="AI analysis cases">
+        <thead><tr><th>Case</th><th>Employee</th><th>Status</th><th>Priority</th><th>Notes</th><th>Updated</th></tr></thead>
+        <tbody id="aiCaseRows"><tr><td colspan="6" class="muted">Belum ada case.</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="ai-analysis-grid">
+    <article class="card">
+      <h4>Discipline Ranking</h4>
+      <div class="table-wrap">
+        <table class="table" aria-label="AI discipline ranking">
+          <thead><tr><th>Employee</th><th>Score</th><th>Grade</th><th>Category</th></tr></thead>
+          <tbody id="aiRankingRows"><tr><td colspan="4" class="muted">Belum ada data.</td></tr></tbody>
+        </table>
+      </div>
+    </article>
+    <article class="card">
+      <h4>Watchlist</h4>
+      <div class="table-wrap">
+        <table class="table" aria-label="AI watchlist">
+          <thead><tr><th>Employee</th><th>Late</th><th>Absent</th><th>Category</th></tr></thead>
+          <tbody id="aiWatchlistRows"><tr><td colspan="4" class="muted">Belum ada data.</td></tr></tbody>
+        </table>
+      </div>
+    </article>
+  </div>
+
+  <div class="ai-analysis-grid">
+    <article class="card">
+      <h4>Chronic Late</h4>
+      <div class="table-wrap">
+        <table class="table" aria-label="AI chronic late employees">
+          <thead><tr><th>Employee</th><th>Late Days</th><th>Late Minutes</th></tr></thead>
+          <tbody id="aiChronicLateRows"><tr><td colspan="3" class="muted">Belum ada data.</td></tr></tbody>
+        </table>
+      </div>
+    </article>
+    <article class="card">
+      <h4>High Absence</h4>
+      <div class="table-wrap">
+        <table class="table" aria-label="AI high absence employees">
+          <thead><tr><th>Employee</th><th>Absent Days</th><th>Absence Rate</th></tr></thead>
+          <tbody id="aiHighAbsenceRows"><tr><td colspan="3" class="muted">Belum ada data.</td></tr></tbody>
+        </table>
+      </div>
+    </article>
+  </div>
+
+  <div class="card">
+    <h4>Client / Location Insight</h4>
+    <div class="table-wrap">
+      <table class="table" aria-label="AI site insight">
+        <thead><tr><th>Client</th><th>Site</th><th>Attendance</th><th>Late</th><th>Absent</th><th>Problem Shift</th><th>Recommendation</th></tr></thead>
+        <tbody id="aiSiteRows"><tr><td colspan="7" class="muted">Belum ada data.</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="section-head">
+      <div>
+        <h3>Employee Classification</h3>
+        <p>Kategori late, absence, discipline score, insight, dan rekomendasi HR.</p>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table class="table" aria-label="AI employee classification">
+        <thead>
+          <tr>
+            <th>Employee</th>
+            <th>Score</th>
+            <th>Grade</th>
+            <th>Late</th>
+            <th>Absence</th>
+            <th>Discipline</th>
+            <th>Insight</th>
+            <th>Recommendation</th>
+          </tr>
+        </thead>
+        <tbody id="aiEmployeeRows">
+          <tr><td colspan="8" class="muted">Belum ada data.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <h4>Snapshot History</h4>
+    <div class="table-wrap">
+      <table class="table" aria-label="AI analysis history">
+        <thead><tr><th>Created</th><th>Range</th><th>Attendance</th><th>Late</th><th>Risks</th></tr></thead>
+        <tbody id="aiHistoryRows">
+          {% for item in history %}
+          <tr>
+            <td>{{ item.created_at|display_datetime }}</td>
+            <td>{{ item.range_start }} - {{ item.range_end }}</td>
+            <td>{{ item.summary.attendance_rate or 0 }}%</td>
+            <td>{{ item.summary.late_rate or 0 }}%</td>
+            <td>{{ item.risks|length }}</td>
+          </tr>
+          {% endfor %}
+          {% if not history %}
+          <tr><td colspan="5" class="muted">Belum ada snapshot.</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<div class="modal" id="aiEmployeeModal" aria-hidden="true">
+  <div class="modal-card modal-large" role="dialog" aria-modal="true" aria-labelledby="aiEmployeeModalTitle">
+    <div class="modal-title" id="aiEmployeeModalTitle">Employee Analysis Detail</div>
+    <div id="aiEmployeeDetail" class="stack"></div>
+    <div class="modal-footer">
+      <button class="btn secondary" type="button" id="aiEmployeeModalClose">Tutup</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || "";
+  const alertBox = document.getElementById("aiAnalysisAlert");
+  const summaryCards = document.getElementById("aiSummaryCards");
+  const recommendations = document.getElementById("aiRecommendations");
+  const insights = document.getElementById("aiInsights");
+  const risks = document.getElementById("aiRisks");
+  const workloadRows = document.getElementById("aiWorkloadRows");
+  const employeeRows = document.getElementById("aiEmployeeRows");
+  const lateTrend = document.getElementById("aiLateTrend");
+  const absentTrend = document.getElementById("aiAbsentTrend");
+  const scoreDistribution = document.getElementById("aiScoreDistribution");
+  const siteRisk = document.getElementById("aiSiteRisk");
+  const alerts = document.getElementById("aiAlerts");
+  const comparisonCards = document.getElementById("aiComparisonCards");
+  const comparisonLists = document.getElementById("aiComparisonLists");
+  const predictiveCards = document.getElementById("aiPredictiveCards");
+  const predictiveNotes = document.getElementById("aiPredictiveNotes");
+  const rankingRows = document.getElementById("aiRankingRows");
+  const watchlistRows = document.getElementById("aiWatchlistRows");
+  const chronicLateRows = document.getElementById("aiChronicLateRows");
+  const highAbsenceRows = document.getElementById("aiHighAbsenceRows");
+  const siteRows = document.getElementById("aiSiteRows");
+  const employeeModal = document.getElementById("aiEmployeeModal");
+  const employeeDetail = document.getElementById("aiEmployeeDetail");
+  const historyRows = document.getElementById("aiHistoryRows");
+  const configGrid = document.getElementById("aiConfigGrid");
+  const caseRows = document.getElementById("aiCaseRows");
+  const fairnessNotice = document.getElementById("aiFairnessNotice");
+  let currentDrilldowns = {};
+  let currentEmployees = [];
+
+  function showAlert(message, type="info"){
+    alertBox.textContent = message;
+    alertBox.className = `alert ${type}`;
+    alertBox.style.display = "block";
+  }
+
+  function params(){
+    const query = new URLSearchParams({
+      start_date: document.getElementById("aiStartDate").value,
+      end_date: document.getElementById("aiEndDate").value,
+    });
+    const clientId = document.getElementById("aiClientId").value;
+    const siteId = document.getElementById("aiSiteId").value;
+    if (clientId && !siteId) query.append("client_id", clientId);
+    if (siteId) query.append("site_id", siteId);
+    return query;
+  }
+
+  function exportParams(){
+    const query = params();
+    query.append("report_type", document.getElementById("aiExportType").value);
+    query.append("format", document.getElementById("aiExportFormat").value);
+    return query;
+  }
+
+  function severityClass(severity){
+    return severity === "critical" ? "error" : (severity === "warning" ? "warning" : "info");
+  }
+
+  function escapeHtml(value){
+    return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;",
+    }[char]));
+  }
+
+  function renderList(target, rows, emptyText){
+    if (!rows || !rows.length){
+      target.innerHTML = `<div class="muted">${escapeHtml(emptyText)}</div>`;
+      return;
+    }
+    target.innerHTML = rows.map((row) => {
+      if (typeof row === "string") return `<div class="ai-list-item"><span>${escapeHtml(row)}</span></div>`;
+      return `<div class="ai-list-item ${severityClass(row.severity)}"><strong>${escapeHtml(row.title)}</strong><span>${escapeHtml(row.description || row.message || "")}</span></div>`;
+    }).join("");
+  }
+
+  function renderAlerts(rows){
+    if (!rows || !rows.length){
+      alerts.innerHTML = '<div class="muted">Tidak ada alert aktif.</div>';
+      return;
+    }
+    alerts.innerHTML = rows.map((row) => `
+      <div class="ai-list-item ${severityClass(row.severity)}">
+        <strong>${escapeHtml(row.title)}</strong>
+        <span>${escapeHtml(row.message || "")}${row.actions?.length ? " | Actions: " + escapeHtml(row.actions.join(", ")) : ""}</span>
+        ${row.id ? `<button class="btn secondary ai-alert-review" type="button" data-ai-alert-review="${escapeHtml(row.id)}">Mark reviewed</button>` : ""}
+      </div>
+    `).join("");
+  }
+
+  function renderBars(target, rows, emptyText){
+    if (!rows || !rows.length){
+      target.innerHTML = `<div class="muted">${escapeHtml(emptyText)}</div>`;
+      return;
+    }
+    const max = Math.max(...rows.map((row) => Number(row.value) || 0), 1);
+    target.innerHTML = rows.map((row) => {
+      const value = Number(row.value) || 0;
+      const width = Math.max(4, Math.round((value / max) * 100));
+      return `<div class="ai-bar-row"><span>${escapeHtml(row.label || "-")}</span><div><i style="width:${width}%"></i></div><strong>${escapeHtml(value)}</strong></div>`;
+    }).join("");
+  }
+
+  function renderSimpleRows(target, rows, columns, emptyText){
+    target.innerHTML = rows && rows.length ? rows.map((row) => `
+      <tr>${columns.map((column) => `<td>${column(row)}</td>`).join("")}</tr>
+    `).join("") : `<tr><td colspan="${columns.length}" class="muted">${escapeHtml(emptyText)}</td></tr>`;
+  }
+
+  function openEmployeeDetail(email){
+    const detail = currentDrilldowns[email] || {};
+    const employee = detail.employee || {};
+    const timeline = detail.timeline || [];
+    employeeDetail.innerHTML = `
+      <div class="ai-kpi-grid">
+        <div><strong>${escapeHtml(employee.discipline_score || 0)}</strong><span>Score</span></div>
+        <div><strong>${escapeHtml(employee.discipline_grade || "-")}</strong><span>Grade</span></div>
+        <div><strong>${escapeHtml(employee.late_days || 0)}</strong><span>Late days</span></div>
+        <div><strong>${escapeHtml(employee.total_late_minutes || 0)}</strong><span>Late minutes</span></div>
+        <div><strong>${escapeHtml(employee.unexcused_absent_days || 0)}</strong><span>Absent days</span></div>
+        <div><strong>${escapeHtml(employee.attendance_rate || 0)}%</strong><span>Attendance rate</span></div>
+      </div>
+      <div class="ai-list">
+        <div class="ai-list-item"><strong>Insight</strong><span>${escapeHtml(employee.insight || "-")}</span></div>
+        <div class="ai-list-item"><strong>Recommendation</strong><span>${(employee.recommendations || []).map(escapeHtml).join("<br>") || "-"}</span></div>
+        <div class="ai-list-item"><strong>Check-in pattern</strong><span>${(detail.checkin_pattern || []).map(escapeHtml).join(", ") || "-"}</span></div>
+      </div>
+      <div class="form-grid">
+        <div class="form-row single"><label class="label">Case Note</label><textarea class="input" id="aiCaseNoteDraft" rows="3" placeholder="Tambahkan catatan HR/Supervisor"></textarea></div>
+      </div>
+      <div class="btn-row">
+        <button class="btn primary" type="button" data-ai-create-case="${escapeHtml(email)}">Create Follow-up Case</button>
+      </div>
+      <div class="table-wrap">
+        <table class="table" aria-label="Employee attendance timeline">
+          <thead><tr><th>Date</th><th>Status</th><th>Check-in</th><th>Checkout</th><th>Late</th><th>Site</th></tr></thead>
+          <tbody>${timeline.length ? timeline.map((item) => `
+            <tr>
+              <td>${escapeHtml(item.date || "-")}</td>
+              <td>${escapeHtml(item.status || "-")}</td>
+              <td>${escapeHtml(item.checkin_time || "-")}</td>
+              <td>${escapeHtml(item.checkout_time || "-")}</td>
+              <td>${escapeHtml(item.late_minutes || 0)}</td>
+              <td>${escapeHtml(item.site_name || "-")}</td>
+            </tr>
+          `).join("") : '<tr><td colspan="6" class="muted">Timeline belum tersedia.</td></tr>'}</tbody>
+        </table>
+      </div>
+    `;
+    employeeModal.classList.add("show");
+    employeeModal.setAttribute("aria-hidden", "false");
+    fetch("/api/admin/ai-analysis/audit-detail", {
+      method: "POST",
+      headers: {"Content-Type": "application/json", "X-CSRF-Token": csrfToken},
+      body: JSON.stringify({employee_email: email}),
+    }).catch(() => {});
+  }
+
+  function renderPayload(payload){
+    const summary = payload.summary || {};
+    summaryCards.innerHTML = [
+      ["Analyzed", summary.employees_analyzed || 0],
+      ["Avg score", summary.average_discipline_score || 0],
+      ["High risk", summary.high_risk_employees || 0],
+      ["Attendance", `${summary.attendance_rate || 0}%`],
+      ["Late", `${summary.late_rate || 0}%`],
+      ["Absent", summary.absent_count || 0],
+      ["Frequent late", summary.frequent_late_employees || 0],
+      ["Frequent absent", summary.frequent_absent_employees || 0],
+      ["Tasks done", `${summary.tasks_done || 0}/${summary.tasks_total || 0}`],
+    ].map(([label, value]) => `<div><strong>${value}</strong><span>${label}</span></div>`).join("");
+    renderList(recommendations, payload.recommendations || [], "Belum ada rekomendasi.");
+    fairnessNotice.textContent = payload.fairness_notice || fairnessNotice.textContent;
+    renderList(insights, payload.insights || [], "Belum ada insight.");
+    renderList(risks, payload.risks || [], "Tidak ada risk besar.");
+    renderBars(lateTrend, payload.dashboard?.trend_late_weekly || [], "Belum ada late trend.");
+    renderBars(absentTrend, payload.dashboard?.trend_absent_weekly || [], "Belum ada absent trend.");
+    renderBars(scoreDistribution, payload.dashboard?.score_distribution || [], "Belum ada distribusi score.");
+    renderBars(siteRisk, payload.dashboard?.site_risk || [], "Belum ada site risk.");
+    renderAlerts((payload.alerts || []).map((row) => ({
+      id: row.id,
+      title: row.title,
+      message: row.message || "",
+      severity: row.level === "critical" ? "critical" : (row.level === "high_risk" ? "warning" : "info"),
+      actions: row.actions || [],
+    })));
+    const comparison = payload.comparison || {};
+    comparisonCards.innerHTML = [
+      ["Attendance delta", `${comparison.attendance_rate_delta || 0}%`],
+      ["Late delta", `${comparison.late_rate_delta || 0}%`],
+      ["Score delta", comparison.average_score_delta || 0],
+    ].map(([label, value]) => `<div><strong>${escapeHtml(value)}</strong><span>${escapeHtml(label)}</span></div>`).join("");
+    comparisonLists.innerHTML = `
+      <div class="ai-list-item"><strong>Improvement</strong><span>${(comparison.improvement_list || []).map((row) => `${escapeHtml(row.employee_name)}: +${escapeHtml(row.delta)}`).join("<br>") || "-"}</span></div>
+      <div class="ai-list-item"><strong>Declining</strong><span>${(comparison.declining_list || []).map((row) => `${escapeHtml(row.employee_name)}: ${escapeHtml(row.delta)}`).join("<br>") || "-"}</span></div>
+    `;
+    const predictive = payload.predictive_readiness || {};
+    predictiveCards.innerHTML = [
+      ["Mode", predictive.mode || "rule_based_foundation"],
+      ["ML enabled", predictive.ml_enabled ? "Yes" : "No"],
+      ["Data points", predictive.data_points || 0],
+      ["Readiness", `${predictive.readiness_percent || 0}%`],
+      ["Status", predictive.status || "collect_more_data"],
+    ].map(([label, value]) => `<div><strong>${escapeHtml(value)}</strong><span>${escapeHtml(label)}</span></div>`).join("");
+    renderList(predictiveNotes, predictive.next_upgrade_notes || [], "Predictive notes belum tersedia.");
+    const workload = payload.workload || [];
+    workloadRows.innerHTML = workload.length ? workload.map((row) => `
+      <tr>
+        <td>${row.employee_name || row.employee_email || "-"}</td>
+        <td>${row.scheduled_days || 0}</td>
+        <td>${row.late_days || 0}</td>
+        <td>${row.absent_days || 0}</td>
+        <td>${row.tasks_total || 0}</td>
+        <td>${row.tasks_done || 0}</td>
+        <td>${row.urgent_open || 0}</td>
+      </tr>
+    `).join("") : '<tr><td colspan="7" class="muted">Tidak ada sinyal workload.</td></tr>';
+    const employees = payload.employee_analysis || [];
+    currentEmployees = employees;
+    currentDrilldowns = payload.employee_drilldowns || {};
+    employeeRows.innerHTML = employees.length ? employees.map((row) => `
+      <tr class="ai-click-row" data-employee-email="${escapeHtml(String(row.employee_email || "").toLowerCase())}">
+        <td>${escapeHtml(row.employee_name || row.employee_email || "-")}</td>
+        <td>${escapeHtml(row.discipline_score || 0)}</td>
+        <td>${escapeHtml(row.discipline_grade || "-")}</td>
+        <td>${escapeHtml(row.late_category || "-")}<br><span class="muted">${escapeHtml(row.late_days || 0)} hari</span></td>
+        <td>${escapeHtml(row.absence_category || "-")}<br><span class="muted">${escapeHtml(row.unexcused_absent_days || 0)} hari</span></td>
+        <td>${escapeHtml(row.discipline_category || "-")}</td>
+        <td>${escapeHtml(row.insight || "-")}</td>
+        <td>${(row.recommendations || []).map(escapeHtml).join("<br>") || "-"}</td>
+      </tr>
+    `).join("") : '<tr><td colspan="8" class="muted">Tidak ada klasifikasi employee.</td></tr>';
+    renderSimpleRows(rankingRows, payload.ranking || [], [
+      (row) => escapeHtml(row.employee_name || row.employee_email || "-"),
+      (row) => escapeHtml(row.discipline_score || 0),
+      (row) => escapeHtml(row.discipline_grade || "-"),
+      (row) => escapeHtml(row.discipline_category || "-"),
+    ], "Belum ada ranking.");
+    renderSimpleRows(watchlistRows, payload.watchlist || [], [
+      (row) => escapeHtml(row.employee_name || row.employee_email || "-"),
+      (row) => escapeHtml(row.late_days || 0),
+      (row) => escapeHtml(row.unexcused_absent_days || 0),
+      (row) => escapeHtml(row.discipline_category || "-"),
+    ], "Watchlist kosong.");
+    renderSimpleRows(chronicLateRows, payload.chronic_late || [], [
+      (row) => escapeHtml(row.employee_name || row.employee_email || "-"),
+      (row) => escapeHtml(row.late_days || 0),
+      (row) => escapeHtml(row.total_late_minutes || 0),
+    ], "Tidak ada chronic late.");
+    renderSimpleRows(highAbsenceRows, payload.high_absence || [], [
+      (row) => escapeHtml(row.employee_name || row.employee_email || "-"),
+      (row) => escapeHtml(row.unexcused_absent_days || 0),
+      (row) => `${escapeHtml(row.absence_rate || 0)}%`,
+    ], "Tidak ada high absence.");
+    renderSimpleRows(siteRows, payload.site_insights || [], [
+      (row) => escapeHtml(row.client_name || "-"),
+      (row) => escapeHtml(row.site_name || "-"),
+      (row) => `${escapeHtml(row.attendance_rate || 0)}%`,
+      (row) => `${escapeHtml(row.late_rate || 0)}%`,
+      (row) => `${escapeHtml(row.absence_rate || 0)}%`,
+      (row) => escapeHtml(row.problem_shift || "-"),
+      (row) => escapeHtml(row.recommendation || "-"),
+    ], "Belum ada insight lokasi.");
+  }
+
+  async function loadConfig(){
+    const response = await fetch("/api/admin/ai-analysis/config");
+    const payload = await response.json().catch(() => ({}));
+    const data = payload.data || {};
+    const labels = {
+      frequent_late_threshold: "Frequent late",
+      chronic_late_threshold: "Chronic late",
+      frequent_absence_threshold: "Frequent absence",
+      critical_absence_threshold: "Critical absence",
+      late_penalty_per_day: "Late penalty/day",
+      late_minute_penalty: "Late minute penalty",
+      absence_penalty_per_day: "Absence penalty/day",
+      early_leave_penalty_per_day: "Early leave penalty",
+      missing_checkout_penalty_per_day: "Missing checkout penalty",
+      grade_a_min: "Grade A min",
+      grade_b_min: "Grade B min",
+      grade_c_min: "Grade C min",
+      grade_d_min: "Grade D min",
+      alert_late_threshold: "Alert late",
+      alert_absence_threshold: "Alert absence",
+      alert_score_drop_threshold: "Alert score drop",
+      alert_site_late_rate: "Alert site late %",
+      alert_site_absence_rate: "Alert site absence %",
+    };
+    configGrid.innerHTML = Object.entries(labels).map(([key, label]) => `
+      <div class="form-row"><label class="label" for="aiConfig_${key}">${escapeHtml(label)}</label><input class="input" type="number" step="0.01" id="aiConfig_${key}" data-ai-config="${key}" value="${escapeHtml(data[key] ?? "")}" /></div>
+    `).join("");
+  }
+
+  async function saveConfig(){
+    const data = {};
+    document.querySelectorAll("[data-ai-config]").forEach((input) => {
+      data[input.dataset.aiConfig] = input.value;
+    });
+    const response = await fetch("/api/admin/ai-analysis/config", {
+      method: "POST",
+      headers: {"Content-Type": "application/json", "X-CSRF-Token": csrfToken},
+      body: JSON.stringify(data),
+    });
+    const payload = await response.json().catch(() => ({}));
+    showAlert(payload.ok ? "Config AI Analysis tersimpan." : (payload.message || "Config gagal disimpan."), payload.ok ? "success" : "error");
+    if (payload.ok) loadSummary(false);
+  }
+
+  async function loadCases(){
+    const response = await fetch("/api/admin/ai-analysis/cases?limit=25");
+    const payload = await response.json().catch(() => ({}));
+    const rows = payload.data || [];
+    caseRows.innerHTML = rows.length ? rows.map((row) => `
+      <tr>
+        <td>${escapeHtml(row.case_title || "-")}</td>
+        <td>${escapeHtml(row.employee_name || row.employee_email || "-")}</td>
+        <td>
+          <select class="input" data-ai-case-status="${escapeHtml(row.id)}">
+            ${["open","in_review","coaching_scheduled","resolved","escalated","closed"].map((status) => `<option value="${status}" ${row.case_status === status ? "selected" : ""}>${status.replaceAll("_", " ")}</option>`).join("")}
+          </select>
+        </td>
+        <td>${escapeHtml(row.priority || "-")}</td>
+        <td>${escapeHtml(row.note_count || 0)}</td>
+        <td>${escapeHtml(row.updated_at || row.created_at || "-")}</td>
+      </tr>
+    `).join("") : '<tr><td colspan="6" class="muted">Belum ada case.</td></tr>';
+  }
+
+  async function createCase(email){
+    const employee = currentEmployees.find((row) => String(row.employee_email || "").toLowerCase() === email) || {};
+    const note = document.getElementById("aiCaseNoteDraft")?.value || "";
+    const response = await fetch("/api/admin/ai-analysis/cases", {
+      method: "POST",
+      headers: {"Content-Type": "application/json", "X-CSRF-Token": csrfToken},
+      body: JSON.stringify({
+        employee_email: employee.employee_email || email,
+        employee_name: employee.employee_name || email,
+        alert_type: employee.discipline_category || "employee_risk",
+        case_title: `AI risk follow-up - ${employee.employee_name || email}`,
+        priority: employee.discipline_category === "Critical HR Action Required" ? "critical" : "medium",
+        note,
+      }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    showAlert(payload.ok ? "Case follow-up dibuat." : (payload.message || "Gagal membuat case."), payload.ok ? "success" : "error");
+    if (payload.ok) loadCases();
+  }
+
+  async function loadSummary(runSnapshot=false){
+    showAlert(runSnapshot ? "Membuat snapshot..." : "Memuat analysis...", "info");
+    const url = runSnapshot ? `/api/admin/ai-analysis/run?${params()}` : `/api/admin/ai-analysis/summary?${params()}`;
+    const options = runSnapshot ? {method:"POST", headers:{"X-CSRF-Token": csrfToken}} : {};
+    const response = await fetch(url, options);
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.ok){
+      showAlert(payload.message || "AI Analysis gagal dimuat.", "error");
+      return;
+    }
+    renderPayload(payload.data || {});
+    showAlert(runSnapshot ? "Snapshot AI Analysis tersimpan." : "Preview AI Analysis selesai.", "success");
+    if (runSnapshot) loadHistory();
+  }
+
+  async function loadHistory(){
+    const response = await fetch("/api/admin/ai-analysis/history?limit=5");
+    const payload = await response.json().catch(() => ({}));
+    const rows = payload.data || [];
+    historyRows.innerHTML = rows.length ? rows.map((row) => `
+      <tr>
+        <td>${row.created_at || "-"}</td>
+        <td>${row.range_start || "-"} - ${row.range_end || "-"}</td>
+        <td>${row.summary?.attendance_rate || 0}%</td>
+        <td>${row.summary?.late_rate || 0}%</td>
+        <td>${(row.risks || []).length}</td>
+      </tr>
+    `).join("") : '<tr><td colspan="5" class="muted">Belum ada snapshot.</td></tr>';
+  }
+
+  document.getElementById("aiLoadSummary")?.addEventListener("click", () => loadSummary(false));
+  document.getElementById("aiRunSnapshot")?.addEventListener("click", () => loadSummary(true));
+  document.getElementById("aiSaveConfig")?.addEventListener("click", saveConfig);
+  document.getElementById("aiRefreshCases")?.addEventListener("click", loadCases);
+  document.getElementById("aiExportReport")?.addEventListener("click", () => {
+    window.open(`/api/admin/ai-analysis/export?${exportParams()}`, "_blank");
+  });
+  caseRows?.addEventListener("change", async (event) => {
+    const select = event.target.closest("[data-ai-case-status]");
+    if (!select) return;
+    const response = await fetch(`/api/admin/ai-analysis/cases/${select.dataset.aiCaseStatus}/status`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json", "X-CSRF-Token": csrfToken},
+      body: JSON.stringify({case_status: select.value}),
+    });
+    const payload = await response.json().catch(() => ({}));
+    showAlert(payload.ok ? "Status case diperbarui." : (payload.message || "Gagal update case."), payload.ok ? "success" : "error");
+  });
+  alerts?.addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-ai-alert-review]");
+    if (!button) return;
+    const response = await fetch(`/api/admin/ai-analysis/alerts/${button.dataset.aiAlertReview}/review`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json", "X-CSRF-Token": csrfToken},
+    });
+    const payload = await response.json().catch(() => ({}));
+    showAlert(payload.ok ? "Alert ditandai reviewed." : (payload.message || "Gagal review alert."), payload.ok ? "success" : "error");
+    if (payload.ok) button.closest(".ai-list-item")?.remove();
+  });
+  employeeRows?.addEventListener("click", (event) => {
+    const row = event.target.closest("[data-employee-email]");
+    if (row) openEmployeeDetail(row.dataset.employeeEmail || "");
+  });
+  document.getElementById("aiEmployeeModalClose")?.addEventListener("click", () => {
+    employeeModal.classList.remove("show");
+    employeeModal.setAttribute("aria-hidden", "true");
+  });
+  employeeDetail?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-ai-create-case]");
+    if (button) createCase(button.dataset.aiCreateCase || "");
+  });
+  loadConfig();
+  loadCases();
+  loadSummary(false);
+})();
+</script>
+{% endblock %}

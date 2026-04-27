@@ -81,6 +81,14 @@
           <span class="nav-label">Calendar</span>
         </a>
         {% endif %}
+        {% if permissions.get("view_ai_analysis") %}
+        <a href="{{ url_for('admin.ai_analysis') }}" class="{% if active == 'ai_analysis' %}active{% endif %}" title="AI Analysis">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M12 3v3m0 12v3M4.9 4.9 7 7m10 10 2.1 2.1M3 12h3m12 0h3M4.9 19.1 7 17m10-10 2.1-2.1" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M9 10.5 12 8l3 2.5V15l-3 2-3-2v-4.5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+          </span>
+          <span class="nav-label">AI Analysis</span>
+        </a>
+        {% endif %}
         {% if permissions.get("manage_policies") %}
         <a href="{{ url_for('admin.policies') }}" class="{% if active == 'policies' %}active{% endif %}" title="Policies" data-i18n-title="nav.policies">
           <span class="nav-icon" aria-hidden="true">
