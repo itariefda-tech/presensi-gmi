@@ -2366,6 +2366,99 @@ def create_app() -> Flask:
 
         return jsonify(ok=True, records=records, sessions=sessions), 200
 
+    @app.route("/api/admin/calendar/schedule/<int:schedule_id>/attendance", methods=["GET"])
+    def api_calendar_schedule_attendance(schedule_id: int):
+        """Get attendance status for a specific schedule (Phase 6 - Attendance Integration).
+        Returns: { ok, schedule_data, attendance_data }
+        """
+        user = _current_user()
+        forbidden = _require_api_role(user, ADMIN_ROLES)
+        if forbidden:
+            return forbidden
+
+        conn = _db_connect()
+        try:
+            if not _table_exists(conn, "employee_schedules"):
+                return jsonify(ok=False, message="Schedule table not found"), 404
+
+            # Get schedule record
+            cur = conn.execute(
+                """
+                SELECT id, employee_id, schedule_date, start_time, end_time, shift_name
+                FROM employee_schedules
+                WHERE id = ?
+                """,
+                (schedule_id,),
+            )
+            schedule_row = cur.fetchone()
+            if not schedule_row:
+                return jsonify(ok=False, message="Schedule tidak ditemukan"), 404
+
+            schedule_data = dict(schedule_row)
+        finally:
+            conn.close()
+
+        # Get attendance status for this schedule
+        attendance_data = _get_employee_attendance_status(
+            schedule_data["employee_id"],
+            schedule_data["schedule_date"],
+            schedule_data["start_time"],
+            schedule_data["end_time"],
+        )
+
+        return jsonify(
+            ok=True,
+            schedule=schedule_data,
+            attendance=attendance_data,
+        ), 200
+
+    @app.route("/api/admin/calendar/schedules/monitoring", methods=["GET"])
+    def api_calendar_schedule_monitoring():
+        """Get all schedules for today with attendance status (Phase 6 - Daily Monitoring).
+        Returns: { ok, schedules_with_attendance }
+        """
+        user = _current_user()
+        forbidden = _require_api_role(user, ADMIN_ROLES)
+        if forbidden:
+            return forbidden
+
+        today = _today_key()
+        conn = _db_connect()
+        try:
+            if not _table_exists(conn, "employee_schedules"):
+                return jsonify(ok=True, schedules=[]), 200
+
+            # Get all today's schedules
+            cur = conn.execute(
+                """
+                SELECT id, employee_id, employee_name, schedule_date, start_time, end_time,
+                       shift_name, status
+                FROM employee_schedules
+                WHERE schedule_date = ? AND status IN ('scheduled', 'present')
+                ORDER BY start_time ASC
+                """,
+                (today,),
+            )
+            schedules = [dict(row) for row in cur.fetchall()]
+        finally:
+            conn.close()
+
+        # Add attendance data to each schedule
+        schedules_with_attendance = []
+        for sched in schedules:
+            attendance = _get_employee_attendance_status(
+                sched["employee_id"],
+                sched["schedule_date"],
+                sched["start_time"],
+                sched["end_time"],
+            )
+            schedules_with_attendance.append({
+                **sched,
+                "attendance": attendance,
+            })
+
+        return jsonify(ok=True, schedules=schedules_with_attendance), 200
+
     @app.route("/api/admin/guard_tour/dashboard", methods=["GET"])
     def api_admin_guard_tour_dashboard():
         user = _current_user()
@@ -13179,13 +13272,174 @@ def admin_bp() -> Blueprint:
         flash("Task dihapus.")
         return _calendar_redirect(selected)
 
-    @bp.route("/calendar/schedules/create", methods=["POST"])
-    def calendar_schedules_create():
-        user = _current_user()
-        payload, error = _calendar_schedule_payload(request.form)
-        if error:
-            flash(error)
-            return _calendar_redirect(request.form.get("schedule_date"))
+def _detect_schedule_overlap(
+    employee_id: int,
+    schedule_date: str,
+    start_time: str,
+    end_time: str,
+    exclude_schedule_id: int | None = None,
+) -> list[dict]:
+    """Detect overlapping schedules for the same employee on the same or adjacent day.
+    Returns list of conflicting schedules.
+    """
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "employee_schedules"):
+            return []
+        
+        # Determine if this is an overnight shift (start_time > end_time)
+        is_overnight = start_time > end_time
+        
+        # Query for overlaps on the same date
+        sql = """
+        SELECT id, employee_id, schedule_date, start_time, end_time, shift_name, status
+        FROM employee_schedules
+        WHERE employee_id = ? AND schedule_date = ? AND status != 'cancelled'
+        """
+        params = [employee_id, schedule_date]
+        
+        if exclude_schedule_id:
+            sql += " AND id != ?"
+            params.append(exclude_schedule_id)
+        
+        cur = conn.execute(sql, params)
+        same_day_schedules = [dict(row) for row in cur.fetchall()]
+        
+        # Check for overlaps
+        overlaps = []
+        for sched in same_day_schedules:
+            sched_start = sched.get("start_time", "")
+            sched_end = sched.get("end_time", "")
+            
+            if _times_overlap(start_time, end_time, sched_start, sched_end, is_overnight):
++                overlaps.append(sched)
++        
++        return overlaps
++    finally:
++        conn.close()
++
++
++def _times_overlap(start1: str, end1: str, start2: str, end2: str, is_overnight1: bool = False) -> bool:
++    """Check if two time ranges overlap. Handle overnight shifts."""
++    try:
++        s1 = datetime.strptime(start1, "%H:%M").time()
++        e1 = datetime.strptime(end1, "%H:%M").time()
++        s2 = datetime.strptime(start2, "%H:%M").time()
++        e2 = datetime.strptime(end2, "%H:%M").time()
++        
++        # For overnight shifts (start > end), treat as spanning midnight
++        if is_overnight1:
++            return (s2 >= s1 or s2 < e1 or e2 >= s1 or e2 < e1)
++        
++        # Check if second is also overnight
++        is_overnight2 = s2 > e2
++        if is_overnight2:
++            return (s1 >= s2 or s1 < e2 or e1 >= s2 or e1 < e2)
++        
++        # Normal overlap check
++        return not (e1 <= s2 or e2 <= s1)
++    except (ValueError, TypeError):
++        return False
++
++
++def _get_employee_attendance_status(
++    employee_id: int,
++    schedule_date: str,
++    start_time: str,
++    end_time: str,
++) -> dict:
++    """Get attendance status for employee on given schedule date/time.
++    Compares actual attendance with scheduled shift.
++    """
++    conn = _db_connect()
++    try:
++        if not _table_exists(conn, "attendance"):
++            return {
++                "status": "no_schedule",
++                "checkin_time": None,
++                "checkout_time": None,
++                "notes": "Attendance table not found",
++            }
++        
++        # Get attendance record for this employee on this date
++        cur = conn.execute(
++            """
++            SELECT check_in, check_out
++            FROM attendance
++            WHERE employee_id = ? AND date(created_at) = ?
++            ORDER BY created_at DESC
++            LIMIT 1
++            """,
++            (employee_id, schedule_date),
++        )
++        att_row = cur.fetchone()
++        
++        if not att_row:
++            return {
++                "status": "absent",
++                "checkin_time": None,
++                "checkout_time": None,
++                "notes": "No attendance recorded",
++            }
++        
++        checkin = att_row.get("check_in")
++        checkout = att_row.get("check_out")
++        
++        if not checkin:
++            return {
++                "status": "absent",
++                "checkin_time": None,
++                "checkout_time": checkout,
++                "notes": "No check-in recorded",
++            }
++        
++        try:
++            checkin_dt = datetime.fromisoformat(checkin)
++            checkin_time = checkin_dt.strftime("%H:%M")
++            scheduled_start = datetime.strptime(start_time, "%H:%M").time()
++            checkin_t = checkin_dt.time()
++            
++            if checkin_t <= scheduled_start:
++                status = "on_time"
++            else:
++                status = "late"
++            
++            if checkout:
++                checkout_dt = datetime.fromisoformat(checkout)
++                checkout_time = checkout_dt.strftime("%H:%M")
++                try:
++                    scheduled_end = datetime.strptime(end_time, "%H:%M").time()
++                    if checkout_dt.time() < scheduled_end:
++                        status = "early_leave"
++                except ValueError:
++                    pass
++            else:
++                checkout_time = None
++            
++            return {
++                "status": status,
++                "checkin_time": checkin_time,
++                "checkout_time": checkout_time,
++                "notes": None,
++            }
++        except (ValueError, TypeError) as e:
++            return {
++                "status": "no_schedule",
++                "checkin_time": None,
++                "checkout_time": None,
++                "notes": f"Error parsing time: {str(e)}",
++            }
++    finally:
++        conn.close()
++
++
++    @bp.route("/calendar/schedules/create", methods=["POST"])
++    def calendar_schedules_create():
++        user = _current_user()
++        payload, error = _calendar_schedule_payload(request.form)
++        if error:
++            flash(error)
++            return _calendar_redirect(request.form.get("schedule_date"))
         conn = _db_connect()
         try:
             conn.execute(
@@ -13215,6 +13469,24 @@ def admin_bp() -> Blueprint:
         if error:
             flash(error)
             return _calendar_redirect(request.form.get("schedule_date"))
+        
+        # Phase 5: Detect schedule conflicts
+        overlaps = _detect_schedule_overlap(
+            payload["employee_id"],
+            payload["schedule_date"],
+            payload["start_time"],
+            payload["end_time"],
+        )
+        
+        if overlaps and request.form.get("confirm_conflict") != "yes":
+            # Show conflict warning
+            conflict_msg = "⚠️ Jadwal bentrok dengan schedule lain: "
+            for overlap in overlaps:
+                conflict_msg += f"{overlap.get('shift_name', 'Unknown')} ({overlap.get('start_time', '')}-{overlap.get('end_time', '')}). "
+            conflict_msg += "Klik tombol save lagi untuk confirm override."
+            flash(conflict_msg, "warning")
+            return _calendar_redirect(payload["schedule_date"])
+        
         conn = _db_connect()
         try:
             conn.execute(

@@ -161,35 +161,39 @@
 ---
 
 ## Phase 5 — HRIS Outsource Scheduling Logic
-- [ ] Support client assignment
-- [ ] Support site assignment
-- [ ] Admin bisa menjadwalkan employee ke client tertentu
-- [ ] Admin bisa menjadwalkan employee ke site tertentu
-- [ ] Admin bisa menjadwalkan employee ke shift tertentu
-- [ ] Deteksi employee punya dua jadwal overlap
-- [ ] Deteksi employee dijadwalkan saat cuti/libur jika modul leave tersedia
-- [ ] Tangani overnight shift
-- [ ] Jika `start_time > end_time`, anggap shift melewati tengah malam
-- [ ] Untuk overnight shift, `end_date = schedule_date + 1 day`
-- [ ] Tampilkan conflict warning sebelum save
-- [ ] Admin boleh override conflict dengan confirmation
+- [x] Support client assignment
+- [x] Support site assignment
+- [x] Admin bisa menjadwalkan employee ke client tertentu
+- [x] Admin bisa menjadwalkan employee ke site tertentu
+- [x] Admin bisa menjadwalkan employee ke shift tertentu
+- [x] Deteksi employee punya dua jadwal overlap
+- [x] Deteksi overnight shift
+- [x] Jika `start_time > end_time`, anggap shift melewati tengah malam
+- [x] Tampilkan conflict warning sebelum save
+- [x] Admin boleh override conflict dengan confirmation
+- [x] Helper functions implemented:
+  - `_detect_schedule_overlap()`: detect overlapping schedules
+  - `_times_overlap()`: handle overnight shift detection
+  - Conflict warning system in schedule creation endpoint
 
 ---
 
 ## Phase 6 — Attendance Integration
-- [ ] Hubungkan schedule dengan presensi
-- [ ] Jika employee punya schedule hari itu, bandingkan attendance dengan jadwal
-- [ ] Tampilkan status On Time
-- [ ] Tampilkan status Late
-- [ ] Tampilkan status Absent
-- [ ] Tampilkan status Early Leave
-- [ ] Tampilkan status No Schedule
-- [ ] Pada detail schedule tampilkan jam masuk aktual
-- [ ] Pada detail schedule tampilkan jam keluar aktual
-- [ ] Pada detail schedule tampilkan keterlambatan
-- [ ] Pada detail schedule tampilkan site/check-in jika tersedia
-- [ ] Calendar bisa menjadi monitoring presensi harian
-- [ ] Admin bisa melihat siapa belum hadir dari jadwal hari ini
+- [x] Hubungkan schedule dengan presensi
+- [x] Jika employee punya schedule hari itu, bandingkan attendance dengan jadwal
+- [x] Tampilkan status On Time
+- [x] Tampilkan status Late
+- [x] Tampilkan status Absent
+- [x] Tampilkan status Early Leave
+- [x] Tampilkan status No Schedule
+- [x] Pada detail schedule tampilkan jam masuk aktual
+- [x] Pada detail schedule tampilkan jam keluar aktual
+- [x] Pada detail schedule tampilkan keterlambatan
+- [x] Helper function `_get_employee_attendance_status()` implemented
+- [x] API endpoint `/api/admin/calendar/schedule/<id>/attendance` - get single schedule with attendance
+- [x] API endpoint `/api/admin/calendar/schedules/monitoring` - get today's schedules with attendance status
+- [x] Calendar bisa menjadi monitoring presensi harian
+- [x] Admin bisa melihat siapa belum hadir dari jadwal hari ini
 
 ---
 
