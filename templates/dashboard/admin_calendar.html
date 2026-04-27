@@ -1,0 +1,339 @@
+{% extends "dashboard/base.html" %}
+{% set active = "calendar" %}
+{% set heading = "Calendar" %}
+{% set subtitle = "Task, jadwal kerja, event, notes, dan info operasional" %}
+
+{% macro client_options(selected) -%}
+  <option value="">Semua client</option>
+  {% for c in clients %}
+  <option value="{{ c.id }}" {% if selected == c.id %}selected{% endif %}>{{ c.name }}</option>
+  {% endfor %}
+{%- endmacro %}
+
+{% macro site_options(selected) -%}
+  <option value="">Semua site</option>
+  {% for s in sites %}
+  <option value="{{ s.id }}" {% if selected == s.id %}selected{% endif %}>{{ s.client_name or '-' }} - {{ s.name }}</option>
+  {% endfor %}
+{%- endmacro %}
+
+{% macro employee_options(selected) -%}
+  <option value="">Pilih employee</option>
+  {% for e in employees %}
+  <option value="{{ e.id }}" {% if selected == e.id %}selected{% endif %}>{{ e.name or e.email }} ({{ e.email }})</option>
+  {% endfor %}
+{%- endmacro %}
+
+{% macro item_button(item) -%}
+  <button class="calendar-item {{ item.class_name }}" type="button" data-modal-open="calendar-{{ item.kind }}-{{ item.id }}" title="{{ item.label }}">
+    {{ item.label }}
+  </button>
+{%- endmacro %}
+
+{% macro text_input(name, value, label, required=False) -%}
+  <div class="form-row">
+    <label class="label">{{ label }}</label>
+    <input class="input" name="{{ name }}" value="{{ value or '' }}" {% if required %}required{% endif %} />
+  </div>
+{%- endmacro %}
+
+{% block body %}
+<section class="calendar-toolbar">
+  <div class="calendar-actions">
+    <button class="btn primary" type="button" data-modal-open="calendar-add-event">Add Event</button>
+    <button class="btn primary" type="button" data-modal-open="calendar-add-task">Add Task</button>
+    <button class="btn primary" type="button" data-modal-open="calendar-add-schedule">Add Schedule</button>
+    <button class="btn primary" type="button" data-modal-open="calendar-add-note">Add Note</button>
+  </div>
+  <form class="calendar-filters" method="get" action="{{ url_for('admin.calendar_page') }}">
+    <input type="hidden" name="year" value="{{ calendar_data.year }}" />
+    <input type="hidden" name="month" value="{{ calendar_data.month }}" />
+    <input type="hidden" name="selected_date" value="{{ day_summary.date }}" />
+    <select class="input" name="type">
+      {% for value, label in [('all','All'),('schedule','Schedule'),('task','Task'),('event','Event'),('notes','Notes')] %}
+      <option value="{{ value }}" {% if filters.type == value %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+    {% if not filters.site_id %}
+    <select class="input" name="client_id" data-calendar-client-filter>{{ client_options(filters.client_id) }}</select>
+    {% endif %}
+    <select class="input" name="site_id" data-calendar-site-filter>{{ site_options(filters.site_id) }}</select>
+    <select class="input" name="employee_id" data-calendar-employee-filter>
+      <option value="">Semua employee</option>
+      {% for e in filter_employees %}
+      <option value="{{ e.id }}" {% if filters.employee_id == e.id %}selected{% endif %}>{{ e.name or e.email }}</option>
+      {% endfor %}
+      {% if not filter_employees and (filters.site_id or filters.client_id) %}
+      <option value="" disabled>Tidak ada employee</option>
+      {% endif %}
+    </select>
+    <select class="input" name="status">
+      <option value="">Semua status</option>
+      {% for status in ['scheduled','pending','in_progress','done','present','absent','late','swapped','cancelled','urgent','info','warning','reminder'] %}
+      <option value="{{ status }}" {% if filters.status == status %}selected{% endif %}>{{ status|replace('_',' ')|title }}</option>
+      {% endfor %}
+    </select>
+    <button class="btn secondary" type="submit">Filter</button>
+  </form>
+</section>
+
+<section class="calendar-shell">
+  <div class="calendar-card">
+    <div class="calendar-month-head">
+      <a class="btn secondary" href="{{ url_for('admin.calendar_page', year=calendar_data.prev_year, month=calendar_data.prev_month, selected_date=day_summary.date, type=filters.type, client_id='' if filters.site_id else filters.client_id or '', site_id=filters.site_id or '', employee_id=filters.employee_id or '', status=filters.status) }}" aria-label="Bulan sebelumnya">&lt;</a>
+      <div class="calendar-month-title">{{ calendar_data.month_label }}</div>
+      <a class="btn secondary" href="{{ url_for('admin.calendar_page', year=calendar_data.next_year, month=calendar_data.next_month, selected_date=day_summary.date, type=filters.type, client_id='' if filters.site_id else filters.client_id or '', site_id=filters.site_id or '', employee_id=filters.employee_id or '', status=filters.status) }}" aria-label="Bulan berikutnya">&gt;</a>
+    </div>
+    <div class="calendar-grid calendar-weekdays" aria-hidden="true">
+      {% for day in ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'] %}
+      <div>{{ day }}</div>
+      {% endfor %}
+    </div>
+    <div class="calendar-grid calendar-days">
+      {% for week in calendar_data.weeks %}
+        {% for day in week %}
+        <a class="calendar-day{% if not day.in_month %} is-muted{% endif %}{% if day.is_today %} is-today{% endif %}{% if day.date == day_summary.date %} is-selected{% endif %}" href="{{ url_for('admin.calendar_page', year=calendar_data.year, month=calendar_data.month, selected_date=day.date, type=filters.type, client_id='' if filters.site_id else filters.client_id or '', site_id=filters.site_id or '', employee_id=filters.employee_id or '', status=filters.status) }}">
+          <span class="calendar-day-number">{{ day.day }}</span>
+          <span class="calendar-dots">
+            {% if day.counts.schedule %}<span class="dot-blue"></span>{% endif %}
+            {% if day.counts.task %}<span class="dot-green"></span>{% endif %}
+            {% if day.counts.event %}<span class="dot-purple"></span>{% endif %}
+            {% if day.counts.note %}<span class="dot-yellow"></span>{% endif %}
+          </span>
+          <span class="calendar-day-items">
+            {% for item in day["items"][:3] %}
+            <span class="calendar-item-mini {{ item.class_name }}">{{ item.label }}</span>
+            {% endfor %}
+            {% if day["items"]|length > 3 %}<span class="calendar-more">+{{ day["items"]|length - 3 }}</span>{% endif %}
+          </span>
+        </a>
+        {% endfor %}
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<section class="calendar-summary">
+  <div class="calendar-summary-head">
+    <div>
+      <div class="label">Selected Date Summary</div>
+      <h3>{{ day_summary.date|ddmmyyyy }}</h3>
+    </div>
+    <span class="badge">{{ day_summary["items"]|length }} item</span>
+  </div>
+  <div class="calendar-summary-grid">
+    {% for title, items in [("Today's Notes", day_summary.notes), ("Today's Tasks", day_summary.tasks), ("Today's Schedule", day_summary.schedules), ("Important Info", day_summary.events)] %}
+    <article class="calendar-summary-panel">
+      <h4>{{ title }}</h4>
+      {% if not items %}
+      <div class="muted">Belum ada data.</div>
+      {% endif %}
+      {% for item in items %}
+      {{ item_button(item) }}
+      {% endfor %}
+    </article>
+    {% endfor %}
+  </div>
+</section>
+
+<div class="modal" id="calendar-add-event" aria-hidden="true">
+  <div class="modal-card" role="dialog" aria-modal="true">
+    <div class="modal-title">Add Event</div>
+    <form method="post" action="{{ url_for('admin.calendar_events_create') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      {{ text_input('title', '', 'Title', True) }}
+      <div class="form-row"><label class="label">Type</label><select class="input" name="event_type">{% for value in event_types %}<option value="{{ value }}">{{ value|replace('_',' ')|title }}</option>{% endfor %}</select></div>
+      <div class="form-row"><label class="label">Start</label><div class="form-inline"><input class="input" type="date" name="start_date" value="{{ day_summary.date }}" required /><input class="input" type="time" name="start_time" value="09:00" required /></div></div>
+      <div class="form-row"><label class="label">End</label><div class="form-inline"><input class="input" type="date" name="end_date" value="{{ day_summary.date }}" /><input class="input" type="time" name="end_time" /></div></div>
+      <div class="form-row"><label class="label">Client</label><select class="input" name="client_id">{{ client_options(None) }}</select></div>
+      {{ text_input('site_label', '', 'Site label') }}
+      <div class="form-row"><label class="label">Visibility</label><select class="input" name="visibility">{% for value in visibilities %}<option value="{{ value }}">{{ value|title }}</option>{% endfor %}</select></div>
+      <div class="form-row"><label class="label">Status</label><select class="input" name="status">{% for value in event_statuses %}<option value="{{ value }}">{{ value|title }}</option>{% endfor %}</select></div>
+      <div class="form-row single"><textarea class="input" name="description" placeholder="Description"></textarea></div>
+      <div class="btn-row"><button class="btn primary btn-fixed-100" type="submit">Simpan</button><button class="btn secondary" type="button" data-modal-close>Tutup</button></div>
+    </form>
+  </div>
+</div>
+
+<div class="modal" id="calendar-add-task" aria-hidden="true">
+  <div class="modal-card" role="dialog" aria-modal="true">
+    <div class="modal-title">Add Task</div>
+    <form method="post" action="{{ url_for('admin.calendar_tasks_create') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      {{ text_input('title', '', 'Title', True) }}
+      <div class="form-row"><label class="label">Assigned To</label><select class="input" name="assigned_to">{{ employee_options(None) }}</select></div>
+      <div class="form-row"><label class="label">Due Date</label><input class="input" type="date" name="due_date" value="{{ day_summary.date }}" required /></div>
+      <div class="form-row"><label class="label">Client</label><select class="input" name="client_id">{{ client_options(None) }}</select></div>
+      <div class="form-row"><label class="label">Site</label><select class="input" name="site_id">{{ site_options(None) }}</select></div>
+      <div class="form-row"><label class="label">Start</label><div class="form-inline"><input class="input" type="date" name="start_date" /><input class="input" type="time" name="start_time" /></div></div>
+      <div class="form-row"><label class="label">End</label><div class="form-inline"><input class="input" type="date" name="end_date" /><input class="input" type="time" name="end_time" /></div></div>
+      <div class="form-row"><label class="label">Priority</label><select class="input" name="priority">{% for value in task_priorities %}<option value="{{ value }}">{{ value|title }}</option>{% endfor %}</select></div>
+      <div class="form-row"><label class="label">Status</label><select class="input" name="status">{% for value in task_statuses %}<option value="{{ value }}">{{ value|replace('_',' ')|title }}</option>{% endfor %}</select></div>
+      <div class="form-row single"><textarea class="input" name="description" placeholder="Description"></textarea></div>
+      <div class="btn-row"><button class="btn primary btn-fixed-100" type="submit">Simpan</button><button class="btn secondary" type="button" data-modal-close>Tutup</button></div>
+    </form>
+  </div>
+</div>
+
+<div class="modal" id="calendar-add-schedule" aria-hidden="true">
+  <div class="modal-card" role="dialog" aria-modal="true">
+    <div class="modal-title">Add Schedule</div>
+    <form method="post" action="{{ url_for('admin.calendar_schedules_create') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <div class="form-row"><label class="label">Employee</label><select class="input" name="employee_id" required>{{ employee_options(None) }}</select></div>
+      {{ text_input('shift_name', 'Shift', 'Shift Name', True) }}
+      <div class="form-row"><label class="label">Date</label><input class="input" type="date" name="schedule_date" value="{{ day_summary.date }}" required /></div>
+      <div class="form-row"><label class="label">Time</label><div class="form-inline"><input class="input" type="time" name="start_time" value="08:00" required /><input class="input" type="time" name="end_time" value="17:00" required /></div></div>
+      <div class="form-row"><label class="label">Break</label><div class="form-inline"><input class="input" type="time" name="break_start" /><input class="input" type="time" name="break_end" /></div></div>
+      <div class="form-row"><label class="label">Client</label><select class="input" name="client_id">{{ client_options(None) }}</select></div>
+      <div class="form-row"><label class="label">Site</label><select class="input" name="site_id">{{ site_options(None) }}</select></div>
+      <div class="form-row"><label class="label">Status</label><select class="input" name="status">{% for value in schedule_statuses %}<option value="{{ value }}">{{ value|title }}</option>{% endfor %}</select></div>
+      <div class="form-row single"><textarea class="input" name="notes" placeholder="Notes"></textarea></div>
+      <div class="btn-row"><button class="btn primary btn-fixed-100" type="submit">Simpan</button><button class="btn secondary" type="button" data-modal-close>Tutup</button></div>
+    </form>
+  </div>
+</div>
+
+<div class="modal" id="calendar-add-note" aria-hidden="true">
+  <div class="modal-card" role="dialog" aria-modal="true">
+    <div class="modal-title">Add Note</div>
+    <form method="post" action="{{ url_for('admin.calendar_notes_create') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      {{ text_input('title', '', 'Title', True) }}
+      <div class="form-row"><label class="label">Date</label><input class="input" type="date" name="note_date" value="{{ day_summary.date }}" required /></div>
+      <div class="form-row"><label class="label">Type</label><select class="input" name="note_type">{% for value in note_types %}<option value="{{ value }}">{{ value|replace('_',' ')|title }}</option>{% endfor %}</select></div>
+      <div class="form-row"><label class="label">Visibility</label><select class="input" name="visibility">{% for value in visibilities %}<option value="{{ value }}">{{ value|title }}</option>{% endfor %}</select></div>
+      <div class="form-row single"><textarea class="input" name="content" placeholder="Content" required></textarea></div>
+      <div class="btn-row"><button class="btn primary btn-fixed-100" type="submit">Simpan</button><button class="btn secondary" type="button" data-modal-close>Tutup</button></div>
+    </form>
+  </div>
+</div>
+
+{% for item in day_summary["items"] %}
+<div class="modal" id="calendar-{{ item.kind }}-{{ item.id }}" aria-hidden="true">
+  <div class="modal-card" role="dialog" aria-modal="true">
+    <div class="modal-title">{{ item.label }}</div>
+    {% if item.kind == 'event' %}
+    <form method="post" action="{{ url_for('admin.calendar_events_update', item_id=item.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      {{ text_input('title', item.title, 'Title', True) }}
+      <div class="form-row"><label class="label">Type</label><select class="input" name="event_type">{% for value in event_types %}<option value="{{ value }}" {% if item.event_type == value %}selected{% endif %}>{{ value|replace('_',' ')|title }}</option>{% endfor %}</select></div>
+      <div class="form-row"><label class="label">Start</label><div class="form-inline"><input class="input" type="date" name="start_date" value="{{ item.start_datetime[:10] }}" required /><input class="input" type="time" name="start_time" value="{{ item.start_datetime[11:16] }}" required /></div></div>
+      <div class="form-row"><label class="label">End</label><div class="form-inline"><input class="input" type="date" name="end_date" value="{{ item.end_datetime[:10] if item.end_datetime else '' }}" /><input class="input" type="time" name="end_time" value="{{ item.end_datetime[11:16] if item.end_datetime else '' }}" /></div></div>
+      <div class="form-row"><label class="label">Client</label><select class="input" name="client_id">{{ client_options(item.client_id) }}</select></div>
+      {{ text_input('site_label', item.site_label, 'Site label') }}
+      <div class="form-row"><label class="label">Visibility</label><select class="input" name="visibility">{% for value in visibilities %}<option value="{{ value }}" {% if item.visibility == value %}selected{% endif %}>{{ value|title }}</option>{% endfor %}</select></div>
+      <div class="form-row"><label class="label">Status</label><select class="input" name="status">{% for value in event_statuses %}<option value="{{ value }}" {% if item.status == value %}selected{% endif %}>{{ value|title }}</option>{% endfor %}</select></div>
+      <div class="form-row single"><textarea class="input" name="description">{{ item.description or '' }}</textarea></div>
+      <div class="btn-row"><button class="btn primary btn-fixed-100" type="submit">Simpan</button><button class="btn secondary" type="button" data-modal-close>Tutup</button></div>
+    </form>
+    <form method="post" action="{{ url_for('admin.calendar_events_delete', item_id=item.id) }}" onsubmit="return confirm('Hapus event ini?');"><input type="hidden" name="csrf_token" value="{{ csrf_token }}" /><input type="hidden" name="selected_date" value="{{ day_summary.date }}" /><button class="btn secondary full" type="submit">Delete</button></form>
+    {% elif item.kind == 'task' %}
+    <form method="post" action="{{ url_for('admin.calendar_tasks_update', item_id=item.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      {{ text_input('title', item.title, 'Title', True) }}
+      <div class="form-row"><label class="label">Assigned To</label><select class="input" name="assigned_to">{{ employee_options(item.assigned_to) }}</select></div>
+      <div class="form-row"><label class="label">Due Date</label><input class="input" type="date" name="due_date" value="{{ item.due_date }}" required /></div>
+      <div class="form-row"><label class="label">Client</label><select class="input" name="client_id">{{ client_options(item.client_id) }}</select></div>
+      <div class="form-row"><label class="label">Site</label><select class="input" name="site_id">{{ site_options(item.site_id) }}</select></div>
+      <div class="form-row"><label class="label">Start</label><div class="form-inline"><input class="input" type="date" name="start_date" value="{{ item.start_datetime[:10] if item.start_datetime else '' }}" /><input class="input" type="time" name="start_time" value="{{ item.start_datetime[11:16] if item.start_datetime else '' }}" /></div></div>
+      <div class="form-row"><label class="label">End</label><div class="form-inline"><input class="input" type="date" name="end_date" value="{{ item.end_datetime[:10] if item.end_datetime else '' }}" /><input class="input" type="time" name="end_time" value="{{ item.end_datetime[11:16] if item.end_datetime else '' }}" /></div></div>
+      <div class="form-row"><label class="label">Priority</label><select class="input" name="priority">{% for value in task_priorities %}<option value="{{ value }}" {% if item.priority == value %}selected{% endif %}>{{ value|title }}</option>{% endfor %}</select></div>
+      <div class="form-row"><label class="label">Status</label><select class="input" name="status">{% for value in task_statuses %}<option value="{{ value }}" {% if item.status == value %}selected{% endif %}>{{ value|replace('_',' ')|title }}</option>{% endfor %}</select></div>
+      <div class="form-row single"><textarea class="input" name="description">{{ item.description or '' }}</textarea></div>
+      <div class="btn-row"><button class="btn primary btn-fixed-100" type="submit">Simpan</button><button class="btn secondary" type="button" data-modal-close>Tutup</button></div>
+    </form>
+    <form method="post" action="{{ url_for('admin.calendar_tasks_delete', item_id=item.id) }}" onsubmit="return confirm('Hapus task ini?');"><input type="hidden" name="csrf_token" value="{{ csrf_token }}" /><input type="hidden" name="selected_date" value="{{ day_summary.date }}" /><button class="btn secondary full" type="submit">Delete</button></form>
+    {% elif item.kind == 'schedule' %}
+    <form method="post" action="{{ url_for('admin.calendar_schedules_update', item_id=item.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <div class="form-row"><label class="label">Employee</label><select class="input" name="employee_id" required>{{ employee_options(item.employee_id) }}</select></div>
+      {{ text_input('shift_name', item.shift_name, 'Shift Name', True) }}
+      <div class="form-row"><label class="label">Date</label><input class="input" type="date" name="schedule_date" value="{{ item.schedule_date }}" required /></div>
+      <div class="form-row"><label class="label">Time</label><div class="form-inline"><input class="input" type="time" name="start_time" value="{{ item.start_time[:5] }}" required /><input class="input" type="time" name="end_time" value="{{ item.end_time[:5] }}" required /></div></div>
+      <div class="form-row"><label class="label">Break</label><div class="form-inline"><input class="input" type="time" name="break_start" value="{{ item.break_start[:5] if item.break_start else '' }}" /><input class="input" type="time" name="break_end" value="{{ item.break_end[:5] if item.break_end else '' }}" /></div></div>
+      <div class="form-row"><label class="label">Client</label><select class="input" name="client_id">{{ client_options(item.client_id) }}</select></div>
+      <div class="form-row"><label class="label">Site</label><select class="input" name="site_id">{{ site_options(item.site_id) }}</select></div>
+      <div class="form-row"><label class="label">Status</label><select class="input" name="status">{% for value in schedule_statuses %}<option value="{{ value }}" {% if item.status == value %}selected{% endif %}>{{ value|title }}</option>{% endfor %}</select></div>
+      <div class="form-row single"><textarea class="input" name="notes">{{ item.notes or '' }}</textarea></div>
+      <div class="btn-row"><button class="btn primary btn-fixed-100" type="submit">Simpan</button><button class="btn secondary" type="button" data-modal-close>Tutup</button></div>
+    </form>
+    <form method="post" action="{{ url_for('admin.calendar_schedules_delete', item_id=item.id) }}" onsubmit="return confirm('Hapus schedule ini?');"><input type="hidden" name="csrf_token" value="{{ csrf_token }}" /><input type="hidden" name="selected_date" value="{{ day_summary.date }}" /><button class="btn secondary full" type="submit">Delete</button></form>
+    {% else %}
+    <form method="post" action="{{ url_for('admin.calendar_notes_update', item_id=item.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      {{ text_input('title', item.title, 'Title', True) }}
+      <div class="form-row"><label class="label">Date</label><input class="input" type="date" name="note_date" value="{{ item.note_date }}" required /></div>
+      <div class="form-row"><label class="label">Type</label><select class="input" name="note_type">{% for value in note_types %}<option value="{{ value }}" {% if item.note_type == value %}selected{% endif %}>{{ value|replace('_',' ')|title }}</option>{% endfor %}</select></div>
+      <div class="form-row"><label class="label">Visibility</label><select class="input" name="visibility">{% for value in visibilities %}<option value="{{ value }}" {% if item.visibility == value %}selected{% endif %}>{{ value|title }}</option>{% endfor %}</select></div>
+      <div class="form-row single"><textarea class="input" name="content" required>{{ item.content or '' }}</textarea></div>
+      <div class="btn-row"><button class="btn primary btn-fixed-100" type="submit">Simpan</button><button class="btn secondary" type="button" data-modal-close>Tutup</button></div>
+    </form>
+    <form method="post" action="{{ url_for('admin.calendar_notes_delete', item_id=item.id) }}" onsubmit="return confirm('Hapus note ini?');"><input type="hidden" name="csrf_token" value="{{ csrf_token }}" /><input type="hidden" name="selected_date" value="{{ day_summary.date }}" /><button class="btn secondary full" type="submit">Delete</button></form>
+    {% endif %}
+  </div>
+</div>
+{% endfor %}
+
+<script>
+  (function(){
+    const filterForm = document.querySelector(".calendar-filters");
+    if (filterForm) {
+      const clientFilter = filterForm.querySelector("[data-calendar-client-filter]");
+      const siteFilter = filterForm.querySelector("[data-calendar-site-filter]");
+      const syncClientFilter = () => {
+        if (!clientFilter || !siteFilter) return;
+        if (siteFilter.value) {
+          clientFilter.value = "";
+          clientFilter.disabled = true;
+          clientFilter.setAttribute("aria-hidden", "true");
+          clientFilter.style.display = "none";
+        } else {
+          clientFilter.disabled = false;
+          clientFilter.removeAttribute("aria-hidden");
+          clientFilter.style.display = "";
+        }
+      };
+      syncClientFilter();
+      const submitScopedFilters = () => {
+        const employeeFilter = filterForm.querySelector("[data-calendar-employee-filter]");
+        if (employeeFilter) {
+          employeeFilter.value = "";
+        }
+        syncClientFilter();
+        filterForm.requestSubmit();
+      };
+      siteFilter?.addEventListener("change", submitScopedFilters);
+      clientFilter?.addEventListener("change", submitScopedFilters);
+      filterForm.addEventListener("submit", syncClientFilter);
+    }
+    const openButtons = document.querySelectorAll("[data-modal-open]");
+    const closeButtons = document.querySelectorAll("[data-modal-close]");
+    openButtons.forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        const modal = document.getElementById(button.getAttribute("data-modal-open"));
+        if (!modal) return;
+        modal.setAttribute("aria-hidden", "false");
+        modal.classList.add("show");
+      });
+    });
+    closeButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        const modal = button.closest(".modal");
+        if (!modal) return;
+        modal.setAttribute("aria-hidden", "true");
+        modal.classList.remove("show");
+      });
+    });
+    document.querySelectorAll(".modal").forEach((modal) => {
+      modal.addEventListener("click", (event) => {
+        if (event.target === modal) {
+          modal.setAttribute("aria-hidden", "true");
+          modal.classList.remove("show");
+        }
+      });
+    });
+  })();
+</script>
+{% endblock %}

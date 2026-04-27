@@ -3507,6 +3507,7 @@ THEME_LABELS = {
 }
 ROLE_PERMISSION_KEYS = [
     "view_overview",
+    "view_calendar",
     "manage_clients_view",
     "manage_clients_add",
     "manage_clients_actions",
@@ -3526,6 +3527,7 @@ ROLE_PERMISSION_KEYS = [
 ]
 ROLE_PERMISSION_LABELS = {
     "view_overview": "Overview",
+    "view_calendar": "Calendar",
     "manage_clients_view": "Clients: Lihat",
     "manage_clients_add": "Clients: Tambah",
     "manage_clients_actions": "Clients: Aksi (Edit/Hapus)",
@@ -3613,6 +3615,14 @@ ATTENDANCE_ACTION_ALIASES = {
     "clockout": ATTENDANCE_ACTION_CHECKOUT,
     "clock_out": ATTENDANCE_ACTION_CHECKOUT,
 }
+CALENDAR_EVENT_TYPES = {"meeting", "training", "briefing", "company_event", "deadline", "other"}
+CALENDAR_EVENT_VISIBILITIES = {"admin", "supervisor", "employee", "all"}
+CALENDAR_EVENT_STATUSES = {"scheduled", "cancelled", "done"}
+CALENDAR_TASK_PRIORITIES = {"low", "medium", "high", "urgent"}
+CALENDAR_TASK_STATUSES = {"pending", "in_progress", "done", "cancelled"}
+CALENDAR_SCHEDULE_STATUSES = {"scheduled", "present", "absent", "late", "swapped", "cancelled"}
+CALENDAR_NOTE_TYPES = {"info", "warning", "reminder", "supervisor_note", "hr_note"}
+CALENDAR_NOTE_VISIBILITIES = {"admin", "supervisor", "employee", "all"}
 PATROL_STATUS_ONGOING = "ongoing"
 PATROL_STATUS_COMPLETED = "completed"
 PATROL_STATUS_INCOMPLETE = "incomplete"
@@ -3938,6 +3948,19 @@ def _permission_for_admin_endpoint(endpoint: str | None) -> str | None:
         return None
     mapping = {
         "admin.overview": "view_overview",
+        "admin.calendar_page": "view_calendar",
+        "admin.calendar_events_create": "view_calendar",
+        "admin.calendar_events_update": "view_calendar",
+        "admin.calendar_events_delete": "view_calendar",
+        "admin.calendar_tasks_create": "view_calendar",
+        "admin.calendar_tasks_update": "view_calendar",
+        "admin.calendar_tasks_delete": "view_calendar",
+        "admin.calendar_schedules_create": "view_calendar",
+        "admin.calendar_schedules_update": "view_calendar",
+        "admin.calendar_schedules_delete": "view_calendar",
+        "admin.calendar_notes_create": "view_calendar",
+        "admin.calendar_notes_update": "view_calendar",
+        "admin.calendar_notes_delete": "view_calendar",
         "admin.clients": "manage_clients_view",
         "admin.client_profile": "manage_clients_view",
         "admin.clients_create": "manage_clients_add",
@@ -7219,6 +7242,467 @@ def _delete_assignment(assignment_id: int) -> None:
         conn.close()
 
 
+def _calendar_int(value: str | int | None) -> int | None:
+    raw = str(value or "").strip()
+    if not raw or not raw.isdigit():
+        return None
+    number = int(raw)
+    return number if number > 0 else None
+
+
+def _calendar_datetime(date_value: str | None, time_value: str | None = None) -> str | None:
+    normalized_date = _normalize_date_input(date_value)
+    if not normalized_date:
+        return None
+    raw_time = (time_value or "").strip()
+    if not raw_time:
+        raw_time = "00:00"
+    try:
+        parsed = datetime.strptime(f"{normalized_date} {raw_time[:5]}", "%Y-%m-%d %H:%M")
+    except ValueError:
+        return None
+    return parsed.strftime("%Y-%m-%d %H:%M")
+
+
+def _calendar_user_valid(user_id: int | None, employee_only: bool = False) -> bool:
+    if not user_id:
+        return True
+    row = _get_user_by_id(user_id)
+    if not row:
+        return False
+    return (row["role"] == "employee") if employee_only else True
+
+
+def _calendar_client_valid(client_id: int | None) -> bool:
+    return not client_id or _get_client_by_id(client_id) is not None
+
+
+def _calendar_site_valid(site_id: int | None) -> bool:
+    return not site_id or _get_site_by_id(site_id) is not None
+
+
+def _calendar_redirect(date_value: str | None = None):
+    selected = _normalize_date_input(date_value) or _today_key()
+    return redirect(url_for("admin.calendar_page", selected_date=selected))
+
+
+def _calendar_item_class(kind: str, status: str | None = None, priority: str | None = None, event_type: str | None = None) -> str:
+    if (status or "").lower() in {"cancelled", "canceled"}:
+        return "calendar-item--cancelled"
+    if kind == "schedule":
+        return "calendar-item--schedule"
+    if kind == "task":
+        return "calendar-item--urgent" if (priority or "").lower() == "urgent" else "calendar-item--task"
+    if kind == "event":
+        return "calendar-item--urgent" if (event_type or "").lower() == "deadline" else "calendar-item--event"
+    return "calendar-item--note"
+
+
+def _calendar_item_label(kind: str, row: dict) -> str:
+    if kind == "schedule":
+        return f"{(row.get('start_time') or '')[:5]} Shift - {row.get('employee_name') or row.get('employee_email') or 'Employee'}"
+    if kind == "task":
+        return f"Task: {row.get('title') or '-'}"
+    if kind == "event":
+        prefix = "Meeting" if (row.get("event_type") or "") == "meeting" else (row.get("event_type") or "Event").replace("_", " ").title()
+        return f"{prefix}: {row.get('title') or '-'}"
+    return f"Info: {row.get('title') or '-'}"
+
+
+def _calendar_filters_from_request() -> dict:
+    site_id = _calendar_int(request.args.get("site_id"))
+    client_id = None if site_id else _calendar_int(request.args.get("client_id"))
+    return {
+        "type": (request.args.get("type") or "all").strip().lower(),
+        "client_id": client_id,
+        "site_id": site_id,
+        "employee_id": _calendar_int(request.args.get("employee_id")),
+        "status": (request.args.get("status") or "").strip().lower(),
+    }
+
+
+def _calendar_employee_filter_options(filters: dict) -> list[dict]:
+    site_id = filters.get("site_id")
+    client_id = filters.get("client_id")
+    conn = _db_connect()
+    try:
+        if site_id:
+            cur = conn.execute(
+                """
+                SELECT DISTINCT u.id, u.name, u.email, u.is_active
+                FROM assignments a
+                JOIN users u ON u.id = a.employee_user_id
+                WHERE u.role = 'employee'
+                  AND a.site_id = ?
+                  AND a.status = 'ACTIVE'
+                  AND a.start_date <= ?
+                  AND (a.end_date IS NULL OR a.end_date = '' OR a.end_date >= ?)
+                ORDER BY u.name, u.email
+                """,
+                (site_id, _today_key(), _today_key()),
+            )
+            return [dict(row) for row in cur.fetchall()]
+        if client_id:
+            cur = conn.execute(
+                """
+                SELECT DISTINCT u.id, u.name, u.email, u.is_active
+                FROM assignments a
+                JOIN users u ON u.id = a.employee_user_id
+                JOIN sites s ON s.id = a.site_id
+                WHERE u.role = 'employee'
+                  AND s.client_id = ?
+                  AND a.status = 'ACTIVE'
+                  AND a.start_date <= ?
+                  AND (a.end_date IS NULL OR a.end_date = '' OR a.end_date >= ?)
+                ORDER BY u.name, u.email
+                """,
+                (client_id, _today_key(), _today_key()),
+            )
+            return [dict(row) for row in cur.fetchall()]
+    finally:
+        conn.close()
+    return _list_employee_users()
+
+
+def _calendar_rows(start_date: str, end_date: str, filters: dict | None = None) -> list[dict]:
+    filters = filters or {}
+    selected_type = filters.get("type") or "all"
+    client_id = filters.get("client_id")
+    site_id = filters.get("site_id")
+    employee_id = filters.get("employee_id")
+    status = filters.get("status")
+    items: list[dict] = []
+    conn = _db_connect()
+    try:
+        if selected_type in {"all", "event"}:
+            clauses = ["date(start_datetime) BETWEEN ? AND ?"]
+            params: list = [start_date, end_date]
+            if client_id:
+                clauses.append("e.client_id = ?")
+                params.append(client_id)
+            if status:
+                clauses.append("lower(e.status) = ?")
+                params.append(status)
+            cur = conn.execute(
+                f"""
+                SELECT e.*, c.name AS client_name, u.name AS created_by_name
+                FROM calendar_events e
+                LEFT JOIN clients c ON c.id = e.client_id
+                LEFT JOIN users u ON u.id = e.created_by
+                WHERE {' AND '.join(clauses)}
+                ORDER BY start_datetime ASC, id ASC
+                """,
+                params,
+            )
+            for row in cur.fetchall():
+                item = dict(row)
+                item.update(
+                    kind="event",
+                    date=(item.get("start_datetime") or "")[:10],
+                    label=_calendar_item_label("event", item),
+                    class_name=_calendar_item_class("event", item.get("status"), event_type=item.get("event_type")),
+                    time=(item.get("start_datetime") or "")[11:16],
+                )
+                items.append(item)
+        if selected_type in {"all", "task"}:
+            clauses = ["due_date BETWEEN ? AND ?"]
+            params = [start_date, end_date]
+            if client_id:
+                clauses.append("t.client_id = ?")
+                params.append(client_id)
+            if site_id:
+                clauses.append("t.site_id = ?")
+                params.append(site_id)
+            if employee_id:
+                clauses.append("t.assigned_to = ?")
+                params.append(employee_id)
+            if status:
+                clauses.append("lower(t.status) = ?")
+                params.append(status)
+            cur = conn.execute(
+                f"""
+                SELECT t.*, c.name AS client_name, s.name AS site_name, u.name AS employee_name, u.email AS employee_email
+                FROM calendar_tasks t
+                LEFT JOIN clients c ON c.id = t.client_id
+                LEFT JOIN sites s ON s.id = t.site_id
+                LEFT JOIN users u ON u.id = t.assigned_to
+                WHERE {' AND '.join(clauses)}
+                ORDER BY due_date ASC, start_datetime ASC, id ASC
+                """,
+                params,
+            )
+            for row in cur.fetchall():
+                item = dict(row)
+                item.update(
+                    kind="task",
+                    date=item.get("due_date"),
+                    label=_calendar_item_label("task", item),
+                    class_name=_calendar_item_class("task", item.get("status"), item.get("priority")),
+                    time=(item.get("start_datetime") or "")[11:16],
+                )
+                items.append(item)
+        if selected_type in {"all", "schedule"}:
+            clauses = ["es.schedule_date BETWEEN ? AND ?"]
+            params = [start_date, end_date]
+            if client_id:
+                clauses.append("es.client_id = ?")
+                params.append(client_id)
+            if site_id:
+                clauses.append("es.site_id = ?")
+                params.append(site_id)
+            if employee_id:
+                clauses.append("es.employee_id = ?")
+                params.append(employee_id)
+            if status:
+                clauses.append("lower(es.status) = ?")
+                params.append(status)
+            cur = conn.execute(
+                f"""
+                SELECT es.*, c.name AS client_name, s.name AS site_name, u.name AS employee_name, u.email AS employee_email
+                FROM employee_schedules es
+                LEFT JOIN clients c ON c.id = es.client_id
+                LEFT JOIN sites s ON s.id = es.site_id
+                LEFT JOIN users u ON u.id = es.employee_id
+                WHERE {' AND '.join(clauses)}
+                ORDER BY schedule_date ASC, start_time ASC, id ASC
+                """,
+                params,
+            )
+            for row in cur.fetchall():
+                item = dict(row)
+                item.update(
+                    kind="schedule",
+                    date=item.get("schedule_date"),
+                    label=_calendar_item_label("schedule", item),
+                    class_name=_calendar_item_class("schedule", item.get("status")),
+                    time=(item.get("start_time") or "")[:5],
+                )
+                items.append(item)
+        if selected_type in {"all", "note", "notes"}:
+            clauses = ["note_date BETWEEN ? AND ?"]
+            params = [start_date, end_date]
+            if status:
+                clauses.append("lower(note_type) = ?")
+                params.append(status)
+            cur = conn.execute(
+                f"""
+                SELECT n.*, u.name AS created_by_name
+                FROM calendar_notes n
+                LEFT JOIN users u ON u.id = n.created_by
+                WHERE {' AND '.join(clauses)}
+                ORDER BY note_date ASC, id ASC
+                """,
+                params,
+            )
+            for row in cur.fetchall():
+                item = dict(row)
+                item.update(
+                    kind="note",
+                    date=item.get("note_date"),
+                    label=_calendar_item_label("note", item),
+                    class_name=_calendar_item_class("note"),
+                    time="",
+                )
+                items.append(item)
+    finally:
+        conn.close()
+    return sorted(items, key=lambda item: (item.get("date") or "", item.get("time") or "99:99", item.get("kind") or "", int(item.get("id") or 0)))
+
+
+def _calendar_month_payload(year: int, month: int, filters: dict) -> dict:
+    first = date(year, month, 1)
+    last = date(year, month, calendar.monthrange(year, month)[1])
+    cal = calendar.Calendar(firstweekday=0)
+    weeks_raw = cal.monthdatescalendar(year, month)
+    grid_start = weeks_raw[0][0].strftime("%Y-%m-%d")
+    grid_end = weeks_raw[-1][-1].strftime("%Y-%m-%d")
+    items = _calendar_rows(grid_start, grid_end, filters)
+    by_date: dict[str, list[dict]] = {}
+    for item in items:
+        by_date.setdefault(item.get("date") or "", []).append(item)
+    today = _today_key()
+    weeks = []
+    for week in weeks_raw:
+        week_days = []
+        for current in week:
+            key = current.strftime("%Y-%m-%d")
+            day_items = by_date.get(key, [])
+            week_days.append(
+                {
+                    "date": key,
+                    "day": current.day,
+                    "in_month": current.month == month,
+                    "is_today": key == today,
+                    "items": day_items,
+                    "counts": {
+                        "schedule": len([item for item in day_items if item["kind"] == "schedule"]),
+                        "task": len([item for item in day_items if item["kind"] == "task"]),
+                        "event": len([item for item in day_items if item["kind"] == "event"]),
+                        "note": len([item for item in day_items if item["kind"] == "note"]),
+                    },
+                }
+            )
+        weeks.append(week_days)
+    prev_month = first - timedelta(days=1)
+    next_month = last + timedelta(days=1)
+    return {
+        "weeks": weeks,
+        "month_label": first.strftime("%B %Y"),
+        "month": month,
+        "year": year,
+        "prev_year": prev_month.year,
+        "prev_month": prev_month.month,
+        "next_year": next_month.year,
+        "next_month": next_month.month,
+    }
+
+
+def _calendar_day_summary(selected_date: str, filters: dict) -> dict:
+    day_items = _calendar_rows(selected_date, selected_date, filters)
+    return {
+        "date": selected_date,
+        "notes": [item for item in day_items if item["kind"] == "note"],
+        "tasks": [item for item in day_items if item["kind"] == "task"],
+        "schedules": [item for item in day_items if item["kind"] == "schedule"],
+        "events": [item for item in day_items if item["kind"] == "event"],
+        "items": day_items,
+    }
+
+
+def _calendar_event_payload(form) -> tuple[dict | None, str | None]:
+    title = (form.get("title") or "").strip()
+    if not title:
+        return None, "Title wajib diisi."
+    start_datetime = _calendar_datetime(form.get("start_date"), form.get("start_time"))
+    if not start_datetime:
+        return None, "Tanggal mulai wajib diisi."
+    end_datetime = _calendar_datetime(form.get("end_date"), form.get("end_time")) if form.get("end_date") else None
+    if end_datetime and end_datetime < start_datetime:
+        return None, "Start time tidak boleh lebih besar dari end time."
+    event_type = (form.get("event_type") or "other").strip().lower()
+    visibility = (form.get("visibility") or "admin").strip().lower()
+    status = (form.get("status") or "scheduled").strip().lower()
+    if event_type not in CALENDAR_EVENT_TYPES or visibility not in CALENDAR_EVENT_VISIBILITIES or status not in CALENDAR_EVENT_STATUSES:
+        return None, "Pilihan event tidak valid."
+    client_id = _calendar_int(form.get("client_id"))
+    if not _calendar_client_valid(client_id):
+        return None, "Client tidak valid."
+    return {
+        "title": title,
+        "description": (form.get("description") or "").strip() or None,
+        "event_type": event_type,
+        "start_datetime": start_datetime,
+        "end_datetime": end_datetime,
+        "site_label": (form.get("site_label") or "").strip() or None,
+        "client_id": client_id,
+        "visibility": visibility,
+        "color": (form.get("color") or "").strip() or None,
+        "status": status,
+    }, None
+
+
+def _calendar_task_payload(form) -> tuple[dict | None, str | None]:
+    title = (form.get("title") or "").strip()
+    due_date = _normalize_date_input(form.get("due_date"))
+    if not title:
+        return None, "Title wajib diisi."
+    if not due_date:
+        return None, "Due date wajib diisi."
+    start_datetime = _calendar_datetime(form.get("start_date"), form.get("start_time")) if form.get("start_date") else None
+    end_datetime = _calendar_datetime(form.get("end_date"), form.get("end_time")) if form.get("end_date") else None
+    if start_datetime and end_datetime and start_datetime > end_datetime:
+        return None, "Start time tidak boleh lebih besar dari end time."
+    assigned_to = _calendar_int(form.get("assigned_to"))
+    if not _calendar_user_valid(assigned_to, employee_only=True):
+        return None, "Assigned employee tidak valid."
+    client_id = _calendar_int(form.get("client_id"))
+    site_id = _calendar_int(form.get("site_id"))
+    if site_id:
+        client_id = None
+    if not _calendar_client_valid(client_id) or not _calendar_site_valid(site_id):
+        return None, "Client atau site tidak valid."
+    priority = (form.get("priority") or "medium").strip().lower()
+    status = (form.get("status") or "pending").strip().lower()
+    if priority not in CALENDAR_TASK_PRIORITIES or status not in CALENDAR_TASK_STATUSES:
+        return None, "Status task tidak valid."
+    return {
+        "title": title,
+        "description": (form.get("description") or "").strip() or None,
+        "assigned_to": assigned_to,
+        "client_id": client_id,
+        "site_id": site_id,
+        "due_date": due_date,
+        "start_datetime": start_datetime,
+        "end_datetime": end_datetime,
+        "priority": priority,
+        "status": status,
+    }, None
+
+
+def _calendar_schedule_payload(form) -> tuple[dict | None, str | None]:
+    employee_id = _calendar_int(form.get("employee_id"))
+    schedule_date = _normalize_date_input(form.get("schedule_date"))
+    shift_name = (form.get("shift_name") or "").strip()
+    start_time = (form.get("start_time") or "").strip()[:5]
+    end_time = (form.get("end_time") or "").strip()[:5]
+    if not employee_id or not _calendar_user_valid(employee_id, employee_only=True):
+        return None, "Employee wajib valid."
+    if not schedule_date:
+        return None, "Tanggal schedule wajib diisi."
+    if not shift_name:
+        return None, "Shift name wajib diisi."
+    try:
+        datetime.strptime(start_time, "%H:%M")
+        datetime.strptime(end_time, "%H:%M")
+    except ValueError:
+        return None, "Start time dan end time wajib valid."
+    client_id = _calendar_int(form.get("client_id"))
+    site_id = _calendar_int(form.get("site_id"))
+    if site_id:
+        client_id = None
+    if not _calendar_client_valid(client_id) or not _calendar_site_valid(site_id):
+        return None, "Client atau site tidak valid."
+    status = (form.get("status") or "scheduled").strip().lower()
+    if status not in CALENDAR_SCHEDULE_STATUSES:
+        return None, "Status schedule tidak valid."
+    return {
+        "employee_id": employee_id,
+        "client_id": client_id,
+        "site_id": site_id,
+        "shift_name": shift_name,
+        "schedule_date": schedule_date,
+        "start_time": start_time,
+        "end_time": end_time,
+        "break_start": (form.get("break_start") or "").strip()[:5] or None,
+        "break_end": (form.get("break_end") or "").strip()[:5] or None,
+        "status": status,
+        "notes": (form.get("notes") or "").strip() or None,
+    }, None
+
+
+def _calendar_note_payload(form) -> tuple[dict | None, str | None]:
+    title = (form.get("title") or "").strip()
+    note_date = _normalize_date_input(form.get("note_date"))
+    content = (form.get("content") or "").strip()
+    if not title:
+        return None, "Title wajib diisi."
+    if not note_date:
+        return None, "Tanggal note wajib diisi."
+    if not content:
+        return None, "Content note wajib diisi."
+    note_type = (form.get("note_type") or "info").strip().lower()
+    visibility = (form.get("visibility") or "admin").strip().lower()
+    if note_type not in CALENDAR_NOTE_TYPES or visibility not in CALENDAR_NOTE_VISIBILITIES:
+        return None, "Pilihan note tidak valid."
+    return {
+        "note_date": note_date,
+        "title": title,
+        "content": content,
+        "note_type": note_type,
+        "visibility": visibility,
+    }, None
+
+
 def _create_site(
     client_id: int,
     name: str,
@@ -7489,6 +7973,16 @@ def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition
     columns = _table_columns(conn, table)
     if column not in columns:
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {definition}")
+
+
+def _rename_column_if_exists(
+    conn: sqlite3.Connection, table: str, old_column: str, new_column: str
+) -> None:
+    if not _table_exists(conn, table):
+        return
+    columns = _table_columns(conn, table)
+    if old_column in columns and new_column not in columns:
+        conn.execute(f"ALTER TABLE {table} RENAME COLUMN {old_column} TO {new_column}")
 
 
 def _backfill_enterprise_scope_columns(conn: sqlite3.Connection) -> None:
@@ -7864,6 +8358,156 @@ def _migrate_attendance_methods(conn: sqlite3.Connection) -> None:
             )
 
 
+def _ensure_calendar_tables(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS calendar_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            description TEXT,
+            event_type TEXT NOT NULL DEFAULT 'other',
+            start_datetime TEXT NOT NULL,
+            end_datetime TEXT,
+            site_label TEXT,
+            client_id INTEGER,
+            created_by INTEGER NOT NULL,
+            visibility TEXT NOT NULL DEFAULT 'admin',
+            color TEXT,
+            status TEXT NOT NULL DEFAULT 'scheduled',
+            created_at TEXT,
+            updated_at TEXT
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS calendar_tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            description TEXT,
+            assigned_to INTEGER,
+            assigned_by INTEGER NOT NULL,
+            client_id INTEGER,
+            site_id INTEGER,
+            due_date TEXT NOT NULL,
+            start_datetime TEXT,
+            end_datetime TEXT,
+            priority TEXT NOT NULL DEFAULT 'medium',
+            status TEXT NOT NULL DEFAULT 'pending',
+            created_at TEXT,
+            updated_at TEXT
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS employee_schedules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            employee_id INTEGER NOT NULL,
+            client_id INTEGER,
+            site_id INTEGER,
+            shift_name TEXT NOT NULL,
+            schedule_date TEXT NOT NULL,
+            start_time TEXT NOT NULL,
+            end_time TEXT NOT NULL,
+            break_start TEXT,
+            break_end TEXT,
+            status TEXT NOT NULL DEFAULT 'scheduled',
+            notes TEXT,
+            created_by INTEGER NOT NULL,
+            created_at TEXT,
+            updated_at TEXT
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS calendar_notes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            note_date TEXT NOT NULL,
+            title TEXT NOT NULL,
+            content TEXT NOT NULL,
+            note_type TEXT NOT NULL DEFAULT 'info',
+            visibility TEXT NOT NULL DEFAULT 'admin',
+            created_by INTEGER NOT NULL,
+            created_at TEXT,
+            updated_at TEXT
+        )
+        """
+    )
+    _rename_column_if_exists(conn, "calendar_events", "location", "site_label")
+    _rename_column_if_exists(conn, "calendar_tasks", "location_id", "site_id")
+    _rename_column_if_exists(conn, "employee_schedules", "location_id", "site_id")
+    for table, columns in {
+        "calendar_events": {
+            "title": "title TEXT NOT NULL DEFAULT ''",
+            "description": "description TEXT",
+            "event_type": "event_type TEXT NOT NULL DEFAULT 'other'",
+            "start_datetime": "start_datetime TEXT NOT NULL DEFAULT ''",
+            "end_datetime": "end_datetime TEXT",
+            "site_label": "site_label TEXT",
+            "client_id": "client_id INTEGER",
+            "created_by": "created_by INTEGER NOT NULL DEFAULT 0",
+            "visibility": "visibility TEXT NOT NULL DEFAULT 'admin'",
+            "color": "color TEXT",
+            "status": "status TEXT NOT NULL DEFAULT 'scheduled'",
+            "created_at": "created_at TEXT",
+            "updated_at": "updated_at TEXT",
+        },
+        "calendar_tasks": {
+            "title": "title TEXT NOT NULL DEFAULT ''",
+            "description": "description TEXT",
+            "assigned_to": "assigned_to INTEGER",
+            "assigned_by": "assigned_by INTEGER NOT NULL DEFAULT 0",
+            "client_id": "client_id INTEGER",
+            "site_id": "site_id INTEGER",
+            "due_date": "due_date TEXT NOT NULL DEFAULT ''",
+            "start_datetime": "start_datetime TEXT",
+            "end_datetime": "end_datetime TEXT",
+            "priority": "priority TEXT NOT NULL DEFAULT 'medium'",
+            "status": "status TEXT NOT NULL DEFAULT 'pending'",
+            "created_at": "created_at TEXT",
+            "updated_at": "updated_at TEXT",
+        },
+        "employee_schedules": {
+            "employee_id": "employee_id INTEGER NOT NULL DEFAULT 0",
+            "client_id": "client_id INTEGER",
+            "site_id": "site_id INTEGER",
+            "shift_name": "shift_name TEXT NOT NULL DEFAULT ''",
+            "schedule_date": "schedule_date TEXT NOT NULL DEFAULT ''",
+            "start_time": "start_time TEXT NOT NULL DEFAULT ''",
+            "end_time": "end_time TEXT NOT NULL DEFAULT ''",
+            "break_start": "break_start TEXT",
+            "break_end": "break_end TEXT",
+            "status": "status TEXT NOT NULL DEFAULT 'scheduled'",
+            "notes": "notes TEXT",
+            "created_by": "created_by INTEGER NOT NULL DEFAULT 0",
+            "created_at": "created_at TEXT",
+            "updated_at": "updated_at TEXT",
+        },
+        "calendar_notes": {
+            "note_date": "note_date TEXT NOT NULL DEFAULT ''",
+            "title": "title TEXT NOT NULL DEFAULT ''",
+            "content": "content TEXT NOT NULL DEFAULT ''",
+            "note_type": "note_type TEXT NOT NULL DEFAULT 'info'",
+            "visibility": "visibility TEXT NOT NULL DEFAULT 'admin'",
+            "created_by": "created_by INTEGER NOT NULL DEFAULT 0",
+            "created_at": "created_at TEXT",
+            "updated_at": "updated_at TEXT",
+        },
+    }.items():
+        if _table_exists(conn, table):
+            for column, definition in columns.items():
+                _ensure_column(conn, table, column, definition)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_calendar_events_start ON calendar_events(start_datetime)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_calendar_events_status ON calendar_events(status)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_calendar_tasks_due ON calendar_tasks(due_date)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_calendar_tasks_status ON calendar_tasks(status)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_employee_schedules_date ON employee_schedules(schedule_date)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_employee_schedules_employee ON employee_schedules(employee_id, schedule_date)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_calendar_notes_date ON calendar_notes(note_date)")
+
+
 def _init_db() -> None:
     conn = _db_connect()
     try:
@@ -8212,6 +8856,7 @@ def _init_db() -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_logs_client_branch ON logs(client_id, branch_id)"
         )
+        _ensure_calendar_tables(conn)
 
         conn.execute(
             """
@@ -12345,6 +12990,328 @@ def admin_bp() -> Blueprint:
             kpi_cards=kpi_cards,
             audit_logs=audit_logs,
         )
+
+    @bp.route("/calendar", methods=["GET"])
+    def calendar_page():
+        user = _current_user()
+        today_dt = date.today()
+        year = _calendar_int(request.args.get("year")) or today_dt.year
+        month = _calendar_int(request.args.get("month")) or today_dt.month
+        if month < 1 or month > 12:
+            month = today_dt.month
+        filters = _calendar_filters_from_request()
+        filter_employees = _calendar_employee_filter_options(filters)
+        if filters.get("employee_id"):
+            allowed_employee_ids = {int(e.get("id") or 0) for e in filter_employees}
+            if int(filters["employee_id"]) not in allowed_employee_ids:
+                filters["employee_id"] = None
+        selected_date = _normalize_date_input(request.args.get("selected_date")) or _today_key()
+        month_payload = _calendar_month_payload(year, month, filters)
+        day_summary = _calendar_day_summary(selected_date, filters)
+        
+        # Filter sites based on selected client
+        client_id_filter = filters.get("client_id")
+        if client_id_filter:
+            try:
+                client_id = int(client_id_filter)
+                sites = _list_sites_by_client(client_id)
+            except (ValueError, TypeError):
+                sites = _list_sites()
+        else:
+            sites = _list_sites()
+        
+        return render_template(
+            "dashboard/admin_calendar.html",
+            user=user,
+            calendar_data=month_payload,
+            day_summary=day_summary,
+            filters=filters,
+            clients=_clients(),
+            sites=sites,
+            employees=_list_employee_users(),
+            filter_employees=filter_employees,
+            event_types=sorted(CALENDAR_EVENT_TYPES),
+            event_statuses=sorted(CALENDAR_EVENT_STATUSES),
+            task_priorities=sorted(CALENDAR_TASK_PRIORITIES),
+            task_statuses=sorted(CALENDAR_TASK_STATUSES),
+            schedule_statuses=sorted(CALENDAR_SCHEDULE_STATUSES),
+            note_types=sorted(CALENDAR_NOTE_TYPES),
+            visibilities=sorted(CALENDAR_EVENT_VISIBILITIES),
+        )
+
+    @bp.route("/calendar/events/create", methods=["POST"])
+    def calendar_events_create():
+        user = _current_user()
+        payload, error = _calendar_event_payload(request.form)
+        if error:
+            flash(error)
+            return _calendar_redirect(request.form.get("start_date"))
+        conn = _db_connect()
+        try:
+            conn.execute(
+                """
+                INSERT INTO calendar_events (
+                    title, description, event_type, start_datetime, end_datetime, site_label,
+                    client_id, created_by, visibility, color, status, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    payload["title"], payload["description"], payload["event_type"],
+                    payload["start_datetime"], payload["end_datetime"], payload["site_label"],
+                    payload["client_id"], user.id, payload["visibility"], payload["color"],
+                    payload["status"], _now_ts(), _now_ts(),
+                ),
+            )
+        finally:
+            conn.commit()
+            conn.close()
+        flash("Event ditambahkan.")
+        return _calendar_redirect(payload["start_datetime"][:10])
+
+    @bp.route("/calendar/events/<int:item_id>/update", methods=["POST"])
+    def calendar_events_update(item_id: int):
+        payload, error = _calendar_event_payload(request.form)
+        if error:
+            flash(error)
+            return _calendar_redirect(request.form.get("start_date"))
+        conn = _db_connect()
+        try:
+            conn.execute(
+                """
+                UPDATE calendar_events
+                SET title = ?, description = ?, event_type = ?, start_datetime = ?,
+                    end_datetime = ?, site_label = ?, client_id = ?, visibility = ?,
+                    color = ?, status = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    payload["title"], payload["description"], payload["event_type"],
+                    payload["start_datetime"], payload["end_datetime"], payload["site_label"],
+                    payload["client_id"], payload["visibility"], payload["color"],
+                    payload["status"], _now_ts(), item_id,
+                ),
+            )
+        finally:
+            conn.commit()
+            conn.close()
+        flash("Event diperbarui.")
+        return _calendar_redirect(payload["start_datetime"][:10])
+
+    @bp.route("/calendar/events/<int:item_id>/delete", methods=["POST"])
+    def calendar_events_delete(item_id: int):
+        selected = request.form.get("selected_date")
+        conn = _db_connect()
+        try:
+            conn.execute("DELETE FROM calendar_events WHERE id = ?", (item_id,))
+        finally:
+            conn.commit()
+            conn.close()
+        flash("Event dihapus.")
+        return _calendar_redirect(selected)
+
+    @bp.route("/calendar/tasks/create", methods=["POST"])
+    def calendar_tasks_create():
+        user = _current_user()
+        payload, error = _calendar_task_payload(request.form)
+        if error:
+            flash(error)
+            return _calendar_redirect(request.form.get("due_date"))
+        conn = _db_connect()
+        try:
+            conn.execute(
+                """
+                INSERT INTO calendar_tasks (
+                    title, description, assigned_to, assigned_by, client_id, site_id,
+                    due_date, start_datetime, end_datetime, priority, status, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    payload["title"], payload["description"], payload["assigned_to"], user.id,
+                    payload["client_id"], payload["site_id"], payload["due_date"],
+                    payload["start_datetime"], payload["end_datetime"], payload["priority"],
+                    payload["status"], _now_ts(), _now_ts(),
+                ),
+            )
+        finally:
+            conn.commit()
+            conn.close()
+        flash("Task ditambahkan.")
+        return _calendar_redirect(payload["due_date"])
+
+    @bp.route("/calendar/tasks/<int:item_id>/update", methods=["POST"])
+    def calendar_tasks_update(item_id: int):
+        payload, error = _calendar_task_payload(request.form)
+        if error:
+            flash(error)
+            return _calendar_redirect(request.form.get("due_date"))
+        conn = _db_connect()
+        try:
+            conn.execute(
+                """
+                UPDATE calendar_tasks
+                SET title = ?, description = ?, assigned_to = ?, client_id = ?, site_id = ?,
+                    due_date = ?, start_datetime = ?, end_datetime = ?, priority = ?,
+                    status = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    payload["title"], payload["description"], payload["assigned_to"],
+                    payload["client_id"], payload["site_id"], payload["due_date"],
+                    payload["start_datetime"], payload["end_datetime"], payload["priority"],
+                    payload["status"], _now_ts(), item_id,
+                ),
+            )
+        finally:
+            conn.commit()
+            conn.close()
+        flash("Task diperbarui.")
+        return _calendar_redirect(payload["due_date"])
+
+    @bp.route("/calendar/tasks/<int:item_id>/delete", methods=["POST"])
+    def calendar_tasks_delete(item_id: int):
+        selected = request.form.get("selected_date")
+        conn = _db_connect()
+        try:
+            conn.execute("DELETE FROM calendar_tasks WHERE id = ?", (item_id,))
+        finally:
+            conn.commit()
+            conn.close()
+        flash("Task dihapus.")
+        return _calendar_redirect(selected)
+
+    @bp.route("/calendar/schedules/create", methods=["POST"])
+    def calendar_schedules_create():
+        user = _current_user()
+        payload, error = _calendar_schedule_payload(request.form)
+        if error:
+            flash(error)
+            return _calendar_redirect(request.form.get("schedule_date"))
+        conn = _db_connect()
+        try:
+            conn.execute(
+                """
+                INSERT INTO employee_schedules (
+                    employee_id, client_id, site_id, shift_name, schedule_date,
+                    start_time, end_time, break_start, break_end, status, notes,
+                    created_by, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    payload["employee_id"], payload["client_id"], payload["site_id"],
+                    payload["shift_name"], payload["schedule_date"], payload["start_time"],
+                    payload["end_time"], payload["break_start"], payload["break_end"],
+                    payload["status"], payload["notes"], user.id, _now_ts(), _now_ts(),
+                ),
+            )
+        finally:
+            conn.commit()
+            conn.close()
+        flash("Schedule ditambahkan.")
+        return _calendar_redirect(payload["schedule_date"])
+
+    @bp.route("/calendar/schedules/<int:item_id>/update", methods=["POST"])
+    def calendar_schedules_update(item_id: int):
+        payload, error = _calendar_schedule_payload(request.form)
+        if error:
+            flash(error)
+            return _calendar_redirect(request.form.get("schedule_date"))
+        conn = _db_connect()
+        try:
+            conn.execute(
+                """
+                UPDATE employee_schedules
+                SET employee_id = ?, client_id = ?, site_id = ?, shift_name = ?,
+                    schedule_date = ?, start_time = ?, end_time = ?, break_start = ?,
+                    break_end = ?, status = ?, notes = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    payload["employee_id"], payload["client_id"], payload["site_id"],
+                    payload["shift_name"], payload["schedule_date"], payload["start_time"],
+                    payload["end_time"], payload["break_start"], payload["break_end"],
+                    payload["status"], payload["notes"], _now_ts(), item_id,
+                ),
+            )
+        finally:
+            conn.commit()
+            conn.close()
+        flash("Schedule diperbarui.")
+        return _calendar_redirect(payload["schedule_date"])
+
+    @bp.route("/calendar/schedules/<int:item_id>/delete", methods=["POST"])
+    def calendar_schedules_delete(item_id: int):
+        selected = request.form.get("selected_date")
+        conn = _db_connect()
+        try:
+            conn.execute("DELETE FROM employee_schedules WHERE id = ?", (item_id,))
+        finally:
+            conn.commit()
+            conn.close()
+        flash("Schedule dihapus.")
+        return _calendar_redirect(selected)
+
+    @bp.route("/calendar/notes/create", methods=["POST"])
+    def calendar_notes_create():
+        user = _current_user()
+        payload, error = _calendar_note_payload(request.form)
+        if error:
+            flash(error)
+            return _calendar_redirect(request.form.get("note_date"))
+        conn = _db_connect()
+        try:
+            conn.execute(
+                """
+                INSERT INTO calendar_notes (
+                    note_date, title, content, note_type, visibility, created_by, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    payload["note_date"], payload["title"], payload["content"],
+                    payload["note_type"], payload["visibility"], user.id, _now_ts(), _now_ts(),
+                ),
+            )
+        finally:
+            conn.commit()
+            conn.close()
+        flash("Note ditambahkan.")
+        return _calendar_redirect(payload["note_date"])
+
+    @bp.route("/calendar/notes/<int:item_id>/update", methods=["POST"])
+    def calendar_notes_update(item_id: int):
+        payload, error = _calendar_note_payload(request.form)
+        if error:
+            flash(error)
+            return _calendar_redirect(request.form.get("note_date"))
+        conn = _db_connect()
+        try:
+            conn.execute(
+                """
+                UPDATE calendar_notes
+                SET note_date = ?, title = ?, content = ?, note_type = ?, visibility = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    payload["note_date"], payload["title"], payload["content"],
+                    payload["note_type"], payload["visibility"], _now_ts(), item_id,
+                ),
+            )
+        finally:
+            conn.commit()
+            conn.close()
+        flash("Note diperbarui.")
+        return _calendar_redirect(payload["note_date"])
+
+    @bp.route("/calendar/notes/<int:item_id>/delete", methods=["POST"])
+    def calendar_notes_delete(item_id: int):
+        selected = request.form.get("selected_date")
+        conn = _db_connect()
+        try:
+            conn.execute("DELETE FROM calendar_notes WHERE id = ?", (item_id,))
+        finally:
+            conn.commit()
+            conn.close()
+        flash("Note dihapus.")
+        return _calendar_redirect(selected)
 
     @bp.route("/qr", methods=["GET"])
     def qr_page():

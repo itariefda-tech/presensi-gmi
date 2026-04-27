@@ -270,6 +270,12 @@ SHIFT + OVERTIME (optional, tied to policy)
 | notes             |
 +-------------------+
 
+## Domain Model
+
+Sistem ini menggunakan konsep **Site** sebagai unit kerja operasional utama.
+
+Penjelasan lengkap dapat dilihat di:
+👉 docs/domain-model.md
 
 ## Docs
 

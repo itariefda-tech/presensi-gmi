@@ -73,6 +73,14 @@
           <span class="nav-label" data-i18n="nav.assignments">Assignments</span>
         </a>
         {% endif %}
+        {% if permissions.get("view_calendar") %}
+        <a href="{{ url_for('admin.calendar_page') }}" class="{% if active == 'calendar' %}active{% endif %}" title="Calendar">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M7 4v3M17 4v3M4 9h16M6 6h12a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M8 13h3v3H8v-3Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+          </span>
+          <span class="nav-label">Calendar</span>
+        </a>
+        {% endif %}
         {% if permissions.get("manage_policies") %}
         <a href="{{ url_for('admin.policies') }}" class="{% if active == 'policies' %}active{% endif %}" title="Policies" data-i18n-title="nav.policies">
           <span class="nav-icon" aria-hidden="true">
