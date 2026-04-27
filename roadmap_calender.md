@@ -1,10 +1,10 @@
 # ROADMAP FEATURE: Tier add on; HRIS CALENDAR, TASK & SCHEDULING
 
 ## Objective
-- [ ] Bangun fitur Calendar masuk ke dalam versi enterprise untuk aplikasi HRIS
-- [ ] Menampilkan kalender besar di dashboard Admin
-- [ ] Menyediakan task, jadwal kerja, event, notes, info, dan reminder
-- [ ] Terintegrasi bertahap dengan employee dan attendance
+- [x] Bangun fitur Calendar masuk ke dalam versi enterprise untuk aplikasi HRIS
+- [x] Menampilkan kalender besar di dashboard Admin
+- [x] Menyediakan task, jadwal kerja, event, notes, info, dan reminder
+- [x] Terintegrasi bertahap dengan employee dan attendance
 - [x] Cocok untuk perusahaan outsource dengan banyak site/client
 
 ---
@@ -215,70 +215,85 @@
 ---
 
 ## Phase 8 — Dashboard Widgets
-- [ ] Tambahkan widget Today Schedule
-- [ ] Widget Today Schedule menampilkan jumlah employee scheduled
-- [ ] Widget Today Schedule menampilkan jumlah present
-- [ ] Widget Today Schedule menampilkan jumlah late
-- [ ] Widget Today Schedule menampilkan jumlah absent
-- [ ] Tambahkan widget Today Tasks
-- [ ] Widget Today Tasks menampilkan pending
-- [ ] Widget Today Tasks menampilkan in progress
-- [ ] Widget Today Tasks menampilkan done
-- [ ] Widget Today Tasks menampilkan urgent
-- [ ] Tambahkan widget Upcoming Events
-- [ ] Widget Upcoming Events menampilkan 5 event terdekat
-- [ ] Tambahkan widget Alerts
-- [ ] Alerts menampilkan shift conflict
-- [ ] Alerts menampilkan absent without notice
-- [ ] Alerts menampilkan urgent task overdue
-- [ ] Tombol Calendar menjadi entry utama ke halaman detail
+- [x] Tambahkan widget Today Schedule
+- [x] Widget Today Schedule menampilkan jumlah employee scheduled
+- [x] Widget Today Schedule menampilkan jumlah present
+- [x] Widget Today Schedule menampilkan jumlah late
+- [x] Widget Today Schedule menampilkan jumlah absent
+- [x] Tambahkan widget Today Tasks
+- [x] Widget Today Tasks menampilkan pending
+- [x] Widget Today Tasks menampilkan in progress
+- [x] Widget Today Tasks menampilkan done
+- [x] Widget Today Tasks menampilkan urgent
+- [x] Tambahkan widget Upcoming Events
+- [x] Widget Upcoming Events menampilkan 5 event terdekat
+- [x] Tambahkan widget Alerts
+- [x] Alerts menampilkan shift conflict
+- [x] Alerts menampilkan absent without notice
+- [x] Alerts menampilkan urgent task overdue
+- [x] Tombol Calendar menjadi entry utama ke halaman detail
+- [x] Helper functions:
+  - `_calendar_today_schedule_summary()`: get today's schedule stats
+  - `_calendar_today_tasks_summary()`: get today's tasks stats
+  - `_calendar_upcoming_events()`: get upcoming events
+  - `_calendar_alerts()`: generate admin alerts
+- [x] API endpoint `/api/admin/calendar/dashboard/widgets` - get all widgets data
 
 ---
 
 ## Phase 9 — Notification & Reminder
-- [ ] Reminder jadwal shift besok
-- [ ] Reminder task deadline hari ini
-- [ ] Reminder meeting/event
-- [ ] Reminder task overdue
-- [ ] Reminder perubahan jadwal
-- [ ] Buat in-app notification
-- [ ] Siapkan struktur future email notification
-- [ ] Siapkan struktur future WhatsApp gateway
-- [ ] Siapkan struktur future push notification
-- [ ] User menerima reminder sesuai role
-- [ ] Admin mendapat alert jika task/schedule bermasalah
+- [x] Reminder jadwal shift besok
+- [x] Reminder task deadline hari ini
+- [x] Reminder meeting/event
+- [x] Reminder task overdue
+- [x] Reminder perubahan jadwal
+- [x] Buat in-app notification
+- [x] Siapkan struktur future email notification
+- [x] Siapkan struktur future WhatsApp gateway
+- [x] Siapkan struktur future push notification
+- [x] User menerima reminder sesuai role
+- [x] Admin mendapat alert jika task/schedule bermasalah
+- [x] Helper functions:
+  - `_send_notification()`: create in-app notification
+  - `_schedule_reminders()`: generate and send reminders
+- [x] API endpoints:
+  - `/api/admin/notifications` - get user notifications
+  - `/api/admin/notifications/<id>/mark-read` - mark notification as read
+  - `/api/admin/calendar/send-reminders` - trigger reminders (for cron/testing)
+- [x] Notifications table structure ready with: user_id, title, message, type, is_read, created_at
+- [x] Future: Email/WhatsApp/Push notification structure prepared for extension
 
 ---
 
 ## Phase 10 — Recurring Schedule
-- [ ] Tambahkan repeat schedule daily
-- [ ] Tambahkan repeat schedule weekly
-- [ ] Tambahkan repeat schedule monthly
-- [ ] Tambahkan pattern Senin–Jumat
-- [ ] Tambahkan custom days
-- [ ] Tambahkan shift rotation
-- [ ] Tambahkan bulk schedule
-- [ ] Bulk schedule bisa memilih banyak employee
-- [ ] Bulk schedule bisa memilih client/site
-- [ ] Bulk schedule bisa generate jadwal
-- [ ] Cegah duplikat jadwal
-- [ ] Conflict tetap dicek
+- [x] Tambahkan repeat schedule daily
+- [x] Tambahkan repeat schedule weekly
+- [x] Tambahkan repeat schedule monthly
+- [x] Tambahkan pattern Senin–Jumat
+- [x] Tambahkan custom days
+- [x] Tambahkan shift rotation
+- [x] Tambahkan bulk schedule
+- [x] Bulk schedule bisa memilih banyak employee
+- [x] Bulk schedule bisa memilih client/site
+- [x] Bulk schedule bisa generate jadwal
+- [x] Cegah duplikat jadwal
+- [x] Conflict tetap dicek
 
 ---
 
 ## Phase 11 — Reports
-- [ ] Buat Schedule vs Attendance Report
-- [ ] Buat Task Completion Report
-- [ ] Buat Employee Workload Report
-- [ ] Buat Client Site Coverage Report
-- [ ] Buat Late/Absent Report by Schedule
-- [ ] Tambahkan filter tanggal
-- [ ] Tambahkan filter client
-- [ ] Tambahkan filter site
-- [ ] Tambahkan filter employee
-- [ ] Tambahkan export Excel
+- [x] Buat Schedule vs Attendance Report
+- [x] Buat Task Completion Report
+- [x] Buat Employee Workload Report
+- [x] Buat Client Site Coverage Report
+- [x] Buat Late/Absent Report by Schedule
+- [x] Tambahkan filter tanggal
+- [x] Tambahkan filter client
+- [x] Tambahkan filter site
+- [x] Tambahkan filter employee
+- [x] Tambahkan export Excel
 - [ ] Tambahkan export PDF optional
-- [ ] Pastikan report bisa dipakai untuk audit dan billing client
+- [x] Pastikan report bisa dipakai untuk audit dan billing client
 
 ---
 
@@ -298,8 +313,8 @@
 - [ ] Integrasikan attendance
 - [ ] Tambahkan dashboard widgets
 - [ ] Tambahkan reminder
-- [ ] Tambahkan recurring schedule
-- [ ] Tambahkan report
+- [x] Tambahkan recurring schedule
+- [x] Tambahkan report
 
 ---
 

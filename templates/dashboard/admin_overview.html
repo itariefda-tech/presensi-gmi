@@ -36,6 +36,60 @@
   </div>
 </section>
 
+{% if calendar_enabled %}
+<section class="calendar-widget-section">
+  <div class="section-head">
+    <div>
+      <h3>Calendar</h3>
+      <p>Schedule, task, event, dan alert hari ini.</p>
+    </div>
+    <a class="btn primary" href="{{ url_for('admin.calendar_page') }}">Open Calendar</a>
+  </div>
+  <div class="calendar-widget-grid">
+    <article class="calendar-widget-card">
+      <div class="calendar-widget-title">Today Schedule</div>
+      <div class="calendar-stat-grid">
+        <div><strong>{{ calendar_schedule_summary.total_scheduled }}</strong><span>Scheduled</span></div>
+        <div><strong>{{ calendar_schedule_summary.present }}</strong><span>Present</span></div>
+        <div><strong>{{ calendar_schedule_summary.late }}</strong><span>Late</span></div>
+        <div><strong>{{ calendar_schedule_summary.absent }}</strong><span>Absent</span></div>
+      </div>
+    </article>
+    <article class="calendar-widget-card">
+      <div class="calendar-widget-title">Today Tasks</div>
+      <div class="calendar-stat-grid">
+        <div><strong>{{ calendar_tasks_summary.pending }}</strong><span>Pending</span></div>
+        <div><strong>{{ calendar_tasks_summary.in_progress }}</strong><span>Progress</span></div>
+        <div><strong>{{ calendar_tasks_summary.done }}</strong><span>Done</span></div>
+        <div><strong>{{ calendar_tasks_summary.urgent }}</strong><span>Urgent</span></div>
+      </div>
+    </article>
+    <article class="calendar-widget-card">
+      <div class="calendar-widget-title">Upcoming Events</div>
+      <div class="calendar-widget-list">
+        {% for event in calendar_upcoming_events %}
+        <div><strong>{{ event.title }}</strong><span>{{ event.start_datetime|display_datetime }}</span></div>
+        {% endfor %}
+        {% if not calendar_upcoming_events %}
+        <div class="muted">Belum ada event terdekat.</div>
+        {% endif %}
+      </div>
+    </article>
+    <article class="calendar-widget-card">
+      <div class="calendar-widget-title">Alerts</div>
+      <div class="calendar-widget-list">
+        {% for alert in calendar_alerts[:5] %}
+        <div><strong>{{ alert.severity|title }}</strong><span>{{ alert.message }}</span></div>
+        {% endfor %}
+        {% if not calendar_alerts %}
+        <div class="muted">Tidak ada alert calendar.</div>
+        {% endif %}
+      </div>
+    </article>
+  </div>
+</section>
+{% endif %}
+
 <div class="card" style="margin-top:16px;">
   <div style="font-weight:700; margin-bottom:8px;">Summary per Client</div>
   <div class="table-wrap">

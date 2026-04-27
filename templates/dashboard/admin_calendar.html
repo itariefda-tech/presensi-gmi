@@ -43,6 +43,7 @@
     <button class="btn primary" type="button" data-modal-open="calendar-add-event">Add Event</button>
     <button class="btn primary" type="button" data-modal-open="calendar-add-task">Add Task</button>
     <button class="btn primary" type="button" data-modal-open="calendar-add-schedule">Add Schedule</button>
+    <button class="btn primary" type="button" data-modal-open="calendar-bulk-schedule">Bulk Schedule</button>
     <button class="btn primary" type="button" data-modal-open="calendar-add-note">Add Note</button>
   </div>
   <form class="calendar-filters" method="get" action="{{ url_for('admin.calendar_page') }}">
@@ -190,6 +191,49 @@
       <div class="form-row"><label class="label">Status</label><select class="input" name="status">{% for value in schedule_statuses %}<option value="{{ value }}">{{ value|title }}</option>{% endfor %}</select></div>
       <div class="form-row single"><textarea class="input" name="notes" placeholder="Notes"></textarea></div>
       <div class="btn-row"><button class="btn primary btn-fixed-100" type="submit">Simpan</button><button class="btn secondary" type="button" data-modal-close>Tutup</button></div>
+    </form>
+  </div>
+</div>
+
+<div class="modal" id="calendar-bulk-schedule" aria-hidden="true">
+  <div class="modal-card modal-large" role="dialog" aria-modal="true">
+    <div class="modal-title">Bulk Recurring Schedule</div>
+    <form method="post" action="{{ url_for('admin.calendar_schedules_bulk_create') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <div class="form-row single">
+        <label class="label">Employees</label>
+        <select class="input" name="employee_ids" multiple size="6" required>
+          {% for e in employees %}
+          <option value="{{ e.id }}">{{ e.name or e.email }} ({{ e.email }})</option>
+          {% endfor %}
+        </select>
+      </div>
+      {{ text_input('shift_name', 'Shift', 'Shift Name', True) }}
+      <div class="form-row"><label class="label">Range</label><div class="form-inline"><input class="input" type="date" name="start_date" value="{{ day_summary.date }}" required /><input class="input" type="date" name="end_date" value="{{ day_summary.date }}" required /></div></div>
+      <div class="form-row"><label class="label">Repeat</label><select class="input" name="repeat_pattern">
+        <option value="daily">Daily</option>
+        <option value="weekly">Weekly</option>
+        <option value="monthly">Monthly</option>
+        <option value="weekdays">Senin-Jumat</option>
+        <option value="custom">Custom days</option>
+      </select></div>
+      <div class="form-row single">
+        <label class="label">Custom days</label>
+        <div class="check-grid">
+          {% for value, label in [(0,'Sen'),(1,'Sel'),(2,'Rab'),(3,'Kam'),(4,'Jum'),(5,'Sab'),(6,'Min')] %}
+          <label><input type="checkbox" name="custom_days" value="{{ value }}" /> {{ label }}</label>
+          {% endfor %}
+        </div>
+      </div>
+      <div class="form-row"><label class="label">Time</label><div class="form-inline"><input class="input" type="time" name="start_time" value="08:00" required /><input class="input" type="time" name="end_time" value="17:00" required /></div></div>
+      <div class="form-row"><label class="label">Break</label><div class="form-inline"><input class="input" type="time" name="break_start" /><input class="input" type="time" name="break_end" /></div></div>
+      <div class="form-row"><label class="label">Client</label><select class="input" name="client_id">{{ client_options(None) }}</select></div>
+      <div class="form-row"><label class="label">Site</label><select class="input" name="site_id">{{ site_options(None) }}</select></div>
+      <div class="form-row"><label class="label">Status</label><select class="input" name="status">{% for value in schedule_statuses %}<option value="{{ value }}">{{ value|title }}</option>{% endfor %}</select></div>
+      <div class="form-row single"><label class="label">Shift rotation</label><textarea class="input" name="shift_rotation" placeholder="Opsional: Shift A, Shift B, Shift C"></textarea></div>
+      <div class="form-row single"><textarea class="input" name="notes" placeholder="Notes"></textarea></div>
+      <div class="form-row single"><label><input type="checkbox" name="confirm_conflict" value="yes" /> Override conflict schedule</label></div>
+      <div class="btn-row"><button class="btn primary" type="submit">Generate</button><button class="btn secondary" type="button" data-modal-close>Tutup</button></div>
     </form>
   </div>
 </div>

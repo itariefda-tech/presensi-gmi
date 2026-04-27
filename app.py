@@ -172,7 +172,9 @@ def create_app() -> Flask:
         user = _current_user()
         if not user:
             return {"permissions": {}}
-        return {"permissions": _get_role_permissions(user.role)}
+        permissions = _get_role_permissions(user.role)
+        permissions["view_calendar"] = bool(permissions.get("view_calendar")) and _calendar_feature_enabled(user)
+        return {"permissions": permissions}
 
     @app.context_processor
     def _inject_notifications():
@@ -2375,6 +2377,9 @@ def create_app() -> Flask:
         forbidden = _require_api_role(user, ADMIN_ROLES)
         if forbidden:
             return forbidden
+        addon_block = _require_calendar_feature(user)
+        if addon_block:
+            return addon_block
 
         conn = _db_connect()
         try:
@@ -2421,6 +2426,9 @@ def create_app() -> Flask:
         forbidden = _require_api_role(user, ADMIN_ROLES)
         if forbidden:
             return forbidden
+        addon_block = _require_calendar_feature(user)
+        if addon_block:
+            return addon_block
 
         today = _today_key()
         conn = _db_connect()
@@ -2458,6 +2466,105 @@ def create_app() -> Flask:
             })
 
         return jsonify(ok=True, schedules=schedules_with_attendance), 200
+
+    @app.route("/api/admin/calendar/dashboard/widgets", methods=["GET"])
+    def api_calendar_dashboard_widgets():
+        """Phase 8: Get all dashboard widgets data.
+        Returns: { schedule_summary, tasks_summary, upcoming_events, alerts }
+        """
+        user = _current_user()
+        forbidden = _require_api_role(user, ADMIN_ROLES)
+        if forbidden:
+            return forbidden
+        addon_block = _require_calendar_feature(user)
+        if addon_block:
+            return addon_block
+
+        schedule_summary = _calendar_today_schedule_summary()
+        tasks_summary = _calendar_today_tasks_summary()
+        upcoming_events = _calendar_upcoming_events(days_ahead=7)
+        alerts = _calendar_alerts()
+
+        return jsonify(
+            ok=True,
+            schedule_summary=schedule_summary,
+            tasks_summary=tasks_summary,
+            upcoming_events=upcoming_events,
+            alerts=alerts,
+        ), 200
+
+    @app.route("/api/admin/notifications", methods=["GET"])
+    def api_get_notifications():
+        """Phase 9: Get user's notifications.
+        Query params: unread_only (bool), limit (int)
+        """
+        user = _current_user()
+        if not user:
+            return _json_forbidden()
+
+        unread_only = request.args.get("unread_only", "false").lower() == "true"
+        try:
+            limit = min(max(int(request.args.get("limit", 50)), 1), 100)
+        except (TypeError, ValueError):
+            limit = 50
+
+        conn = _db_connect()
+        try:
+            _ensure_notifications_table(conn)
+
+            sql = "SELECT * FROM notifications WHERE user_id = ?"
+            params = [user.id]
+
+            if unread_only:
+                sql += " AND is_read = 0"
+
+            sql += " ORDER BY created_at DESC LIMIT ?"
+            params.append(limit)
+
+            cur = conn.execute(sql, params)
+            notifications = [dict(row) for row in cur.fetchall()]
+            return jsonify(ok=True, notifications=notifications), 200
+        finally:
+            conn.close()
+
+    @app.route("/api/admin/notifications/<int:notification_id>/mark-read", methods=["POST"])
+    def api_mark_notification_read(notification_id: int):
+        """Phase 9: Mark notification as read."""
+        user = _current_user()
+        if not user:
+            return _json_forbidden()
+
+        conn = _db_connect()
+        try:
+            _ensure_notifications_table(conn)
+            conn.execute(
+                "UPDATE notifications SET is_read = 1, read_at = ? WHERE id = ? AND user_id = ?",
+                (_now_ts(), notification_id, user.id),
+            )
+        finally:
+            conn.commit()
+            conn.close()
+
+        return jsonify(ok=True, message="Notification marked as read"), 200
+
+    @app.route("/api/admin/calendar/send-reminders", methods=["POST"])
+    def api_send_reminders():
+        """Phase 9: Manually trigger reminder sending (for testing/cron).
+        Future: can be automated via scheduled task/cron job.
+        """
+        user = _current_user()
+        forbidden = _require_api_role(user, {"hr_superadmin"})
+        if forbidden:
+            return forbidden
+        addon_block = _require_calendar_feature(user)
+        if addon_block:
+            return addon_block
+
+        try:
+            _schedule_reminders()
+            return jsonify(ok=True, message="Reminders sent successfully"), 200
+        except Exception as e:
+            return jsonify(ok=False, message=f"Error sending reminders: {str(e)}"), 500
 
     @app.route("/api/admin/guard_tour/dashboard", methods=["GET"])
     def api_admin_guard_tour_dashboard():
@@ -2877,6 +2984,43 @@ def create_app() -> Flask:
             return jsonify(ok=True, data=summary_data), 200
         except Exception:
             return jsonify(ok=False, message="Failed to generate summary report"), 500
+
+    @app.route("/api/reports/calendar", methods=["GET"])
+    def reports_calendar():
+        user = _current_user()
+        if not user or user.role not in ADMIN_ROLES or not _is_pro(user):
+            return _json_forbidden()
+        addon_block = _require_calendar_feature(user)
+        if addon_block:
+            return addon_block
+        filters, error_response = _report_filters_from_request()
+        if error_response:
+            return error_response
+        report_type = (request.args.get("report_type") or "schedule_attendance").strip().lower()
+        allowed = {"schedule_attendance", "task_completion", "workload", "coverage", "late_absent"}
+        if report_type not in allowed:
+            return jsonify(ok=False, message="report_type tidak valid."), 400
+        data = _calendar_report_data(report_type, filters)
+        return jsonify(ok=True, report_type=report_type, filters=filters, data=data), 200
+
+    @app.route("/api/reports/calendar/export", methods=["GET"])
+    def reports_calendar_export():
+        user = _current_user()
+        if not user or user.role not in ADMIN_ROLES or not _is_pro(user):
+            return _json_forbidden()
+        addon_block = _require_calendar_feature(user)
+        if addon_block:
+            return addon_block
+        filters, error_response = _report_filters_from_request()
+        if error_response:
+            return error_response
+        report_type = (request.args.get("report_type") or "schedule_attendance").strip().lower()
+        allowed = {"schedule_attendance", "task_completion", "workload", "coverage", "late_absent"}
+        if report_type not in allowed:
+            return jsonify(ok=False, message="report_type tidak valid."), 400
+        data = _calendar_report_data(report_type, filters)
+        filename = f"{report_type}_{filters['start_date']}_to_{filters['end_date']}.csv"
+        return _csv_response(filename, data)
 
     @app.route("/api/v1/attendance", methods=["GET"])
     def api_v1_attendance():
@@ -3658,6 +3802,7 @@ RESET_WHATSAPP_WEBHOOK_URL = (os.environ.get("RESET_WHATSAPP_WEBHOOK_URL") or ""
 PAYROLL_DEFAULT_LATE_DEDUCTION = 50000.0
 PAYROLL_DEFAULT_ABSENT_DEDUCTION = 100000.0
 ADDON_PATROL = "patrol"
+ADDON_CALENDAR = "calendar"
 ADDON_REPORTING_ADVANCED = "reporting_advanced"
 ADDON_API_ACCESS = "api_access"
 ADDON_PAYROLL_PLUS = "payroll_plus"
@@ -3665,6 +3810,7 @@ ADDON_AI = "ai"
 ADDON_ENTERPRISE_TIER = "enterprise_tier"
 ADDON_ALLOWED = {
     ADDON_PATROL,
+    ADDON_CALENDAR,
     ADDON_REPORTING_ADVANCED,
     ADDON_API_ACCESS,
     ADDON_PAYROLL_PLUS,
@@ -3674,6 +3820,9 @@ ADDON_ALLOWED = {
 ADDON_FEATURE_ALIASES = {
     "patrol": ADDON_PATROL,
     "guard_tour": ADDON_PATROL,
+    "calendar": ADDON_CALENDAR,
+    "calender": ADDON_CALENDAR,
+    "hris_calendar": ADDON_CALENDAR,
     "reporting": ADDON_REPORTING_ADVANCED,
     "reporting_advanced": ADDON_REPORTING_ADVANCED,
     "advanced_reporting": ADDON_REPORTING_ADVANCED,
@@ -4094,6 +4243,401 @@ def _now_ts() -> str:
 
 def _today_key() -> str:
     return datetime.now().strftime("%Y-%m-%d")
+
+
+def _detect_schedule_overlap(
+    employee_id: int,
+    schedule_date: str,
+    start_time: str,
+    end_time: str,
+    exclude_schedule_id: int | None = None,
+) -> list[dict]:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "employee_schedules"):
+            return []
+        sql = """
+            SELECT id, employee_id, schedule_date, start_time, end_time, shift_name, status
+            FROM employee_schedules
+            WHERE employee_id = ? AND schedule_date = ? AND status != 'cancelled'
+        """
+        params: list = [employee_id, schedule_date]
+        if exclude_schedule_id:
+            sql += " AND id != ?"
+            params.append(exclude_schedule_id)
+        rows = [dict(row) for row in conn.execute(sql, params).fetchall()]
+        return [
+            row for row in rows
+            if _times_overlap(start_time, end_time, row.get("start_time"), row.get("end_time"))
+        ]
+    finally:
+        conn.close()
+
+
+def _times_overlap(start1: str | None, end1: str | None, start2: str | None, end2: str | None) -> bool:
+    try:
+        s1 = datetime.strptime(str(start1), "%H:%M").time()
+        e1 = datetime.strptime(str(end1), "%H:%M").time()
+        s2 = datetime.strptime(str(start2), "%H:%M").time()
+        e2 = datetime.strptime(str(end2), "%H:%M").time()
+    except (ValueError, TypeError):
+        return False
+    overnight1 = s1 > e1
+    overnight2 = s2 > e2
+    if overnight1:
+        return s2 >= s1 or s2 < e1 or e2 > s1 or e2 <= e1
+    if overnight2:
+        return s1 >= s2 or s1 < e2 or e1 > s2 or e1 <= e2
+    return s1 < e2 and s2 < e1
+
+
+def _format_minutes(minutes: int | None) -> str | None:
+    if minutes is None:
+        return None
+    minutes = minutes % (24 * 60)
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
+
+
+def _get_employee_attendance_status(
+    employee_id: int,
+    schedule_date: str,
+    start_time: str,
+    end_time: str,
+) -> dict:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "attendance"):
+            return {"status": "no_schedule", "checkin_time": None, "checkout_time": None, "late_minutes": 0, "notes": "Attendance table not found"}
+        email = None
+        if _table_exists(conn, "users"):
+            user_row = conn.execute("SELECT email FROM users WHERE id = ?", (employee_id,)).fetchone()
+            email = user_row["email"] if user_row else None
+        clauses = ["date = ?"]
+        params: list = [schedule_date]
+        if email:
+            clauses.append("(employee_id = ? OR lower(employee_email) = ?)")
+            params.extend([employee_id, email.lower()])
+        else:
+            clauses.append("employee_id = ?")
+            params.append(employee_id)
+        rows = [
+            dict(row)
+            for row in conn.execute(
+                f"""
+                SELECT time, action, created_at
+                FROM attendance
+                WHERE {' AND '.join(clauses)}
+                ORDER BY created_at ASC, id ASC
+                """,
+                params,
+            ).fetchall()
+        ]
+    finally:
+        conn.close()
+
+    checkin_minutes = None
+    checkout_minutes = None
+    for row in rows:
+        minutes = _extract_minutes(row.get("time"), row.get("created_at"))
+        if minutes is None:
+            continue
+        action = (row.get("action") or "").lower()
+        if action == ATTENDANCE_ACTION_CHECKIN and (checkin_minutes is None or minutes < checkin_minutes):
+            checkin_minutes = minutes
+        if action == ATTENDANCE_ACTION_CHECKOUT and (checkout_minutes is None or minutes > checkout_minutes):
+            checkout_minutes = minutes
+
+    if checkin_minutes is None:
+        return {"status": "absent", "checkin_time": None, "checkout_time": _format_minutes(checkout_minutes), "late_minutes": 0, "notes": "No check-in recorded"}
+
+    start_minutes = _parse_hhmm(start_time)
+    end_minutes = _parse_hhmm(end_time)
+    late_minutes = max(0, checkin_minutes - start_minutes) if start_minutes is not None else 0
+    status = "late" if late_minutes else "on_time"
+    if checkout_minutes is not None and end_minutes is not None and start_minutes is not None:
+        end_compare = end_minutes + (24 * 60 if end_minutes <= start_minutes else 0)
+        checkout_compare = checkout_minutes + (24 * 60 if checkout_minutes < start_minutes else 0)
+        if checkout_compare < end_compare:
+            status = "early_leave"
+    return {
+        "status": status,
+        "checkin_time": _format_minutes(checkin_minutes),
+        "checkout_time": _format_minutes(checkout_minutes),
+        "late_minutes": late_minutes,
+        "notes": None,
+    }
+
+
+def _calendar_today_schedule_summary() -> dict:
+    today = _today_key()
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "employee_schedules"):
+            return {"total_scheduled": 0, "present": 0, "late": 0, "absent": 0}
+        schedules = [
+            dict(row)
+            for row in conn.execute(
+                """
+                SELECT id, employee_id, start_time, end_time
+                FROM employee_schedules
+                WHERE schedule_date = ? AND status IN ('scheduled', 'present', 'late', 'absent')
+                """,
+                (today,),
+            ).fetchall()
+        ]
+    finally:
+        conn.close()
+    summary = {"total_scheduled": len(schedules), "present": 0, "late": 0, "absent": 0}
+    for sched in schedules:
+        status = _get_employee_attendance_status(
+            sched["employee_id"], today, sched["start_time"], sched["end_time"]
+        ).get("status")
+        if status == "late":
+            summary["late"] += 1
+        elif status == "absent":
+            summary["absent"] += 1
+        elif status in {"on_time", "early_leave"}:
+            summary["present"] += 1
+    return summary
+
+
+def _calendar_today_tasks_summary() -> dict:
+    today = _today_key()
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "calendar_tasks"):
+            return {"pending": 0, "in_progress": 0, "done": 0, "urgent": 0}
+        tasks = [
+            dict(row)
+            for row in conn.execute(
+                """
+                SELECT priority, status
+                FROM calendar_tasks
+                WHERE due_date = ?
+                """,
+                (today,),
+            ).fetchall()
+        ]
+    finally:
+        conn.close()
+    return {
+        "pending": sum(1 for task in tasks if task.get("status") == "pending"),
+        "in_progress": sum(1 for task in tasks if task.get("status") == "in_progress"),
+        "done": sum(1 for task in tasks if task.get("status") == "done"),
+        "urgent": sum(1 for task in tasks if task.get("priority") == "urgent" and task.get("status") != "done"),
+    }
+
+
+def _calendar_upcoming_events(days_ahead: int = 7) -> list[dict]:
+    today = _today_key()
+    end_date = (datetime.strptime(today, "%Y-%m-%d") + timedelta(days=days_ahead)).strftime("%Y-%m-%d")
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "calendar_events"):
+            return []
+        return [
+            dict(row)
+            for row in conn.execute(
+                """
+                SELECT id, title, event_type, start_datetime, end_datetime
+                FROM calendar_events
+                WHERE date(start_datetime) BETWEEN ? AND ? AND status = 'scheduled'
+                ORDER BY start_datetime ASC
+                LIMIT 5
+                """,
+                (today, end_date),
+            ).fetchall()
+        ]
+    finally:
+        conn.close()
+
+
+def _calendar_alerts() -> list[dict]:
+    today = _today_key()
+    alerts: list[dict] = []
+    conn = _db_connect()
+    try:
+        if _table_exists(conn, "employee_schedules"):
+            schedules = [
+                dict(row)
+                for row in conn.execute(
+                    """
+                    SELECT id, employee_id, shift_name, start_time, end_time
+                    FROM employee_schedules
+                    WHERE schedule_date = ? AND status = 'scheduled'
+                    """,
+                    (today,),
+                ).fetchall()
+            ]
+            for sched in schedules:
+                if _get_employee_attendance_status(sched["employee_id"], today, sched["start_time"], sched["end_time"]).get("status") == "absent":
+                    alerts.append({
+                        "type": "absent_without_notice",
+                        "message": f"Employee {sched['employee_id']} tidak hadir dari jadwal {sched['shift_name']} ({sched['start_time']}-{sched['end_time']})",
+                        "severity": "warning",
+                        "schedule_id": sched["id"],
+                    })
+            seen_pairs: set[tuple[int, int]] = set()
+            for sched in schedules:
+                for overlap in _detect_schedule_overlap(sched["employee_id"], today, sched["start_time"], sched["end_time"], sched["id"]):
+                    pair = tuple(sorted((int(sched["id"]), int(overlap["id"]))))
+                    if pair in seen_pairs:
+                        continue
+                    seen_pairs.add(pair)
+                    alerts.append({
+                        "type": "shift_conflict",
+                        "message": f"Employee {sched['employee_id']} memiliki jadwal bentrok: {sched['shift_name']} dan {overlap.get('shift_name', 'Schedule lain')}",
+                        "severity": "critical",
+                        "schedule_id": sched["id"],
+                    })
+        if _table_exists(conn, "calendar_tasks"):
+            overdue = [
+                dict(row)
+                for row in conn.execute(
+                    """
+                    SELECT id, title, due_date
+                    FROM calendar_tasks
+                    WHERE priority = 'urgent' AND due_date < ? AND status NOT IN ('done', 'cancelled')
+                    LIMIT 10
+                    """,
+                    (today,),
+                ).fetchall()
+            ]
+            for task in overdue:
+                alerts.append({
+                    "type": "urgent_task_overdue",
+                    "message": f"Urgent task '{task['title']}' overdue sejak {task['due_date']}",
+                    "severity": "critical",
+                    "task_id": task["id"],
+                })
+    finally:
+        conn.close()
+    return alerts
+
+
+def _ensure_notifications_table(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS notifications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            message TEXT,
+            notification_type TEXT DEFAULT 'info',
+            type TEXT DEFAULT 'info',
+            is_read INTEGER DEFAULT 0,
+            created_at TEXT NOT NULL,
+            read_at TEXT
+        )
+        """
+    )
+    _ensure_column(conn, "notifications", "notification_type", "notification_type TEXT DEFAULT 'info'")
+    _ensure_column(conn, "notifications", "type", "type TEXT DEFAULT 'info'")
+    _ensure_column(conn, "notifications", "is_read", "is_read INTEGER DEFAULT 0")
+    _ensure_column(conn, "notifications", "read_at", "read_at TEXT")
+
+
+def _send_notification(user_id: int, title: str, message: str, notification_type: str = "info") -> None:
+    conn = _db_connect()
+    try:
+        _ensure_notifications_table(conn)
+        conn.execute(
+            """
+            INSERT INTO notifications (user_id, title, message, notification_type, type, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (user_id, title, message, notification_type, notification_type, _now_ts()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _schedule_reminders() -> None:
+    tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+    today = _today_key()
+    conn = _db_connect()
+    try:
+        if _table_exists(conn, "employee_schedules"):
+            rows = [
+                dict(row)
+                for row in conn.execute(
+                    """
+                    SELECT DISTINCT employee_id, shift_name, start_time, end_time
+                    FROM employee_schedules
+                    WHERE schedule_date = ? AND status = 'scheduled'
+                    """,
+                    (tomorrow,),
+                ).fetchall()
+            ]
+            for sched in rows:
+                _send_notification(
+                    sched["employee_id"],
+                    "Jadwal Shift Besok",
+                    f"Anda dijadwalkan untuk shift {sched['shift_name']} ({sched['start_time']}-{sched['end_time']}) besok",
+                    "reminder",
+                )
+        if _table_exists(conn, "calendar_tasks"):
+            rows = [
+                dict(row)
+                for row in conn.execute(
+                    """
+                    SELECT assigned_to, title
+                    FROM calendar_tasks
+                    WHERE due_date = ? AND status IN ('pending', 'in_progress') AND assigned_to IS NOT NULL
+                    """,
+                    (today,),
+                ).fetchall()
+            ]
+            for task in rows:
+                _send_notification(
+                    task["assigned_to"],
+                    "Task Deadline Hari Ini",
+                    f"Task '{task['title']}' harus diselesaikan hari ini",
+                    "reminder",
+                )
+            overdue = [
+                dict(row)
+                for row in conn.execute(
+                    """
+                    SELECT assigned_to, title, due_date
+                    FROM calendar_tasks
+                    WHERE due_date < ? AND status IN ('pending', 'in_progress') AND assigned_to IS NOT NULL
+                    """,
+                    (today,),
+                ).fetchall()
+            ]
+            for task in overdue:
+                _send_notification(
+                    task["assigned_to"],
+                    "Task Overdue",
+                    f"Task '{task['title']}' sudah melewati deadline {task['due_date']}",
+                    "alert",
+                )
+        if _table_exists(conn, "calendar_events"):
+            events = [
+                dict(row)
+                for row in conn.execute(
+                    """
+                    SELECT title, start_datetime
+                    FROM calendar_events
+                    WHERE date(start_datetime) = ? AND status = 'scheduled' AND visibility IN ('admin', 'all')
+                    """,
+                    (today,),
+                ).fetchall()
+            ]
+            if events and _table_exists(conn, "users"):
+                admins = [dict(row) for row in conn.execute("SELECT id FROM users WHERE role IN ('hr_superadmin', 'admin', 'hr_admin') AND is_active = 1").fetchall()]
+                for event in events:
+                    for admin in admins:
+                        _send_notification(
+                            admin["id"],
+                            "Reminder Event Hari Ini",
+                            f"Event '{event['title']}' dijadwalkan hari ini",
+                            "reminder",
+                        )
+    finally:
+        conn.close()
 
 
 def _normalize_date_input(value: str | None) -> str | None:
@@ -7773,6 +8317,168 @@ def _calendar_schedule_payload(form) -> tuple[dict | None, str | None]:
     }, None
 
 
+def _calendar_schedule_bulk_payload(form) -> tuple[dict | None, str | None]:
+    base_payload, error = _calendar_schedule_payload(form)
+    if error:
+        return None, error
+    start_date = _normalize_date_input(form.get("start_date") or form.get("schedule_date"))
+    end_date = _normalize_date_input(form.get("end_date") or form.get("schedule_date"))
+    if not start_date or not end_date:
+        return None, "Tanggal mulai dan selesai wajib diisi."
+    if start_date > end_date:
+        return None, "Rentang tanggal schedule tidak valid."
+    employee_ids = []
+    for raw in form.getlist("employee_ids") or [form.get("employee_id")]:
+        employee_id = _calendar_int(raw)
+        if employee_id and employee_id not in employee_ids:
+            employee_ids.append(employee_id)
+    if not employee_ids:
+        return None, "Pilih minimal satu employee."
+    invalid_employees = [employee_id for employee_id in employee_ids if not _calendar_user_valid(employee_id, employee_only=True)]
+    if invalid_employees:
+        return None, "Ada employee yang tidak valid."
+    repeat_pattern = (form.get("repeat_pattern") or "daily").strip().lower()
+    if repeat_pattern not in {"daily", "weekly", "monthly", "weekdays", "custom"}:
+        return None, "Repeat pattern tidak valid."
+    custom_days = []
+    for raw_day in form.getlist("custom_days"):
+        if str(raw_day).isdigit():
+            day = int(raw_day)
+            if 0 <= day <= 6 and day not in custom_days:
+                custom_days.append(day)
+    shift_rotation = [
+        value.strip()
+        for value in re.split(r"[\n,;]+", form.get("shift_rotation") or "")
+        if value.strip()
+    ]
+    return {
+        "base": base_payload,
+        "employee_ids": employee_ids,
+        "start_date": start_date,
+        "end_date": end_date,
+        "repeat_pattern": repeat_pattern,
+        "custom_days": custom_days,
+        "shift_rotation": shift_rotation,
+        "allow_conflicts": form.get("confirm_conflict") == "yes",
+    }, None
+
+
+def _calendar_recurring_dates(
+    start_date: str,
+    end_date: str,
+    repeat_pattern: str,
+    custom_days: list[int] | None = None,
+) -> list[str]:
+    start_dt = datetime.strptime(start_date, "%Y-%m-%d").date()
+    end_dt = datetime.strptime(end_date, "%Y-%m-%d").date()
+    custom_days = custom_days or []
+    dates: list[str] = []
+    current = start_dt
+    while current <= end_dt:
+        include = False
+        if repeat_pattern == "daily":
+            include = True
+        elif repeat_pattern == "weekdays":
+            include = current.weekday() < 5
+        elif repeat_pattern == "weekly":
+            include = current.weekday() == start_dt.weekday()
+        elif repeat_pattern == "monthly":
+            include = current.day == start_dt.day
+        elif repeat_pattern == "custom":
+            include = current.weekday() in custom_days
+        if include:
+            dates.append(current.strftime("%Y-%m-%d"))
+        current += timedelta(days=1)
+    return dates
+
+
+def _calendar_schedule_duplicate_exists(conn: sqlite3.Connection, payload: dict) -> bool:
+    row = conn.execute(
+        """
+        SELECT 1
+        FROM employee_schedules
+        WHERE employee_id = ?
+          AND schedule_date = ?
+          AND start_time = ?
+          AND end_time = ?
+          AND status != 'cancelled'
+        LIMIT 1
+        """,
+        (
+            payload["employee_id"],
+            payload["schedule_date"],
+            payload["start_time"],
+            payload["end_time"],
+        ),
+    ).fetchone()
+    return row is not None
+
+
+def _calendar_bulk_create_schedules(form, created_by: int) -> tuple[dict, str | None]:
+    payload, error = _calendar_schedule_bulk_payload(form)
+    if error:
+        return {}, error
+    dates = _calendar_recurring_dates(
+        payload["start_date"],
+        payload["end_date"],
+        payload["repeat_pattern"],
+        payload["custom_days"],
+    )
+    if not dates:
+        return {}, "Tidak ada tanggal yang cocok dengan repeat pattern."
+
+    created = 0
+    duplicates: list[dict] = []
+    conflicts: list[dict] = []
+    conn = _db_connect()
+    try:
+        for index, date_key in enumerate(dates):
+            for employee_id in payload["employee_ids"]:
+                row_payload = dict(payload["base"])
+                row_payload["employee_id"] = employee_id
+                row_payload["schedule_date"] = date_key
+                if payload["shift_rotation"]:
+                    row_payload["shift_name"] = payload["shift_rotation"][index % len(payload["shift_rotation"])]
+                if _calendar_schedule_duplicate_exists(conn, row_payload):
+                    duplicates.append({"employee_id": employee_id, "date": date_key})
+                    continue
+                overlap_rows = _detect_schedule_overlap(
+                    employee_id,
+                    date_key,
+                    row_payload["start_time"],
+                    row_payload["end_time"],
+                )
+                if overlap_rows and not payload["allow_conflicts"]:
+                    conflicts.append({"employee_id": employee_id, "date": date_key, "items": overlap_rows})
+                    continue
+                conn.execute(
+                    """
+                    INSERT INTO employee_schedules (
+                        employee_id, client_id, site_id, shift_name, schedule_date,
+                        start_time, end_time, break_start, break_end, status, notes,
+                        created_by, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        row_payload["employee_id"], row_payload["client_id"], row_payload["site_id"],
+                        row_payload["shift_name"], row_payload["schedule_date"], row_payload["start_time"],
+                        row_payload["end_time"], row_payload["break_start"], row_payload["break_end"],
+                        row_payload["status"], row_payload["notes"], created_by, _now_ts(), _now_ts(),
+                    ),
+                )
+                created += 1
+        conn.commit()
+    finally:
+        conn.close()
+    return {
+        "created": created,
+        "duplicates": duplicates,
+        "conflicts": conflicts,
+        "dates": dates,
+        "employees": payload["employee_ids"],
+    }, None
+
+
 def _calendar_note_payload(form) -> tuple[dict | None, str | None]:
     title = (form.get("title") or "").strip()
     note_date = _normalize_date_input(form.get("note_date"))
@@ -8599,6 +9305,7 @@ def _ensure_calendar_tables(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_employee_schedules_date ON employee_schedules(schedule_date)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_employee_schedules_employee ON employee_schedules(employee_id, schedule_date)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_calendar_notes_date ON calendar_notes(note_date)")
+    _ensure_notifications_table(conn)
 
 
 def _init_db() -> None:
@@ -9877,9 +10584,31 @@ def _admin_enterprise_addon_enabled(user: User | None, feature: str) -> bool:
         return False
     feature_key = _normalize_addon_key(feature)
     active_addons = _global_addons()
-    if ADDON_ENTERPRISE_TIER in active_addons and feature_key == ADDON_PATROL:
+    if ADDON_ENTERPRISE_TIER in active_addons and feature_key in {ADDON_PATROL, ADDON_CALENDAR}:
         return True
     return feature_key in active_addons
+
+
+def _calendar_feature_enabled(user: User | None) -> bool:
+    if not user or user.role not in ADMIN_ROLES:
+        return False
+    if ADDON_CALENDAR in _global_addons():
+        return True
+    return _admin_enterprise_addon_enabled(user, ADDON_CALENDAR)
+
+
+def _require_calendar_feature(user: User | None):
+    if not user or user.role not in ADMIN_ROLES:
+        return _json_forbidden()
+    if not _calendar_feature_enabled(user):
+        return (
+            jsonify(
+                ok=False,
+                message="HRIS Calendar membutuhkan add-on Calendar aktif atau paket HRIS Enterprise.",
+            ),
+            403,
+        )
+    return None
 
 
 def _require_admin_enterprise_addon(user: User | None, feature: str, feature_label: str):
@@ -10930,6 +11659,233 @@ def _generate_summary_report(start_date: str, end_date: str, client_id: int | No
         "attendance_rate": (total_checkins / expected_attendance * 100) if expected_attendance > 0 else 0,
         "late_rate": (total_late / total_checkins * 100) if total_checkins > 0 else 0,
     }
+
+
+def _report_filters_from_request() -> tuple[dict | None, tuple]:
+    start_date = _normalize_date_input(request.args.get("start_date"))
+    end_date = _normalize_date_input(request.args.get("end_date"))
+    if not start_date or not end_date:
+        start_dt, end_dt = _month_bounds()
+        start_date = start_dt.strftime("%Y-%m-%d")
+        end_date = end_dt.strftime("%Y-%m-%d")
+    if start_date > end_date:
+        return None, (jsonify(ok=False, message="Rentang tanggal tidak valid."), 400)
+    filters = {
+        "start_date": start_date,
+        "end_date": end_date,
+        "client_id": _calendar_int(request.args.get("client_id")),
+        "site_id": _calendar_int(request.args.get("site_id")),
+        "employee_id": _calendar_int(request.args.get("employee_id")),
+    }
+    if filters["site_id"]:
+        filters["client_id"] = None
+    return filters, ()
+
+
+def _calendar_schedule_report_rows(filters: dict) -> list[dict]:
+    clauses = ["es.schedule_date BETWEEN ? AND ?"]
+    params: list = [filters["start_date"], filters["end_date"]]
+    if filters.get("client_id"):
+        clauses.append("es.client_id = ?")
+        params.append(filters["client_id"])
+    if filters.get("site_id"):
+        clauses.append("es.site_id = ?")
+        params.append(filters["site_id"])
+    if filters.get("employee_id"):
+        clauses.append("es.employee_id = ?")
+        params.append(filters["employee_id"])
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "employee_schedules"):
+            return []
+        rows = [
+            dict(row)
+            for row in conn.execute(
+                f"""
+                SELECT es.*, u.name AS employee_name, u.email AS employee_email,
+                       c.name AS client_name, s.name AS site_name
+                FROM employee_schedules es
+                LEFT JOIN users u ON u.id = es.employee_id
+                LEFT JOIN clients c ON c.id = es.client_id
+                LEFT JOIN sites s ON s.id = es.site_id
+                WHERE {' AND '.join(clauses)}
+                ORDER BY es.schedule_date ASC, es.start_time ASC, u.name ASC
+                """,
+                params,
+            ).fetchall()
+        ]
+    finally:
+        conn.close()
+    report_rows = []
+    for row in rows:
+        attendance = _get_employee_attendance_status(
+            row["employee_id"],
+            row["schedule_date"],
+            row["start_time"],
+            row["end_time"],
+        )
+        report_rows.append({
+            "date": row.get("schedule_date"),
+            "employee_id": row.get("employee_id"),
+            "employee_name": row.get("employee_name") or row.get("employee_email") or "-",
+            "employee_email": row.get("employee_email") or "-",
+            "client_name": row.get("client_name") or "-",
+            "site_name": row.get("site_name") or "-",
+            "shift_name": row.get("shift_name"),
+            "scheduled_start": row.get("start_time"),
+            "scheduled_end": row.get("end_time"),
+            "schedule_status": row.get("status"),
+            "attendance_status": attendance.get("status"),
+            "checkin_time": attendance.get("checkin_time"),
+            "checkout_time": attendance.get("checkout_time"),
+            "late_minutes": attendance.get("late_minutes") or 0,
+        })
+    return report_rows
+
+
+def _calendar_task_completion_report(filters: dict) -> list[dict]:
+    clauses = ["t.due_date BETWEEN ? AND ?"]
+    params: list = [filters["start_date"], filters["end_date"]]
+    if filters.get("client_id"):
+        clauses.append("t.client_id = ?")
+        params.append(filters["client_id"])
+    if filters.get("site_id"):
+        clauses.append("t.site_id = ?")
+        params.append(filters["site_id"])
+    if filters.get("employee_id"):
+        clauses.append("t.assigned_to = ?")
+        params.append(filters["employee_id"])
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "calendar_tasks"):
+            return []
+        return [
+            dict(row)
+            for row in conn.execute(
+                f"""
+                SELECT t.id, t.title, t.assigned_to, t.due_date, t.priority, t.status,
+                       u.name AS employee_name, u.email AS employee_email,
+                       c.name AS client_name, s.name AS site_name
+                FROM calendar_tasks t
+                LEFT JOIN users u ON u.id = t.assigned_to
+                LEFT JOIN clients c ON c.id = t.client_id
+                LEFT JOIN sites s ON s.id = t.site_id
+                WHERE {' AND '.join(clauses)}
+                ORDER BY t.due_date ASC, t.priority DESC, t.id ASC
+                """,
+                params,
+            ).fetchall()
+        ]
+    finally:
+        conn.close()
+
+
+def _calendar_workload_report(filters: dict) -> list[dict]:
+    schedules = _calendar_schedule_report_rows(filters)
+    tasks = _calendar_task_completion_report(filters)
+    by_employee: dict[int, dict] = {}
+    for row in schedules:
+        employee_id = int(row.get("employee_id") or 0)
+        item = by_employee.setdefault(employee_id, {
+            "employee_id": employee_id,
+            "employee_name": row.get("employee_name"),
+            "employee_email": row.get("employee_email"),
+            "scheduled_days": 0,
+            "late_days": 0,
+            "absent_days": 0,
+            "tasks_total": 0,
+            "tasks_done": 0,
+            "urgent_open": 0,
+        })
+        item["scheduled_days"] += 1
+        if row.get("attendance_status") == "late":
+            item["late_days"] += 1
+        if row.get("attendance_status") == "absent":
+            item["absent_days"] += 1
+    for row in tasks:
+        employee_id = int(row.get("assigned_to") or 0)
+        item = by_employee.setdefault(employee_id, {
+            "employee_id": employee_id,
+            "employee_name": row.get("employee_name") or row.get("employee_email") or "-",
+            "employee_email": row.get("employee_email") or "-",
+            "scheduled_days": 0,
+            "late_days": 0,
+            "absent_days": 0,
+            "tasks_total": 0,
+            "tasks_done": 0,
+            "urgent_open": 0,
+        })
+        item["tasks_total"] += 1
+        if row.get("status") == "done":
+            item["tasks_done"] += 1
+        if row.get("priority") == "urgent" and row.get("status") not in {"done", "cancelled"}:
+            item["urgent_open"] += 1
+    return sorted(by_employee.values(), key=lambda row: (row.get("employee_name") or "", row.get("employee_email") or ""))
+
+
+def _calendar_site_coverage_report(filters: dict) -> list[dict]:
+    schedules = _calendar_schedule_report_rows(filters)
+    by_site: dict[tuple[str, str], dict] = {}
+    for row in schedules:
+        key = (row.get("client_name") or "-", row.get("site_name") or "-")
+        item = by_site.setdefault(key, {
+            "client_name": key[0],
+            "site_name": key[1],
+            "schedule_count": 0,
+            "unique_employees": set(),
+            "present": 0,
+            "late": 0,
+            "absent": 0,
+        })
+        item["schedule_count"] += 1
+        item["unique_employees"].add(row.get("employee_id"))
+        status = row.get("attendance_status")
+        if status == "late":
+            item["late"] += 1
+        elif status == "absent":
+            item["absent"] += 1
+        elif status in {"on_time", "early_leave"}:
+            item["present"] += 1
+    result = []
+    for item in by_site.values():
+        item = dict(item)
+        item["unique_employees"] = len([value for value in item["unique_employees"] if value])
+        result.append(item)
+    return sorted(result, key=lambda row: (row.get("client_name") or "", row.get("site_name") or ""))
+
+
+def _calendar_report_data(report_type: str, filters: dict) -> list[dict]:
+    if report_type == "schedule_attendance":
+        return _calendar_schedule_report_rows(filters)
+    if report_type == "task_completion":
+        return _calendar_task_completion_report(filters)
+    if report_type == "workload":
+        return _calendar_workload_report(filters)
+    if report_type == "coverage":
+        return _calendar_site_coverage_report(filters)
+    if report_type == "late_absent":
+        return [
+            row for row in _calendar_schedule_report_rows(filters)
+            if row.get("attendance_status") in {"late", "absent", "early_leave"}
+        ]
+    return []
+
+
+def _csv_response(filename: str, rows: list[dict]) -> Response:
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    headers = list(rows[0].keys()) if rows else ["message"]
+    writer.writerow(headers)
+    if rows:
+        for row in rows:
+            writer.writerow([row.get(header, "") for header in headers])
+    else:
+        writer.writerow(["Tidak ada data."])
+    return Response(
+        buffer.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 def _create_manual_request(
@@ -12973,6 +13929,13 @@ def admin_bp() -> Blueprint:
             permission = _permission_for_admin_endpoint(request.endpoint)
             if permission and not _has_role_permission(user.role, permission):
                 return abort(403)
+        if (request.endpoint or "").startswith("admin.calendar") and not _calendar_feature_enabled(user):
+            return render_template(
+                "dashboard/upgrade_prompt.html",
+                user=user,
+                feature="HRIS Calendar",
+                message="Calendar membutuhkan add-on Calendar aktif atau paket HRIS Enterprise.",
+            )
 
     @bp.route("/", methods=["GET"])
     def overview():
@@ -13074,6 +14037,11 @@ def admin_bp() -> Blueprint:
         client_summaries = _client_operational_summary(today, user, clients=clients)
         alerts = _build_admin_alerts(today, client_id=client_scope)
         audit_logs = [] if client_scope else _fetch_audit_logs(5)
+        calendar_enabled = _calendar_feature_enabled(user)
+        calendar_schedule_summary = _calendar_today_schedule_summary() if calendar_enabled else {}
+        calendar_tasks_summary = _calendar_today_tasks_summary() if calendar_enabled else {}
+        calendar_upcoming_events = _calendar_upcoming_events(days_ahead=7) if calendar_enabled else []
+        calendar_alerts = _calendar_alerts() if calendar_enabled else []
         return render_template(
             "dashboard/admin_overview.html",
             user=user,
@@ -13082,6 +14050,11 @@ def admin_bp() -> Blueprint:
             alerts=alerts,
             kpi_cards=kpi_cards,
             audit_logs=audit_logs,
+            calendar_schedule_summary=calendar_schedule_summary,
+            calendar_tasks_summary=calendar_tasks_summary,
+            calendar_upcoming_events=calendar_upcoming_events,
+            calendar_alerts=calendar_alerts,
+            calendar_enabled=calendar_enabled,
         )
 
     @bp.route("/calendar", methods=["GET"])
@@ -13272,174 +14245,26 @@ def admin_bp() -> Blueprint:
         flash("Task dihapus.")
         return _calendar_redirect(selected)
 
-def _detect_schedule_overlap(
-    employee_id: int,
-    schedule_date: str,
-    start_time: str,
-    end_time: str,
-    exclude_schedule_id: int | None = None,
-) -> list[dict]:
-    """Detect overlapping schedules for the same employee on the same or adjacent day.
-    Returns list of conflicting schedules.
-    """
-    conn = _db_connect()
-    try:
-        if not _table_exists(conn, "employee_schedules"):
-            return []
-        
-        # Determine if this is an overnight shift (start_time > end_time)
-        is_overnight = start_time > end_time
-        
-        # Query for overlaps on the same date
-        sql = """
-        SELECT id, employee_id, schedule_date, start_time, end_time, shift_name, status
-        FROM employee_schedules
-        WHERE employee_id = ? AND schedule_date = ? AND status != 'cancelled'
-        """
-        params = [employee_id, schedule_date]
-        
-        if exclude_schedule_id:
-            sql += " AND id != ?"
-            params.append(exclude_schedule_id)
-        
-        cur = conn.execute(sql, params)
-        same_day_schedules = [dict(row) for row in cur.fetchall()]
-        
-        # Check for overlaps
-        overlaps = []
-        for sched in same_day_schedules:
-            sched_start = sched.get("start_time", "")
-            sched_end = sched.get("end_time", "")
-            
-            if _times_overlap(start_time, end_time, sched_start, sched_end, is_overnight):
-+                overlaps.append(sched)
-+        
-+        return overlaps
-+    finally:
-+        conn.close()
-+
-+
-+def _times_overlap(start1: str, end1: str, start2: str, end2: str, is_overnight1: bool = False) -> bool:
-+    """Check if two time ranges overlap. Handle overnight shifts."""
-+    try:
-+        s1 = datetime.strptime(start1, "%H:%M").time()
-+        e1 = datetime.strptime(end1, "%H:%M").time()
-+        s2 = datetime.strptime(start2, "%H:%M").time()
-+        e2 = datetime.strptime(end2, "%H:%M").time()
-+        
-+        # For overnight shifts (start > end), treat as spanning midnight
-+        if is_overnight1:
-+            return (s2 >= s1 or s2 < e1 or e2 >= s1 or e2 < e1)
-+        
-+        # Check if second is also overnight
-+        is_overnight2 = s2 > e2
-+        if is_overnight2:
-+            return (s1 >= s2 or s1 < e2 or e1 >= s2 or e1 < e2)
-+        
-+        # Normal overlap check
-+        return not (e1 <= s2 or e2 <= s1)
-+    except (ValueError, TypeError):
-+        return False
-+
-+
-+def _get_employee_attendance_status(
-+    employee_id: int,
-+    schedule_date: str,
-+    start_time: str,
-+    end_time: str,
-+) -> dict:
-+    """Get attendance status for employee on given schedule date/time.
-+    Compares actual attendance with scheduled shift.
-+    """
-+    conn = _db_connect()
-+    try:
-+        if not _table_exists(conn, "attendance"):
-+            return {
-+                "status": "no_schedule",
-+                "checkin_time": None,
-+                "checkout_time": None,
-+                "notes": "Attendance table not found",
-+            }
-+        
-+        # Get attendance record for this employee on this date
-+        cur = conn.execute(
-+            """
-+            SELECT check_in, check_out
-+            FROM attendance
-+            WHERE employee_id = ? AND date(created_at) = ?
-+            ORDER BY created_at DESC
-+            LIMIT 1
-+            """,
-+            (employee_id, schedule_date),
-+        )
-+        att_row = cur.fetchone()
-+        
-+        if not att_row:
-+            return {
-+                "status": "absent",
-+                "checkin_time": None,
-+                "checkout_time": None,
-+                "notes": "No attendance recorded",
-+            }
-+        
-+        checkin = att_row.get("check_in")
-+        checkout = att_row.get("check_out")
-+        
-+        if not checkin:
-+            return {
-+                "status": "absent",
-+                "checkin_time": None,
-+                "checkout_time": checkout,
-+                "notes": "No check-in recorded",
-+            }
-+        
-+        try:
-+            checkin_dt = datetime.fromisoformat(checkin)
-+            checkin_time = checkin_dt.strftime("%H:%M")
-+            scheduled_start = datetime.strptime(start_time, "%H:%M").time()
-+            checkin_t = checkin_dt.time()
-+            
-+            if checkin_t <= scheduled_start:
-+                status = "on_time"
-+            else:
-+                status = "late"
-+            
-+            if checkout:
-+                checkout_dt = datetime.fromisoformat(checkout)
-+                checkout_time = checkout_dt.strftime("%H:%M")
-+                try:
-+                    scheduled_end = datetime.strptime(end_time, "%H:%M").time()
-+                    if checkout_dt.time() < scheduled_end:
-+                        status = "early_leave"
-+                except ValueError:
-+                    pass
-+            else:
-+                checkout_time = None
-+            
-+            return {
-+                "status": status,
-+                "checkin_time": checkin_time,
-+                "checkout_time": checkout_time,
-+                "notes": None,
-+            }
-+        except (ValueError, TypeError) as e:
-+            return {
-+                "status": "no_schedule",
-+                "checkin_time": None,
-+                "checkout_time": None,
-+                "notes": f"Error parsing time: {str(e)}",
-+            }
-+    finally:
-+        conn.close()
-+
-+
-+    @bp.route("/calendar/schedules/create", methods=["POST"])
-+    def calendar_schedules_create():
-+        user = _current_user()
-+        payload, error = _calendar_schedule_payload(request.form)
-+        if error:
-+            flash(error)
-+            return _calendar_redirect(request.form.get("schedule_date"))
+    @bp.route("/calendar/schedules/create", methods=["POST"])
+    def calendar_schedules_create():
+        user = _current_user()
+        payload, error = _calendar_schedule_payload(request.form)
+        if error:
+            flash(error)
+            return _calendar_redirect(request.form.get("schedule_date"))
+        overlaps = _detect_schedule_overlap(
+            payload["employee_id"],
+            payload["schedule_date"],
+            payload["start_time"],
+            payload["end_time"],
+        )
+        if overlaps and request.form.get("confirm_conflict") != "yes":
+            conflict_msg = "Jadwal bentrok dengan schedule lain: "
+            for overlap in overlaps:
+                conflict_msg += f"{overlap.get('shift_name', 'Unknown')} ({overlap.get('start_time', '')}-{overlap.get('end_time', '')}). "
+            conflict_msg += "Kirim ulang dengan confirm_conflict=yes untuk override."
+            flash(conflict_msg, "warning")
+            return _calendar_redirect(payload["schedule_date"])
         conn = _db_connect()
         try:
             conn.execute(
@@ -13463,6 +14288,26 @@ def _detect_schedule_overlap(
         flash("Schedule ditambahkan.")
         return _calendar_redirect(payload["schedule_date"])
 
+    @bp.route("/calendar/schedules/bulk-create", methods=["POST"])
+    def calendar_schedules_bulk_create():
+        user = _current_user()
+        result, error = _calendar_bulk_create_schedules(request.form, user.id)
+        selected = request.form.get("start_date") or request.form.get("schedule_date")
+        if error:
+            flash(error, "error")
+            return _calendar_redirect(selected)
+        if result.get("conflicts") and request.form.get("confirm_conflict") != "yes":
+            flash(
+                f"{len(result['conflicts'])} jadwal bentrok dilewati. Kirim ulang dengan confirm_conflict=yes untuk override.",
+                "warning",
+            )
+        duplicate_count = len(result.get("duplicates") or [])
+        flash(
+            f"Bulk schedule selesai: {result.get('created', 0)} dibuat, {duplicate_count} duplikat dilewati.",
+            "success",
+        )
+        return _calendar_redirect(selected)
+
     @bp.route("/calendar/schedules/<int:item_id>/update", methods=["POST"])
     def calendar_schedules_update(item_id: int):
         payload, error = _calendar_schedule_payload(request.form)
@@ -13476,14 +14321,15 @@ def _detect_schedule_overlap(
             payload["schedule_date"],
             payload["start_time"],
             payload["end_time"],
+            exclude_schedule_id=item_id,
         )
         
         if overlaps and request.form.get("confirm_conflict") != "yes":
             # Show conflict warning
-            conflict_msg = "⚠️ Jadwal bentrok dengan schedule lain: "
+            conflict_msg = "Jadwal bentrok dengan schedule lain: "
             for overlap in overlaps:
                 conflict_msg += f"{overlap.get('shift_name', 'Unknown')} ({overlap.get('start_time', '')}-{overlap.get('end_time', '')}). "
-            conflict_msg += "Klik tombol save lagi untuk confirm override."
+            conflict_msg += "Kirim ulang dengan confirm_conflict=yes untuk override."
             flash(conflict_msg, "warning")
             return _calendar_redirect(payload["schedule_date"])
         
@@ -14684,6 +15530,9 @@ def _detect_schedule_overlap(
             "dashboard/admin_reports.html",
             user=user,
             advanced_reporting_enabled=True,
+            clients=_clients(),
+            sites=_list_sites(),
+            employees=_list_employee_users(),
         )
 
     @bp.route("/guard-tour", methods=["GET"])

@@ -4,6 +4,36 @@
 {% set subtitle = "Attendance and performance reports" %}
 
 {% block body %}
+<div class="card" style="margin-bottom:16px;">
+  <div class="card-header-actions">
+    <div>
+      <h3>HRIS Calendar Reports</h3>
+      <p class="muted" style="margin:4px 0 0;">Schedule vs attendance, task completion, workload, site coverage, late/absent by schedule.</p>
+    </div>
+    <button class="btn secondary" id="btnCalendarReportExport" type="button">Export Excel CSV</button>
+  </div>
+  <div class="form-grid" style="margin-top:12px;">
+    <div class="form-row"><label class="label">Report</label><select class="input" id="calendarReportType">
+      <option value="schedule_attendance">Schedule vs Attendance</option>
+      <option value="task_completion">Task Completion</option>
+      <option value="workload">Employee Workload</option>
+      <option value="coverage">Client Site Coverage</option>
+      <option value="late_absent">Late/Absent by Schedule</option>
+    </select></div>
+    <div class="form-row"><label class="label">Tanggal</label><div class="form-inline"><input class="input" type="date" id="calendarReportStart"><input class="input" type="date" id="calendarReportEnd"></div></div>
+    <div class="form-row"><label class="label">Client</label><select class="input" id="calendarReportClient"><option value="">Semua client</option>{% for client in clients %}<option value="{{ client.id }}">{{ client.name }}</option>{% endfor %}</select></div>
+    <div class="form-row"><label class="label">Site</label><select class="input" id="calendarReportSite"><option value="">Semua site</option>{% for site in sites %}<option value="{{ site.id }}">{{ site.client_name or '-' }} - {{ site.name }}</option>{% endfor %}</select></div>
+    <div class="form-row"><label class="label">Employee</label><select class="input" id="calendarReportEmployee"><option value="">Semua employee</option>{% for employee in employees %}<option value="{{ employee.id }}">{{ employee.name or employee.email }}</option>{% endfor %}</select></div>
+    <div class="form-row"><label class="label">&nbsp;</label><button class="btn primary" id="btnCalendarReportGenerate" type="button">Generate Calendar Report</button></div>
+  </div>
+  <div class="table-wrap" style="margin-top:12px;">
+    <table class="table" aria-label="Calendar HRIS report">
+      <thead id="calendarReportHead"><tr><th>Report</th></tr></thead>
+      <tbody id="calendarReportRows"><tr><td class="muted">Generate report untuk melihat data.</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
 <div class="card">
   <div class="card-header">
     <div class="card-header-actions">
@@ -393,6 +423,14 @@
     absent: []
   };
   const advancedReportingEnabled = {{ advanced_reporting_enabled|default(false)|tojson }};
+  let currentCalendarReport = [];
+  const calendarReportLabels = {
+    schedule_attendance: ['date','employee_name','employee_email','client_name','site_name','shift_name','scheduled_start','scheduled_end','attendance_status','checkin_time','checkout_time','late_minutes'],
+    task_completion: ['due_date','title','employee_name','employee_email','client_name','site_name','priority','status'],
+    workload: ['employee_name','employee_email','scheduled_days','late_days','absent_days','tasks_total','tasks_done','urgent_open'],
+    coverage: ['client_name','site_name','schedule_count','unique_employees','present','late','absent'],
+    late_absent: ['date','employee_name','employee_email','client_name','site_name','shift_name','attendance_status','checkin_time','late_minutes']
+  };
   
   // Initialize date inputs
   function initializeDateInputs() {
@@ -402,6 +440,58 @@
     
     document.getElementById('startDate').value = firstDay.toISOString().split('T')[0];
     document.getElementById('endDate').value = lastDay.toISOString().split('T')[0];
+    document.getElementById('calendarReportStart').value = firstDay.toISOString().split('T')[0];
+    document.getElementById('calendarReportEnd').value = lastDay.toISOString().split('T')[0];
+  }
+
+  function calendarReportParams() {
+    const params = new URLSearchParams({
+      report_type: document.getElementById('calendarReportType').value,
+      start_date: document.getElementById('calendarReportStart').value,
+      end_date: document.getElementById('calendarReportEnd').value
+    });
+    const clientId = document.getElementById('calendarReportClient').value;
+    const siteId = document.getElementById('calendarReportSite').value;
+    const employeeId = document.getElementById('calendarReportEmployee').value;
+    if (clientId && !siteId) params.append('client_id', clientId);
+    if (siteId) params.append('site_id', siteId);
+    if (employeeId) params.append('employee_id', employeeId);
+    return params;
+  }
+
+  function generateCalendarReport() {
+    const tbody = document.getElementById('calendarReportRows');
+    tbody.innerHTML = '<tr><td class="muted"><span class="spinner"></span> Loading...</td></tr>';
+    return fetch(`/api/reports/calendar?${calendarReportParams()}`)
+      .then(r => r.json())
+      .then(response => {
+        if (!response.ok) throw new Error(response.message || 'Failed to generate calendar report');
+        currentCalendarReport = response.data || [];
+        renderCalendarReport(response.report_type, currentCalendarReport);
+      })
+      .catch((error) => {
+        currentCalendarReport = [];
+        tbody.innerHTML = `<tr><td class="muted">${error.message || 'Failed to generate calendar report'}</td></tr>`;
+      });
+  }
+
+  function renderCalendarReport(reportType, rows) {
+    const keys = calendarReportLabels[reportType] || Object.keys((rows || [])[0] || {});
+    const head = document.getElementById('calendarReportHead');
+    const body = document.getElementById('calendarReportRows');
+    head.innerHTML = `<tr>${keys.map(key => `<th>${key.replaceAll('_', ' ')}</th>`).join('')}</tr>`;
+    if (!rows || rows.length === 0) {
+      body.innerHTML = `<tr><td colspan="${keys.length}" class="muted">Tidak ada data.</td></tr>`;
+      return;
+    }
+    body.innerHTML = rows.map(row => `
+      <tr>${keys.map(key => `<td>${row[key] ?? '-'}</td>`).join('')}</tr>
+    `).join('');
+  }
+
+  function exportCalendarReport() {
+    const params = calendarReportParams();
+    window.open(`/api/reports/calendar/export?${params.toString()}`, '_blank');
   }
   
   // Load clients
@@ -742,6 +832,8 @@
     
     // Generate reports button
     document.getElementById('btnGenerateReports').addEventListener('click', generateReports);
+    document.getElementById('btnCalendarReportGenerate').addEventListener('click', generateCalendarReport);
+    document.getElementById('btnCalendarReportExport').addEventListener('click', exportCalendarReport);
     
     // Export buttons
     document.getElementById('btnExportAttendance').addEventListener('click', exportAttendanceCSV);
@@ -749,6 +841,7 @@
     document.getElementById('btnExportAbsent').addEventListener('click', exportAbsentCSV);
     
     // Auto-generate on load
+    generateCalendarReport();
     generateReports();
   });
 })();
