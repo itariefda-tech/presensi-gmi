@@ -3272,7 +3272,7 @@ def create_app() -> Flask:
             return jsonify(ok=False, message="report_type tidak valid."), 400
         fmt = (request.args.get("format") or "csv").strip().lower()
         payload = _ai_analysis_payload(filters)
-        rows = _ai_report_rows(report_type, payload)
+        rows = _ai_report_rows(report_type, payload, request.args.get("employee_email"))
         filename_base = f"ai-analysis-{report_type}-{filters['start_date']}-{filters['end_date']}"
         _log_audit_event(
             "ai_analysis_export",
@@ -12837,6 +12837,12 @@ def _ai_employee_drilldowns(
             "site_name": row.get("site_name"),
             "shift_name": row.get("shift_name"),
         })
+    emails = [
+        (row.get("employee_email") or "").strip().lower()
+        for row in employee_rows
+        if (row.get("employee_email") or "").strip()
+    ]
+    alert_history = _ai_alert_history_for_emails(emails)
     drilldowns = {}
     for row in employee_rows:
         email = (row.get("employee_email") or "").strip().lower()
@@ -12853,8 +12859,43 @@ def _ai_employee_drilldowns(
             "absent_days": [item for item in timeline if item.get("status") == "absent"],
             "checkin_pattern": checkin_times[-10:],
             "score_history": [],
+            "alert_history": alert_history.get(email, []),
         }
     return drilldowns
+
+
+def _ai_alert_history_for_emails(emails: list[str]) -> dict[str, list[dict]]:
+    clean_emails = sorted({
+        (email or "").strip().lower()
+        for email in emails
+        if (email or "").strip()
+    })
+    if not clean_emails:
+        return {}
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "ai_analysis_alerts"):
+            return {}
+        placeholders = ",".join("?" for _ in clean_emails)
+        rows = conn.execute(
+            f"""
+            SELECT id, employee_email, alert_type, alert_level, title, description,
+                   metric_value, threshold_value, status, reviewed_at, created_at
+            FROM ai_analysis_alerts
+            WHERE lower(employee_email) IN ({placeholders})
+            ORDER BY created_at DESC
+            LIMIT 100
+            """,
+            tuple(clean_emails),
+        ).fetchall()
+    finally:
+        conn.close()
+    result: dict[str, list[dict]] = {email: [] for email in clean_emails}
+    for row in rows:
+        item = dict(row)
+        email = (item.get("employee_email") or "").strip().lower()
+        result.setdefault(email, []).append(item)
+    return result
 
 
 def _ai_previous_period(filters: dict) -> dict:
@@ -13374,6 +13415,7 @@ def _review_ai_alert(alert_id: int, user: User | None) -> bool:
 
 def _save_ai_analysis_snapshot(filters: dict, payload: dict, user_id: int | None) -> int:
     snapshot_id = 0
+    now = _now_ts()
     conn = _db_connect()
     try:
         _ensure_ai_analysis_tables(conn)
@@ -13398,11 +13440,58 @@ def _save_ai_analysis_snapshot(filters: dict, payload: dict, user_id: int | None
                 json.dumps(payload.get("alerts", []), ensure_ascii=True),
                 payload.get("rule_version") or AI_ANALYSIS_RULE_VERSION,
                 user_id,
-                _now_ts(),
-                _now_ts(),
+                now,
+                now,
             ),
         )
         snapshot_id = int(cur.lastrowid)
+        for row in payload.get("employee_analysis", []):
+            employee = _get_user_by_email((row.get("employee_email") or "").strip().lower())
+            employee_recommendations = row.get("recommendations") or []
+            conn.execute(
+                """
+                INSERT INTO ai_analysis_snapshots (
+                    analysis_date, range_start, range_end, client_id, site_id,
+                    summary_json, insights_json, risks_json, recommendations_json,
+                    alerts_json, rule_version, created_by, created_at, updated_at,
+                    employee_id, total_work_days, present_days, late_days, absent_days,
+                    total_late_minutes, early_leave_days, missing_checkout_days,
+                    attendance_rate, absence_rate, discipline_score, grade, risk_level,
+                    insight_text, recommendation_text
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    _today_key(),
+                    filters["start_date"],
+                    filters["end_date"],
+                    filters.get("client_id"),
+                    filters.get("site_id"),
+                    json.dumps(payload.get("summary", {}), ensure_ascii=True),
+                    json.dumps([row.get("insight")], ensure_ascii=True),
+                    json.dumps([], ensure_ascii=True),
+                    json.dumps(employee_recommendations, ensure_ascii=True),
+                    json.dumps([], ensure_ascii=True),
+                    payload.get("rule_version") or AI_ANALYSIS_RULE_VERSION,
+                    user_id,
+                    now,
+                    now,
+                    int(employee["id"]) if employee else None,
+                    int(row.get("work_days") or 0),
+                    int(row.get("present_days") or 0),
+                    int(row.get("late_days") or 0),
+                    int(row.get("unexcused_absent_days") or 0),
+                    int(row.get("total_late_minutes") or 0),
+                    int(row.get("early_leave_days") or 0),
+                    int(row.get("missing_checkout_days") or 0),
+                    float(row.get("attendance_rate") or 0),
+                    float(row.get("absence_rate") or 0),
+                    float(row.get("discipline_score") or 0),
+                    row.get("discipline_grade"),
+                    row.get("discipline_category"),
+                    row.get("insight"),
+                    "\n".join(str(item) for item in employee_recommendations),
+                ),
+            )
         conn.commit()
     finally:
         conn.close()
@@ -13438,6 +13527,7 @@ def _ai_analysis_history(limit: int = 10) -> list[dict]:
             SELECT id, analysis_date, range_start, range_end, client_id, site_id,
                    summary_json, risks_json, created_at
             FROM ai_analysis_snapshots
+            WHERE employee_id IS NULL
             ORDER BY created_at DESC
             LIMIT ?
             """,
@@ -13612,7 +13702,8 @@ def _add_ai_case_note(case_id: int, note: str, user: User) -> bool:
     return True
 
 
-def _ai_report_rows(report_type: str, payload: dict) -> list[dict]:
+def _ai_report_rows(report_type: str, payload: dict, employee_email: str | None = None) -> list[dict]:
+    employee_email = (employee_email or "").strip().lower()
     if report_type == "discipline_ranking":
         return payload.get("ranking", [])
     if report_type == "frequent_late":
@@ -13628,6 +13719,11 @@ def _ai_report_rows(report_type: str, payload: dict) -> list[dict]:
         return payload.get("site_insights", [])
     if report_type == "monthly_summary":
         return [payload.get("summary", {})]
+    if report_type == "employee_individual" and employee_email:
+        return [
+            row for row in payload.get("employee_analysis", [])
+            if (row.get("employee_email") or "").strip().lower() == employee_email
+        ]
     return payload.get("employee_analysis", [])
 
 

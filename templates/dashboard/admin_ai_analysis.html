@@ -5,7 +5,7 @@
 
 {% block body %}
 <section class="ai-analysis-shell">
-  <div class="card">
+  <div class="card ai-filter-card">
     <div class="section-head">
       <div>
         <h3>AI Analysis</h3>
@@ -13,13 +13,13 @@
       </div>
       <button class="btn primary" type="button" id="aiRunSnapshot">Generate Snapshot</button>
     </div>
-    <div class="form-grid ai-analysis-filters">
+    <div class="form-grid ai-analysis-filters ai-compact-filters">
       <div class="form-row"><label class="label">Mulai</label><input class="input" type="date" id="aiStartDate" value="{{ default_start }}" /></div>
       <div class="form-row"><label class="label">Sampai</label><input class="input" type="date" id="aiEndDate" value="{{ default_end }}" /></div>
       <div class="form-row"><label class="label">Client</label><select class="input" id="aiClientId"><option value="">Semua client</option>{% for client in clients %}<option value="{{ client.id }}">{{ client.name }}</option>{% endfor %}</select></div>
-      <div class="form-row"><label class="label">Site</label><select class="input" id="aiSiteId"><option value="">Semua site</option>{% for site in sites %}<option value="{{ site.id }}">{{ site.client_name or '-' }} - {{ site.name }}</option>{% endfor %}</select></div>
+      <div class="form-row"><label class="label">Site</label><select class="input" id="aiSiteId"><option value="">Semua site</option>{% for site in sites %}<option value="{{ site.id }}" data-client-id="{{ site.client_id }}">{{ site.client_name or '-' }} - {{ site.name }}</option>{% endfor %}</select></div>
     </div>
-    <div class="btn-row">
+    <div class="btn-row ai-card-actions">
       <button class="btn secondary" type="button" id="aiLoadSummary">Preview Analysis</button>
     </div>
     <div class="alert info" id="aiAnalysisAlert" style="display:none;"></div>
@@ -29,17 +29,19 @@
   </div>
 
   <div class="ai-analysis-grid">
-    <article class="card">
+    <article class="card ai-config-card">
       <div class="section-head">
         <div>
           <h3>Threshold Configuration</h3>
           <p>Rule scoring dan alert bisa disesuaikan oleh HR/Admin.</p>
         </div>
-        <button class="btn secondary" type="button" id="aiSaveConfig">Simpan Config</button>
       </div>
       <div class="form-grid ai-config-grid" id="aiConfigGrid"></div>
+      <div class="btn-row ai-card-actions">
+        <button class="btn secondary" type="button" id="aiSaveConfig">Simpan Config</button>
+      </div>
     </article>
-    <article class="card">
+    <article class="card ai-export-card">
       <div class="section-head">
         <div>
           <h3>Reports & Export</h3>
@@ -61,7 +63,7 @@
           <option value="pdf">PDF</option>
         </select></div>
       </div>
-      <div class="btn-row">
+      <div class="btn-row ai-card-actions">
         <button class="btn primary" type="button" id="aiExportReport">Export Report</button>
       </div>
     </article>
@@ -364,6 +366,14 @@
     return query;
   }
 
+  function employeeExportParams(email){
+    const query = params();
+    query.append("report_type", "employee_individual");
+    query.append("format", document.getElementById("aiExportFormat").value || "csv");
+    query.append("employee_email", email);
+    return query;
+  }
+
   function severityClass(severity){
     return severity === "critical" ? "error" : (severity === "warning" ? "warning" : "info");
   }
@@ -426,6 +436,7 @@
     const detail = currentDrilldowns[email] || {};
     const employee = detail.employee || {};
     const timeline = detail.timeline || [];
+    const alertHistory = detail.alert_history || [];
     employeeDetail.innerHTML = `
       <div class="ai-kpi-grid">
         <div><strong>${escapeHtml(employee.discipline_score || 0)}</strong><span>Score</span></div>
@@ -445,6 +456,21 @@
       </div>
       <div class="btn-row">
         <button class="btn primary" type="button" data-ai-create-case="${escapeHtml(email)}">Create Follow-up Case</button>
+        <button class="btn secondary" type="button" data-ai-export-employee="${escapeHtml(email)}">Export Employee</button>
+      </div>
+      <div class="table-wrap">
+        <table class="table" aria-label="Employee alert history">
+          <thead><tr><th>Alert</th><th>Level</th><th>Status</th><th>Metric</th><th>Created</th></tr></thead>
+          <tbody>${alertHistory.length ? alertHistory.map((item) => `
+            <tr>
+              <td>${escapeHtml(item.title || item.alert_type || "-")}</td>
+              <td>${escapeHtml(item.alert_level || "-")}</td>
+              <td>${escapeHtml(item.status || "-")}</td>
+              <td>${escapeHtml(item.metric_value ?? "-")} / ${escapeHtml(item.threshold_value ?? "-")}</td>
+              <td>${escapeHtml(item.created_at || "-")}</td>
+            </tr>
+          `).join("") : '<tr><td colspan="5" class="muted">Belum ada alert history.</td></tr>'}</tbody>
+        </table>
       </div>
       <div class="table-wrap">
         <table class="table" aria-label="Employee attendance timeline">
@@ -699,6 +725,18 @@
   document.getElementById("aiExportReport")?.addEventListener("click", () => {
     window.open(`/api/admin/ai-analysis/export?${exportParams()}`, "_blank");
   });
+  document.getElementById("aiClientId")?.addEventListener("change", () => {
+    const clientId = document.getElementById("aiClientId").value;
+    const siteSelect = document.getElementById("aiSiteId");
+    Array.from(siteSelect.options).forEach((option) => {
+      if (!option.value){
+        option.hidden = false;
+        return;
+      }
+      option.hidden = Boolean(clientId) && option.dataset.clientId !== clientId;
+    });
+    if (siteSelect.selectedOptions[0]?.hidden) siteSelect.value = "";
+  });
   caseRows?.addEventListener("change", async (event) => {
     const select = event.target.closest("[data-ai-case-status]");
     if (!select) return;
@@ -730,8 +768,10 @@
     employeeModal.setAttribute("aria-hidden", "true");
   });
   employeeDetail?.addEventListener("click", (event) => {
-    const button = event.target.closest("[data-ai-create-case]");
-    if (button) createCase(button.dataset.aiCreateCase || "");
+    const caseButton = event.target.closest("[data-ai-create-case]");
+    if (caseButton) createCase(caseButton.dataset.aiCreateCase || "");
+    const exportButton = event.target.closest("[data-ai-export-employee]");
+    if (exportButton) window.open(`/api/admin/ai-analysis/export?${employeeExportParams(exportButton.dataset.aiExportEmployee || "")}`, "_blank");
   });
   loadConfig();
   loadCases();
