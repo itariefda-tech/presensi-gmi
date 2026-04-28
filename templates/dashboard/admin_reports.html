@@ -4,7 +4,7 @@
 {% set subtitle = "Attendance and performance reports" %}
 
 {% block body %}
-<div class="card" style="margin-bottom:16px;">
+<div class="card calendar-report-card" style="margin-bottom:16px;">
   <div class="card-header-actions">
     <div>
       <h3>HRIS Calendar Reports</h3>
@@ -12,19 +12,19 @@
     </div>
     <button class="btn secondary" id="btnCalendarReportExport" type="button">Export Excel CSV</button>
   </div>
-  <div class="form-grid" style="margin-top:12px;">
-    <div class="form-row"><label class="label">Report</label><select class="input" id="calendarReportType">
+  <div class="calendar-report-filters" style="margin-top:12px;">
+    <div class="calendar-report-field"><label class="label" for="calendarReportType">Report</label><select class="input" id="calendarReportType">
       <option value="schedule_attendance">Schedule vs Attendance</option>
       <option value="task_completion">Task Completion</option>
       <option value="workload">Employee Workload</option>
       <option value="coverage">Client Site Coverage</option>
       <option value="late_absent">Late/Absent by Schedule</option>
     </select></div>
-    <div class="form-row"><label class="label">Tanggal</label><div class="form-inline"><input class="input" type="date" id="calendarReportStart"><input class="input" type="date" id="calendarReportEnd"></div></div>
-    <div class="form-row"><label class="label">Client</label><select class="input" id="calendarReportClient"><option value="">Semua client</option>{% for client in clients %}<option value="{{ client.id }}">{{ client.name }}</option>{% endfor %}</select></div>
-    <div class="form-row"><label class="label">Site</label><select class="input" id="calendarReportSite"><option value="">Semua site</option>{% for site in sites %}<option value="{{ site.id }}">{{ site.client_name or '-' }} - {{ site.name }}</option>{% endfor %}</select></div>
-    <div class="form-row"><label class="label">Employee</label><select class="input" id="calendarReportEmployee"><option value="">Semua employee</option>{% for employee in employees %}<option value="{{ employee.id }}">{{ employee.name or employee.email }}</option>{% endfor %}</select></div>
-    <div class="form-row"><label class="label">&nbsp;</label><button class="btn primary" id="btnCalendarReportGenerate" type="button">Generate Calendar Report</button></div>
+    <div class="calendar-report-field calendar-report-field--dates"><label class="label" for="calendarReportStart">Tanggal</label><div class="calendar-date-range"><input class="input" type="date" id="calendarReportStart"><input class="input" type="date" id="calendarReportEnd"></div></div>
+    <div class="calendar-report-field"><label class="label" for="calendarReportClient">Client</label><select class="input" id="calendarReportClient"><option value="">Semua client</option>{% for client in clients %}<option value="{{ client.id }}">{{ client.name }}</option>{% endfor %}</select></div>
+    <div class="calendar-report-field"><label class="label" for="calendarReportSite">Site</label><select class="input" id="calendarReportSite"><option value="">Semua site</option>{% for site in sites %}<option value="{{ site.id }}">{{ site.client_name or '-' }} - {{ site.name }}</option>{% endfor %}</select></div>
+    <div class="calendar-report-field"><label class="label" for="calendarReportEmployee">Employee</label><select class="input" id="calendarReportEmployee"><option value="">Semua employee</option>{% for employee in employees %}<option value="{{ employee.id }}">{{ employee.name or employee.email }}</option>{% endfor %}</select></div>
+    <div class="calendar-report-field calendar-report-actions"><button class="btn primary" id="btnCalendarReportGenerate" type="button">Generate Calendar Report</button></div>
   </div>
   <div class="table-wrap" style="margin-top:12px;">
     <table class="table" aria-label="Calendar HRIS report">
@@ -224,6 +224,44 @@
   flex-wrap: wrap;
 }
 
+.calendar-report-card .card-header-actions {
+  align-items: flex-start;
+}
+
+.calendar-report-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+
+.calendar-report-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.calendar-report-field .input {
+  width: 100%;
+  min-width: 0;
+}
+
+.calendar-date-range {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.calendar-report-actions {
+  align-self: end;
+}
+
+.calendar-report-actions .btn {
+  width: 100%;
+  min-height: 42px;
+  justify-content: center;
+}
+
 .summary-cards {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -381,6 +419,14 @@
   .card-header-actions {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .calendar-report-filters {
+    grid-template-columns: 1fr;
+  }
+
+  .calendar-date-range {
+    grid-template-columns: 1fr;
   }
   
   .header-actions {

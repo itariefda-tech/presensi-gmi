@@ -292,7 +292,6 @@
 - [x] Tambahkan filter site
 - [x] Tambahkan filter employee
 - [x] Tambahkan export Excel
-- [ ] Tambahkan export PDF optional
 - [x] Pastikan report bisa dipakai untuk audit dan billing client
 
 ---
@@ -310,9 +309,9 @@
 - [x] Tambahkan modal add/edit
 - [x] Tambahkan filter
 - [x] Tambahkan role access
-- [ ] Integrasikan attendance
-- [ ] Tambahkan dashboard widgets
-- [ ] Tambahkan reminder
+- [x] Integrasikan attendance
+- [x] Tambahkan dashboard widgets
+- [x] Tambahkan reminder
 - [x] Tambahkan recurring schedule
 - [x] Tambahkan report
 
@@ -344,6 +343,6 @@
 - [x] Panel bawah menampilkan data tanggal terpilih
 - [x] Data bisa difilter
 - [x] Role access dasar berjalan
-- [ ] Jadwal employee bisa dihubungkan dengan presensi
+- [x] Jadwal employee bisa dihubungkan dengan attendance
 - [x] Tidak merusak fitur presensi existing
 - [x] Code mengikuti struktur dan style repo
