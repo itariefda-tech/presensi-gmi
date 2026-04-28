@@ -1213,6 +1213,175 @@
     patrolRenderStructure(patrolState.payload);
   }
 
+  function patrolOpsCategoryLabel(value){
+    const normalized = String(value || "").toLowerCase();
+    if (normalized === "gate") return "Gate Log";
+    if (normalized === "incident") return "Insiden";
+    if (normalized === "handover") return "Handover";
+    return "Catatan";
+  }
+
+  function patrolOpsBuildParams(format){
+    const params = new URLSearchParams();
+    const startInput = document.getElementById("clientPatrolOpsStart");
+    const endInput = document.getElementById("clientPatrolOpsEnd");
+    const categoryInput = document.getElementById("clientPatrolOpsCategory");
+    if (startInput?.value) params.set("date_start", startInput.value);
+    if (endInput?.value) params.set("date_end", endInput.value);
+    if (categoryInput?.value) params.set("category", categoryInput.value);
+    if (format) params.set("format", format);
+    return params;
+  }
+
+  function patrolOpsSetFeedback(message, tone = "muted"){
+    const feedback = document.getElementById("clientPatrolOpsFeedback");
+    if (!feedback) return;
+    feedback.textContent = message || "";
+    feedback.classList.remove("is-error", "is-success", "is-muted");
+    feedback.classList.add(`is-${tone}`);
+  }
+
+  function patrolOpsRenderReports(summary){
+    const categoryReport = document.getElementById("clientPatrolOpsCategoryReport");
+    const performanceReport = document.getElementById("clientPatrolOpsPerformanceReport");
+    const dailyReport = document.getElementById("clientPatrolOpsDailyReport");
+    const categories = summary?.category_counts || {};
+    if (categoryReport) {
+      categoryReport.innerHTML = ["activity", "gate", "incident", "handover"].map((key) => `
+        <div class="patrol-ops-mini-item">
+          <div class="patrol-ops-mini-top">
+            <strong>${escapeHtml(patrolOpsCategoryLabel(key))}</strong>
+            <span class="panel-badge">${Number(categories[key] || 0)}</span>
+          </div>
+        </div>
+      `).join("");
+    }
+    if (performanceReport) {
+      const performance = Array.isArray(summary?.performance) ? summary.performance : [];
+      performanceReport.innerHTML = performance.length ? performance.map((row) => {
+        const score = Number(row.score || 0);
+        return `
+          <div class="patrol-ops-mini-item">
+            <div class="patrol-ops-mini-top">
+              <strong>${escapeHtml(row.employee_name || row.employee_email || "-")}</strong>
+              <span class="panel-badge">${score}</span>
+            </div>
+            <div class="patrol-ops-meta">Total ${Number(row.total || 0)} - Incident ${Number(row.incident || 0)} - Open ${Number(row.open || 0)}</div>
+            <div class="patrol-ops-score-track"><span style="width:${Math.max(0, Math.min(100, score))}%"></span></div>
+          </div>
+        `;
+      }).join("") : '<div class="empty-state patrol-empty-state">Belum ada data performance.</div>';
+    }
+    if (dailyReport) {
+      const daily = Array.isArray(summary?.daily) ? summary.daily : [];
+      dailyReport.innerHTML = daily.length ? daily.map((row) => `
+        <div class="patrol-ops-mini-item">
+          <div class="patrol-ops-mini-top">
+            <strong>${escapeHtml(row.date || "-")}</strong>
+            <span class="panel-badge">${Number(row.total || 0)}</span>
+          </div>
+          <div class="patrol-ops-meta">Critical ${Number(row.critical || 0)} - Open ${Number(row.open || 0)} - Resolved ${Number(row.resolved || 0)}</div>
+        </div>
+      `).join("") : '<div class="empty-state patrol-empty-state">Belum ada tren harian.</div>';
+    }
+  }
+
+  function patrolOpsRender(payload){
+    const rows = Array.isArray(payload?.data) ? payload.data : [];
+    const summary = payload?.summary || {};
+    const countEl = document.getElementById("clientPatrolOpsCount");
+    const list = document.getElementById("clientPatrolOpsList");
+    const empty = document.getElementById("clientPatrolOpsEmpty");
+    const totalEl = document.getElementById("clientPatrolOpsTotal");
+    const criticalEl = document.getElementById("clientPatrolOpsCritical");
+    const openEl = document.getElementById("clientPatrolOpsOpen");
+    const resolvedEl = document.getElementById("clientPatrolOpsResolved");
+    if (countEl) countEl.textContent = `${rows.length} aktivitas`;
+    if (totalEl) totalEl.textContent = String(Number(summary.total || 0));
+    if (criticalEl) criticalEl.textContent = String(Number(summary.critical || 0));
+    if (openEl) openEl.textContent = String(Number(summary.open || 0));
+    if (resolvedEl) resolvedEl.textContent = String(Number(summary.resolved || 0));
+    patrolOpsRenderReports(summary);
+    if (!list || !empty) return;
+    if (!rows.length) {
+      list.innerHTML = "";
+      empty.classList.remove("is-hidden");
+      return;
+    }
+    empty.classList.add("is-hidden");
+    list.innerHTML = rows.map((row) => {
+      const photoPath = row.photo_path ? `/static/${String(row.photo_path).replace(/^\/+/, "")}` : "";
+      const hasLocation = row.lat !== null && row.lat !== undefined && row.lng !== null && row.lng !== undefined;
+      const mapUrl = hasLocation ? `https://www.google.com/maps?q=${encodeURIComponent(row.lat)},${encodeURIComponent(row.lng)}` : "";
+      const note = row.note || row.event_type || (Array.isArray(row.checklist) ? row.checklist.join(", ") : "") || "-";
+      const plate = row.vehicle_plate ? ` - ${row.vehicle_plate}` : "";
+      const severity = row.category === "incident" ? ` - ${String(row.severity || "warning").toUpperCase()}` : "";
+      const evidence = [
+        photoPath ? `<a class="btn secondary" href="${escapeHtml(photoPath)}" target="_blank" rel="noopener">Foto</a>` : "",
+        mapUrl ? `<a class="btn secondary" href="${escapeHtml(mapUrl)}" target="_blank" rel="noopener">Map</a>` : "",
+      ].filter(Boolean).join("");
+      const id = Number(row.id || 0);
+      return `
+        <article class="patrol-ops-item">
+          <div class="patrol-ops-top">
+            <div>
+              <div class="patrol-ops-title">${escapeHtml(patrolOpsCategoryLabel(row.category))}${escapeHtml(plate)}${escapeHtml(severity)}</div>
+              <div class="patrol-ops-meta">${escapeHtml(row.employee_name || row.employee_email || "-")} - ${patrolFormatDateTime(row.created_at)}</div>
+            </div>
+            <span class="patrol-ops-status is-${escapeHtml(row.status || "open")}">${escapeHtml(row.status || "open")}</span>
+          </div>
+          <div class="patrol-ops-body">${escapeHtml(note)}</div>
+          ${evidence ? `<div class="patrol-ops-evidence">${evidence}</div>` : ""}
+          <div class="patrol-ops-actions">
+            <input class="input" type="text" placeholder="Supervisor note" data-client-patrol-ops-input="${id}" value="${escapeHtml(row.supervisor_note || "")}" />
+            <button class="btn secondary" type="button" data-client-patrol-ops-action="reviewed" data-id="${id}">Review</button>
+            <button class="btn primary" type="button" data-client-patrol-ops-action="resolved" data-id="${id}">Resolve</button>
+          </div>
+        </article>
+      `;
+    }).join("");
+  }
+
+  async function patrolOpsLoad({ silent = false } = {}){
+    if (!document.getElementById("patrol-ops-report")) return;
+    if (!silent) patrolOpsSetFeedback("Memuat Patroli Ops...", "muted");
+    try {
+      const params = patrolOpsBuildParams("");
+      const suffix = params.toString() ? `?${params.toString()}` : "";
+      const response = await patrolApi(`/api/client/patrol_ops/events${suffix}`);
+      patrolOpsRender(response || {});
+      if (!silent) patrolOpsSetFeedback(`${(response.data || []).length} aktivitas ditampilkan.`, "success");
+    } catch (error) {
+      patrolOpsSetFeedback(error.message || "Gagal memuat Patroli Ops.", "error");
+      patrolOpsRender({ data: [], summary: {} });
+    }
+  }
+
+  async function patrolOpsUpdate(eventId, status){
+    const input = document.querySelector(`[data-client-patrol-ops-input="${eventId}"]`);
+    patrolOpsSetFeedback("Memperbarui aktivitas...", "muted");
+    try {
+      await patrolApi("/api/client/patrol_ops/events/update", {
+        method: "POST",
+        body: {
+          id: eventId,
+          status,
+          supervisor_note: input?.value || "",
+        },
+      });
+      await patrolOpsLoad({ silent: true });
+      patrolOpsSetFeedback("Status aktivitas diperbarui.", "success");
+    } catch (error) {
+      patrolOpsSetFeedback(error.message || "Gagal memperbarui aktivitas.", "error");
+    }
+  }
+
+  function patrolOpsExportCsv(){
+    const params = patrolOpsBuildParams("csv");
+    const suffix = params.toString() ? `?${params.toString()}` : "";
+    window.location.href = `/api/client/patrol_ops/events${suffix}`;
+  }
+
   function patrolToggleCheckpointEditor(checkpointId, shouldOpen){
     const list = document.getElementById("patrolCheckpointList");
     if (!list) return;
@@ -1236,6 +1405,7 @@
     try {
       const response = await patrolApi("/api/client/patrol/dashboard");
       patrolApplyPayload(response.data || {});
+      await patrolOpsLoad({ silent: true });
       if (!silent) {
         patrolSetFeedback("Data Guard Tour berhasil dimuat.", "success");
       }
@@ -1491,12 +1661,25 @@
     const checkpointPager = document.getElementById("patrolCheckpointPagination");
     const refreshBtn = document.getElementById("patrolRefreshBtn");
     const recapPager = document.getElementById("patrolRecapPagination");
+    const opsApplyBtn = document.getElementById("clientPatrolOpsApply");
+    const opsExportBtn = document.getElementById("clientPatrolOpsExport");
+    const opsList = document.getElementById("clientPatrolOpsList");
 
     if (refreshBtn) {
       refreshBtn.addEventListener("click", () => {
         patrolLoadDashboard({ silent: false });
       });
     }
+
+    opsApplyBtn?.addEventListener("click", () => patrolOpsLoad({ silent: false }));
+    opsExportBtn?.addEventListener("click", patrolOpsExportCsv);
+    opsList?.addEventListener("click", (event) => {
+      const button = event.target.closest("button[data-client-patrol-ops-action]");
+      if (!button) return;
+      const id = Number(button.dataset.id || 0);
+      if (!id) return;
+      patrolOpsUpdate(id, button.dataset.clientPatrolOpsAction || "reviewed");
+    });
 
     if (checkpointPager) {
       const prevBtn = checkpointPager.querySelector("[data-page='prev']");

@@ -1,0 +1,387 @@
+{% extends "dashboard/base.html" %}
+{% set active = "patroli_ops" %}
+{% set heading = "Patroli Notes & Report" %}
+{% set subtitle = "Catatan operasional lapangan terpisah dari Guard Tour" %}
+
+{% block body %}
+<section class="admin-patrol-ops-pane">
+  <article class="card">
+    <div class="card-header-actions">
+      <div>
+        <h3>Patroli Notes & Report</h3>
+        <div class="panel-sub">Catatan, gate log, insiden, dan handover dari pegawai site.</div>
+      </div>
+      <div class="header-actions">
+        <select id="patrolOpsSite" class="input" required aria-label="Site">
+          <option value="">Pilih Site</option>
+        </select>
+        <input type="date" id="patrolOpsStart" class="input" aria-label="Tanggal mulai" />
+        <input type="date" id="patrolOpsEnd" class="input" aria-label="Tanggal selesai" />
+        <select id="patrolOpsCategory" class="input" aria-label="Kategori">
+          <option value="">Semua aktivitas</option>
+          <option value="activity">Catatan</option>
+          <option value="gate">Gate Log</option>
+          <option value="incident">Insiden</option>
+          <option value="handover">Handover</option>
+        </select>
+        <button class="btn primary" type="button" id="patrolOpsApply">Filter</button>
+        <button class="btn secondary" type="button" id="patrolOpsExport">Export CSV</button>
+      </div>
+    </div>
+    <div class="alert info" id="patrolOpsAlert" style="display:none;"></div>
+  </article>
+
+  <div class="patrol-ops-kpis">
+    <article class="card patrol-ops-kpi"><span>Total</span><strong id="patrolOpsTotal">0</strong></article>
+    <article class="card patrol-ops-kpi"><span>Critical</span><strong id="patrolOpsCritical">0</strong></article>
+    <article class="card patrol-ops-kpi"><span>Open</span><strong id="patrolOpsOpen">0</strong></article>
+    <article class="card patrol-ops-kpi"><span>Resolved</span><strong id="patrolOpsResolved">0</strong></article>
+  </div>
+
+  <article class="card">
+    <div class="panel-head">
+      <div>
+        <h3>Live Activity</h3>
+        <div class="panel-sub">Validasi status tanpa masuk ke halaman Guard Tour.</div>
+      </div>
+      <span class="panel-badge muted" id="patrolOpsCount">0 aktivitas</span>
+    </div>
+    <div class="patrol-ops-list" id="patrolOpsList"></div>
+    <div class="empty-state patrol-empty-state" id="patrolOpsEmpty">Pilih site untuk menampilkan aktivitas patroli.</div>
+  </article>
+
+  <article class="card">
+    <div class="panel-head">
+      <div>
+        <h3>Report & Analytics</h3>
+        <div class="panel-sub">Ringkasan kategori, performa pegawai, dan tren harian dari aktivitas patroli ops.</div>
+      </div>
+    </div>
+    <div class="patrol-ops-report-grid">
+      <section>
+        <h4>Per Kategori</h4>
+        <div class="patrol-ops-mini-list" id="patrolOpsCategoryReport"></div>
+      </section>
+      <section>
+        <h4>Performance Pegawai</h4>
+        <div class="patrol-ops-mini-list" id="patrolOpsPerformanceReport"></div>
+      </section>
+      <section>
+        <h4>Tren Harian</h4>
+        <div class="patrol-ops-mini-list" id="patrolOpsDailyReport"></div>
+      </section>
+    </div>
+  </article>
+</section>
+
+<style>
+.admin-patrol-ops-pane,
+.patrol-ops-list {
+  display: grid;
+  gap: 1rem;
+}
+.card-header-actions,
+.header-actions,
+.panel-head,
+.patrol-ops-top,
+.patrol-ops-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.header-actions {
+  justify-content: flex-end;
+}
+.panel-sub,
+.empty-state,
+.patrol-ops-meta {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+.panel-badge,
+.patrol-ops-status {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.25rem 0.65rem;
+  font-size: 0.78rem;
+  font-weight: 800;
+  background: rgba(148, 163, 184, 0.16);
+  color: var(--muted);
+}
+.patrol-ops-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 1rem;
+}
+.patrol-ops-report-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+.patrol-ops-report-grid h4 {
+  margin: 0 0 0.75rem;
+}
+.patrol-ops-mini-list {
+  display: grid;
+  gap: 0.65rem;
+}
+.patrol-ops-mini-item {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem;
+  background: rgba(255, 255, 255, 0.04);
+}
+.patrol-ops-mini-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.patrol-ops-score-track {
+  height: 8px;
+  border-radius: 999px;
+  overflow: hidden;
+  margin-top: 0.5rem;
+  background: rgba(148, 163, 184, 0.22);
+}
+.patrol-ops-score-track span {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--accent2);
+}
+.patrol-ops-kpi span {
+  color: var(--muted);
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+.patrol-ops-kpi strong {
+  display: block;
+  font-size: 2rem;
+  margin-top: 0.25rem;
+}
+.patrol-ops-item {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.04);
+}
+.patrol-ops-title {
+  font-weight: 900;
+}
+.patrol-ops-body {
+  margin: 0.75rem 0;
+}
+.patrol-ops-evidence {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+}
+.patrol-ops-actions .input {
+  flex: 1;
+  min-width: 200px;
+}
+.patrol-ops-status.is-open {
+  color: #dc2626;
+  background: rgba(220, 38, 38, 0.14);
+}
+.patrol-ops-status.is-reviewed {
+  color: #b45309;
+  background: rgba(180, 83, 9, 0.14);
+}
+.patrol-ops-status.is-resolved {
+  color: #16a34a;
+  background: rgba(22, 163, 74, 0.14);
+}
+</style>
+
+<script>
+  (function(){
+    const siteSelect = document.getElementById("patrolOpsSite");
+    const startInput = document.getElementById("patrolOpsStart");
+    const endInput = document.getElementById("patrolOpsEnd");
+    const categoryInput = document.getElementById("patrolOpsCategory");
+    const applyButton = document.getElementById("patrolOpsApply");
+    const exportButton = document.getElementById("patrolOpsExport");
+    const alertEl = document.getElementById("patrolOpsAlert");
+    const listEl = document.getElementById("patrolOpsList");
+    const emptyEl = document.getElementById("patrolOpsEmpty");
+    const categoryReport = document.getElementById("patrolOpsCategoryReport");
+    const performanceReport = document.getElementById("patrolOpsPerformanceReport");
+    const dailyReport = document.getElementById("patrolOpsDailyReport");
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || "";
+
+    function escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
+    }
+    function setAlert(message) {
+      alertEl.textContent = message || "";
+      alertEl.style.display = message ? "block" : "none";
+    }
+    function formatDateTime(value) {
+      if (!value) return "-";
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? value : date.toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" });
+    }
+    function categoryLabel(value) {
+      return { activity: "Catatan", gate: "Gate Log", incident: "Insiden", handover: "Handover" }[value] || "Catatan";
+    }
+    function buildParams(format) {
+      if (!siteSelect.value) {
+        setAlert("Site wajib dipilih.");
+        return null;
+      }
+      const params = new URLSearchParams({ site_id: siteSelect.value });
+      if (startInput.value) params.set("date_start", startInput.value);
+      if (endInput.value) params.set("date_end", endInput.value);
+      if (categoryInput.value) params.set("category", categoryInput.value);
+      if (format) params.set("format", format);
+      return params;
+    }
+    async function loadSites() {
+      const response = await fetch("/api/sites", { credentials: "same-origin" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload.ok === false) throw new Error(payload.message || "Gagal memuat site.");
+      siteSelect.innerHTML = '<option value="">Pilih Site</option>';
+      (payload.data || []).forEach((site) => {
+        const option = document.createElement("option");
+        option.value = site.id;
+        option.textContent = site.name || `Site ${site.id}`;
+        siteSelect.appendChild(option);
+      });
+    }
+    async function postJson(url, body) {
+      const response = await fetch(url, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken },
+        body: JSON.stringify({ ...(body || {}), csrf_token: csrfToken }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload.ok === false) throw new Error(payload.message || "Permintaan gagal.");
+      return payload;
+    }
+    function render(payload) {
+      const rows = Array.isArray(payload.data) ? payload.data : [];
+      const summary = payload.summary || {};
+      document.getElementById("patrolOpsTotal").textContent = String(summary.total || 0);
+      document.getElementById("patrolOpsCritical").textContent = String(summary.critical || 0);
+      document.getElementById("patrolOpsOpen").textContent = String(summary.open || 0);
+      document.getElementById("patrolOpsResolved").textContent = String(summary.resolved || 0);
+      document.getElementById("patrolOpsCount").textContent = `${rows.length} aktivitas`;
+      renderReports(summary);
+      if (!rows.length) {
+        listEl.innerHTML = "";
+        emptyEl.style.display = "block";
+        return;
+      }
+      emptyEl.style.display = "none";
+      listEl.innerHTML = rows.map((row) => {
+        const photoPath = row.photo_path ? `/static/${String(row.photo_path).replace(/^\/+/, "")}` : "";
+        const hasLocation = row.lat !== null && row.lat !== undefined && row.lng !== null && row.lng !== undefined;
+        const mapUrl = hasLocation ? `https://www.google.com/maps?q=${encodeURIComponent(row.lat)},${encodeURIComponent(row.lng)}` : "";
+        const note = row.note || row.event_type || (Array.isArray(row.checklist) ? row.checklist.join(", ") : "") || "-";
+        const plate = row.vehicle_plate ? ` - ${row.vehicle_plate}` : "";
+        const severity = row.category === "incident" ? ` - ${String(row.severity || "warning").toUpperCase()}` : "";
+        const evidence = [
+          photoPath ? `<a class="btn secondary" href="${escapeHtml(photoPath)}" target="_blank" rel="noopener">Foto</a>` : "",
+          mapUrl ? `<a class="btn secondary" href="${escapeHtml(mapUrl)}" target="_blank" rel="noopener">Map</a>` : "",
+        ].filter(Boolean).join("");
+        return `
+          <article class="patrol-ops-item">
+            <div class="patrol-ops-top">
+              <div>
+                <div class="patrol-ops-title">${escapeHtml(categoryLabel(row.category))}${escapeHtml(plate)}${escapeHtml(severity)}</div>
+                <div class="patrol-ops-meta">${escapeHtml(row.employee_name || row.employee_email || "-")} - ${formatDateTime(row.created_at)}</div>
+              </div>
+              <span class="patrol-ops-status is-${escapeHtml(row.status || "open")}">${escapeHtml(row.status || "open")}</span>
+            </div>
+            <div class="patrol-ops-body">${escapeHtml(note)}</div>
+            ${evidence ? `<div class="patrol-ops-evidence">${evidence}</div>` : ""}
+            <div class="patrol-ops-actions">
+              <input class="input" type="text" placeholder="Supervisor note" data-note-input="${Number(row.id || 0)}" value="${escapeHtml(row.supervisor_note || "")}" />
+              <button class="btn secondary" type="button" data-action="reviewed" data-id="${Number(row.id || 0)}">Review</button>
+              <button class="btn primary" type="button" data-action="resolved" data-id="${Number(row.id || 0)}">Resolve</button>
+            </div>
+          </article>
+        `;
+      }).join("");
+    }
+    function renderReports(summary) {
+      const categories = summary.category_counts || {};
+      categoryReport.innerHTML = ["activity", "gate", "incident", "handover"].map((key) => `
+        <div class="patrol-ops-mini-item">
+          <div class="patrol-ops-mini-top">
+            <strong>${escapeHtml(categoryLabel(key))}</strong>
+            <span class="panel-badge">${Number(categories[key] || 0)}</span>
+          </div>
+        </div>
+      `).join("");
+      const performance = Array.isArray(summary.performance) ? summary.performance : [];
+      performanceReport.innerHTML = performance.length ? performance.map((row) => {
+        const score = Number(row.score || 0);
+        return `
+          <div class="patrol-ops-mini-item">
+            <div class="patrol-ops-mini-top">
+              <strong>${escapeHtml(row.employee_name || row.employee_email || "-")}</strong>
+              <span class="panel-badge">${score}</span>
+            </div>
+            <div class="patrol-ops-meta">Total ${Number(row.total || 0)} - Incident ${Number(row.incident || 0)} - Open ${Number(row.open || 0)}</div>
+            <div class="patrol-ops-score-track"><span style="width:${Math.max(0, Math.min(100, score))}%"></span></div>
+          </div>
+        `;
+      }).join("") : '<div class="empty-state">Belum ada data performance.</div>';
+      const daily = Array.isArray(summary.daily) ? summary.daily : [];
+      dailyReport.innerHTML = daily.length ? daily.map((row) => `
+        <div class="patrol-ops-mini-item">
+          <div class="patrol-ops-mini-top">
+            <strong>${escapeHtml(row.date || "-")}</strong>
+            <span class="panel-badge">${Number(row.total || 0)}</span>
+          </div>
+          <div class="patrol-ops-meta">Critical ${Number(row.critical || 0)} - Open ${Number(row.open || 0)} - Resolved ${Number(row.resolved || 0)}</div>
+        </div>
+      `).join("") : '<div class="empty-state">Belum ada tren harian.</div>';
+    }
+    async function loadEvents() {
+      const params = buildParams("");
+      if (!params) return;
+      setAlert("Memuat aktivitas patroli...");
+      try {
+        const response = await fetch(`/api/admin/patrol_ops/events?${params.toString()}`, { credentials: "same-origin" });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || payload.ok === false) throw new Error(payload.message || "Gagal memuat aktivitas.");
+        render(payload);
+        setAlert(`${(payload.data || []).length} aktivitas ditampilkan.`);
+      } catch (error) {
+        setAlert(error.message || "Gagal memuat aktivitas.");
+      }
+    }
+    function exportCsv() {
+      const params = buildParams("csv");
+      if (params) window.location.href = `/api/admin/patrol_ops/events?${params.toString()}`;
+    }
+    listEl.addEventListener("click", async (event) => {
+      const button = event.target.closest("button[data-action]");
+      if (!button) return;
+      const id = Number(button.dataset.id || 0);
+      const input = listEl.querySelector(`[data-note-input="${id}"]`);
+      try {
+        await postJson("/api/admin/patrol_ops/events/update", { id, status: button.dataset.action, supervisor_note: input?.value || "" });
+        await loadEvents();
+      } catch (error) {
+        setAlert(error.message || "Gagal memperbarui aktivitas.");
+      }
+    });
+    loadSites().catch((error) => setAlert(error.message));
+    applyButton.addEventListener("click", loadEvents);
+    exportButton.addEventListener("click", exportCsv);
+  })();
+</script>
+{% endblock %}

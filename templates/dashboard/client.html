@@ -949,6 +949,52 @@
               <div class="empty-state patrol-empty-state" id="patrolMonitoringEmpty">Belum ada sesi patroli aktif untuk hari ini.</div>
             </article>
 
+            <article class="panel patrol-ops-panel" id="patrol-ops-report">
+              <div class="panel-head">
+                <div>
+                  <h3>Patroli Ops Notes & Report</h3>
+                  <div class="panel-sub">Catatan, gate log, insiden, dan handover untuk site aktif: {{ site.name or '-' }}.</div>
+                </div>
+                <span class="panel-badge muted" id="clientPatrolOpsCount">0 aktivitas</span>
+              </div>
+              <div class="patrol-ops-filter">
+                <input class="input" type="date" id="clientPatrolOpsStart" aria-label="Tanggal mulai" />
+                <input class="input" type="date" id="clientPatrolOpsEnd" aria-label="Tanggal selesai" />
+                <select class="input" id="clientPatrolOpsCategory" aria-label="Kategori">
+                  <option value="">Semua aktivitas</option>
+                  <option value="activity">Catatan</option>
+                  <option value="gate">Gate Log</option>
+                  <option value="incident">Insiden</option>
+                  <option value="handover">Handover</option>
+                </select>
+                <button class="btn primary" type="button" id="clientPatrolOpsApply">Filter</button>
+                <button class="btn secondary" type="button" id="clientPatrolOpsExport">Export CSV</button>
+              </div>
+              <div class="patrol-ops-kpis">
+                <div class="patrol-ops-kpi"><span>Total</span><strong id="clientPatrolOpsTotal">0</strong></div>
+                <div class="patrol-ops-kpi"><span>Critical</span><strong id="clientPatrolOpsCritical">0</strong></div>
+                <div class="patrol-ops-kpi"><span>Open</span><strong id="clientPatrolOpsOpen">0</strong></div>
+                <div class="patrol-ops-kpi"><span>Resolved</span><strong id="clientPatrolOpsResolved">0</strong></div>
+              </div>
+              <div class="patrol-ops-report-grid">
+                <section>
+                  <h4>Per Kategori</h4>
+                  <div class="patrol-ops-mini-list" id="clientPatrolOpsCategoryReport"></div>
+                </section>
+                <section>
+                  <h4>Performance Pegawai</h4>
+                  <div class="patrol-ops-mini-list" id="clientPatrolOpsPerformanceReport"></div>
+                </section>
+                <section>
+                  <h4>Tren Harian</h4>
+                  <div class="patrol-ops-mini-list" id="clientPatrolOpsDailyReport"></div>
+                </section>
+              </div>
+              <div class="patrol-feedback" id="clientPatrolOpsFeedback"></div>
+              <div class="patrol-ops-list" id="clientPatrolOpsList"></div>
+              <div class="empty-state patrol-empty-state" id="clientPatrolOpsEmpty">Belum ada aktivitas Patroli Ops untuk filter ini.</div>
+            </article>
+
             <article class="panel patrol-recap-panel" id="patrol-recap">
               <div class="panel-head">
                 <div>

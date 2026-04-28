@@ -1876,7 +1876,7 @@ html[data-theme="dark"] .floating-nav{
   border-radius: 14px;
   cursor: pointer;
   min-height: 56px;
-  min-width: 80px;
+  min-width: 66px;
   text-align: center;
   transition: background .2s ease, transform .2s ease, border-color .2s ease;
   display: inline-flex;
@@ -1955,6 +1955,9 @@ html[data-theme="light"] .nav-btn.nav-logout{
 }
 
 .patrol-pane{
+  padding-bottom: 8px;
+}
+.patrol-ops-pane{
   padding-bottom: 8px;
 }
 .patrol-hero-card{
@@ -2218,6 +2221,46 @@ html[data-theme="light"] .nav-btn.nav-logout{
   border: 1px dashed rgba(148,163,184,.45);
   background: rgba(15,23,42,.35);
 }
+.patrol-note-form{
+  display: grid;
+  gap: 10px;
+}
+.patrol-ops-quick-actions{
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.patrol-note-grid{
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.patrol-handover-checklist{
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  font-size: 12px;
+  color: var(--text);
+}
+.patrol-handover-checklist label{
+  border: 1px solid rgba(148,163,184,.28);
+  border-radius: 8px;
+  padding: 8px;
+  background: rgba(15,23,42,.28);
+}
+.patrol-note-story{
+  border-left: 3px solid rgba(148,163,184,.55);
+}
+.patrol-note-story.severity-warning{
+  border-left-color: #f59e0b;
+}
+.patrol-note-story.severity-critical{
+  border-left-color: #ef4444;
+}
+.patrol-note-text{
+  font-size: 12px;
+  margin-top: 4px;
+}
 html[data-theme="light"] .patrol-hero-card{
   background:
     radial-gradient(circle at 90% -10%, rgba(14,116,204,.25), transparent 46%),
@@ -2248,5 +2291,18 @@ html[data-theme="light"] .patrol-progress-track{
   .patrol-quick-grid{
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+  .patrol-note-grid{
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .patrol-ops-quick-actions{
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
 }
 
+@media (max-width: 420px){
+  .patrol-note-grid,
+  .patrol-handover-checklist,
+  .patrol-ops-quick-actions{
+    grid-template-columns: 1fr;
+  }
+}

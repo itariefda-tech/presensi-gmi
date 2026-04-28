@@ -484,6 +484,79 @@
           </div>
 
         </section>
+
+        <section class="swipe-pane patrol-ops-pane" data-pane="4" aria-label="Patroli Notes dan Report">
+          <div class="card mobile-card patrol-note-card">
+            <div class="card-header">
+              <div>
+                <h4>Patroli Ops</h4>
+                <div class="muted">Catatan, gate log, insiden, dan handover</div>
+              </div>
+            </div>
+            <form class="patrol-note-form" id="patrolOpsForm">
+              <div class="patrol-ops-quick-actions">
+                <button class="btn secondary" type="button" data-patrol-ops-quick="activity">+ Catatan</button>
+                <button class="btn secondary" type="button" data-patrol-ops-quick="gate">Gate Log</button>
+                <button class="btn secondary" type="button" data-patrol-ops-quick="incident">Insiden</button>
+                <button class="btn secondary" type="button" data-patrol-ops-quick="handover">Handover</button>
+                <button class="btn danger" type="button" id="btnPatrolOpsEmergency">Emergency</button>
+              </div>
+              <div class="mode-chips patrol-note-type-chips" role="group" aria-label="Jenis aktivitas patroli">
+                <button class="chip active" type="button" data-note-category="activity" aria-pressed="true">Catatan</button>
+                <button class="chip" type="button" data-note-category="gate" aria-pressed="false">Gate</button>
+                <button class="chip" type="button" data-note-category="incident" aria-pressed="false">Insiden</button>
+                <button class="chip" type="button" data-note-category="handover" aria-pressed="false">Handover</button>
+              </div>
+              <input type="hidden" id="patrolOpsCategory" name="category" value="activity" />
+              <div class="patrol-note-grid">
+                <select class="input" id="patrolOpsEventType" name="event_type">
+                  <option value="">Jenis aktivitas</option>
+                  <option value="area_check">Area check</option>
+                  <option value="visitor">Visitor</option>
+                  <option value="delivery">Delivery</option>
+                  <option value="facility">Facility</option>
+                  <option value="security">Security</option>
+                </select>
+                <select class="input is-hidden" id="patrolOpsGateDirection" name="direction">
+                  <option value="">Arah gate</option>
+                  <option value="in">Masuk</option>
+                  <option value="out">Keluar</option>
+                </select>
+                <input class="input is-hidden" id="patrolOpsVehiclePlate" name="vehicle_plate" type="text" placeholder="Plat nomor" />
+                <input class="input is-hidden" id="patrolOpsVehicleType" name="vehicle_type" type="text" placeholder="Jenis kendaraan" />
+                <select class="input is-hidden" id="patrolOpsIncidentSeverity" name="severity">
+                  <option value="warning">Warning</option>
+                  <option value="critical">Critical</option>
+                  <option value="low">Low</option>
+                </select>
+              </div>
+              <textarea class="input" id="patrolOpsNote" name="note" rows="3" placeholder="Tulis catatan singkat"></textarea>
+              <div class="patrol-handover-checklist is-hidden" id="patrolOpsHandoverChecklist">
+                <label><input type="checkbox" value="Pintu aman" /> Pintu aman</label>
+                <label><input type="checkbox" value="CCTV normal" /> CCTV normal</label>
+                <label><input type="checkbox" value="Listrik normal" /> Listrik normal</label>
+              </div>
+              <input class="input" id="patrolOpsPhoto" name="photo" type="file" accept="image/*" capture="environment" />
+              <button class="btn primary full" id="btnPatrolOpsSubmit" type="submit">Kirim Aktivitas</button>
+            </form>
+            <div class="presence-toast patrol-toast" id="patrolOpsToast" role="status" aria-live="polite"></div>
+          </div>
+
+          <div class="card mobile-card card-collapsible" id="patrol-ops-history-card" data-collapsible>
+            <div class="card-header-collapsible">
+              <div>Timeline Patroli Ops</div>
+              <button class="collapse-toggle" type="button" data-collapse-toggle aria-expanded="true" aria-controls="patrol-ops-history-body">
+                <span class="icon-burger" aria-hidden="true"><span></span><span></span><span></span></span>
+                <span class="icon-minus" aria-hidden="true"></span>
+              </button>
+            </div>
+            <div class="card-body-collapsible" id="patrol-ops-history-body">
+              <div class="story-list" id="patrolOpsTimeline">
+                <div class="muted">Belum ada aktivitas patroli ops.</div>
+              </div>
+            </div>
+          </div>
+        </section>
       </div>
     </div>
 
@@ -522,6 +595,15 @@
             </svg>
           </span>
           <span class="nav-label" data-i18n="nav.patrol">Patroli</span>
+        </button>
+        <button class="nav-btn" data-tab="4" type="button">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none">
+              <path d="M5 4h14v16H5V4Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+              <path d="M8 8h8M8 12h5M8 16h7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+          </span>
+          <span class="nav-label">Ops</span>
         </button>
         <form method="post" action="{{ url_for('logout') }}">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
@@ -675,6 +757,8 @@
         const patroli_key = "gmi_page_patroli_enabled";
         const patroli_pane = document.querySelector('[data-pane="3"]');
         const patroli_nav_btn = document.querySelector('[data-tab="3"]');
+        const patroli_ops_pane = document.querySelector('[data-pane="4"]');
+        const patroli_ops_nav_btn = document.querySelector('[data-tab="4"]');
         const swipeTrack = document.getElementById("swipeTrack");
         
         function updatePatroliVisibility(enabled) {
@@ -684,10 +768,14 @@
             // Hide patroli pane
             patroli_pane.style.display = "none";
             patroli_nav_btn.style.display = "none";
+            if (patroli_ops_pane) patroli_ops_pane.style.display = "none";
+            if (patroli_ops_nav_btn) patroli_ops_nav_btn.style.display = "none";
           } else {
             // Show patroli pane
             patroli_pane.style.display = "";
             patroli_nav_btn.style.display = "";
+            if (patroli_ops_pane) patroli_ops_pane.style.display = "";
+            if (patroli_ops_nav_btn) patroli_ops_nav_btn.style.display = "";
           }
         }
         

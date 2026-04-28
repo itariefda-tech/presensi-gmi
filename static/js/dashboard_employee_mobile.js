@@ -148,6 +148,22 @@ const patrolGpsCoords = document.getElementById("patrolGpsCoords");
 const patrolSelfieFile = document.getElementById("patrolSelfieFile");
 const patrolSelfiePreview = document.getElementById("patrolSelfiePreview");
 const patrolSelfieHint = document.getElementById("patrolSelfieHint");
+const patrolOpsForm = document.getElementById("patrolOpsForm");
+const patrolOpsCategory = document.getElementById("patrolOpsCategory");
+const patrolOpsEventType = document.getElementById("patrolOpsEventType");
+const patrolOpsGateDirection = document.getElementById("patrolOpsGateDirection");
+const patrolOpsVehiclePlate = document.getElementById("patrolOpsVehiclePlate");
+const patrolOpsVehicleType = document.getElementById("patrolOpsVehicleType");
+const patrolOpsIncidentSeverity = document.getElementById("patrolOpsIncidentSeverity");
+const patrolOpsNote = document.getElementById("patrolOpsNote");
+const patrolOpsPhoto = document.getElementById("patrolOpsPhoto");
+const btnPatrolOpsSubmit = document.getElementById("btnPatrolOpsSubmit");
+const patrolOpsHandoverChecklist = document.getElementById("patrolOpsHandoverChecklist");
+const patrolOpsTimeline = document.getElementById("patrolOpsTimeline");
+const patrolOpsToast = document.getElementById("patrolOpsToast");
+const patrolOpsTypeChips = Array.from(document.querySelectorAll(".patrol-note-type-chips .chip"));
+const patrolOpsQuickButtons = Array.from(document.querySelectorAll("[data-patrol-ops-quick]"));
+const btnPatrolOpsEmergency = document.getElementById("btnPatrolOpsEmergency");
 
 let qrStream = null;
 let qrDetector = null;
@@ -174,6 +190,8 @@ let patrolGpsLng = "";
 let patrolGpsAccuracy = "";
 let patrolGpsDeviceTime = "";
 let patrolToastTimer = null;
+let patrolOpsToastTimer = null;
+let patrolOpsLoading = false;
 let patrolAutoRefreshTimer = null;
 let patrolCheckpointPage = 1;
 const PATROL_CHECKPOINT_PAGE_SIZE = 5;
@@ -577,6 +595,145 @@ async function loadDailyReport(){
 
 function showPatrolToast(type, message, opts = {}){
   showToast(type, message, { target: patrolToast, ...opts });
+}
+
+function showPatrolOpsToast(type, message, opts = {}){
+  showToast(type, message, { target: patrolOpsToast, ...opts });
+}
+
+function patrolOpsCategoryLabel(category){
+  const normalized = String(category || "").toLowerCase();
+  if (normalized === "gate") return "Gate Log";
+  if (normalized === "incident") return "Insiden";
+  if (normalized === "handover") return "Handover";
+  return "Catatan";
+}
+
+function patrolOpsStatusLabel(status){
+  const normalized = String(status || "").toLowerCase();
+  if (normalized === "reviewed") return "Reviewed";
+  if (normalized === "resolved") return "Resolved";
+  return "Open";
+}
+
+function setPatrolOpsCategory(category){
+  const normalized = ["activity", "gate", "incident", "handover"].includes(category)
+    ? category
+    : "activity";
+  if (patrolOpsCategory) patrolOpsCategory.value = normalized;
+  patrolOpsTypeChips.forEach((chip) => {
+    const active = chip.dataset.noteCategory === normalized;
+    chip.classList.toggle("active", active);
+    chip.setAttribute("aria-pressed", active ? "true" : "false");
+  });
+  patrolOpsGateDirection?.classList.toggle("is-hidden", normalized !== "gate");
+  patrolOpsVehiclePlate?.classList.toggle("is-hidden", normalized !== "gate");
+  patrolOpsVehicleType?.classList.toggle("is-hidden", normalized !== "gate");
+  patrolOpsIncidentSeverity?.classList.toggle("is-hidden", normalized !== "incident");
+  patrolOpsHandoverChecklist?.classList.toggle("is-hidden", normalized !== "handover");
+  patrolOpsEventType?.classList.toggle("is-hidden", normalized === "handover");
+  if (patrolOpsNote) {
+    const placeholders = {
+      activity: "Tulis catatan singkat",
+      gate: "Catatan kendaraan atau tamu",
+      incident: "Deskripsikan insiden",
+      handover: "Catatan tambahan serah terima",
+    };
+    patrolOpsNote.placeholder = placeholders[normalized] || placeholders.activity;
+  }
+}
+
+function focusPatrolOpsNote(){
+  if (patrolOpsNote) {
+    patrolOpsNote.focus({ preventScroll: true });
+  }
+}
+
+function renderPatrolOpsTimeline(rows){
+  if (!patrolOpsTimeline) return;
+  patrolOpsTimeline.innerHTML = "";
+  const items = Array.isArray(rows) ? rows : [];
+  if (!items.length) {
+    const empty = document.createElement("div");
+    empty.className = "muted";
+    empty.textContent = "Belum ada aktivitas patroli ops.";
+    patrolOpsTimeline.appendChild(empty);
+    return;
+  }
+  items.slice(0, 30).forEach((row) => {
+    const item = document.createElement("div");
+    item.className = `story-item patrol-note-story severity-${row.severity || "low"}`;
+    const top = document.createElement("div");
+    top.className = "story-row";
+    const label = document.createElement("span");
+    label.textContent = patrolOpsCategoryLabel(row.category);
+    const status = document.createElement("span");
+    status.className = `patrol-history-badge status-${row.status || "open"}`;
+    status.textContent = patrolOpsStatusLabel(row.status);
+    top.append(label, status);
+
+    const meta = document.createElement("div");
+    meta.className = "muted";
+    const gate = row.vehicle_plate ? ` - ${row.vehicle_plate}` : "";
+    const severity = row.category === "incident" ? ` - ${String(row.severity || "warning").toUpperCase()}` : "";
+    meta.textContent = `${formatPatrolDateTime(row.created_at)}${gate}${severity}`;
+
+    const note = document.createElement("div");
+    note.className = "patrol-note-text";
+    note.textContent = row.note || row.event_type || (Array.isArray(row.checklist) ? row.checklist.join(", ") : "") || "-";
+    item.append(top, meta, note);
+    patrolOpsTimeline.appendChild(item);
+  });
+}
+
+async function loadPatrolOpsTimeline(){
+  if (!patrolOpsTimeline || patrolOpsLoading) return;
+  patrolOpsLoading = true;
+  const result = await safeFetch("/api/patrol/ops/timeline");
+  patrolOpsLoading = false;
+  if (!result.ok) return;
+  renderPatrolOpsTimeline(result.data?.data || []);
+}
+
+async function submitPatrolOps(event){
+  event.preventDefault();
+  if (!patrolOpsForm) return;
+  const category = patrolOpsCategory?.value || "activity";
+  const formData = new FormData();
+  appendCsrf(formData);
+  formData.append("category", category);
+  formData.append("event_type", patrolOpsEventType?.value || "");
+  formData.append("direction", patrolOpsGateDirection?.value || "");
+  formData.append("vehicle_plate", patrolOpsVehiclePlate?.value || "");
+  formData.append("vehicle_type", patrolOpsVehicleType?.value || "");
+  formData.append("severity", patrolOpsIncidentSeverity?.value || "");
+  formData.append("note", patrolOpsNote?.value || "");
+  if (patrolGpsLat && patrolGpsLng) {
+    formData.append("lat", patrolGpsLat);
+    formData.append("lng", patrolGpsLng);
+  } else if (latEl?.value && lonEl?.value) {
+    formData.append("lat", latEl.value);
+    formData.append("lng", lonEl.value);
+  }
+  if (category === "handover") {
+    const checked = Array.from(patrolOpsHandoverChecklist?.querySelectorAll("input:checked") || [])
+      .map((input) => input.value);
+    formData.append("checklist", JSON.stringify(checked));
+  }
+  const photo = patrolOpsPhoto?.files?.[0];
+  if (photo) formData.append("photo", photo);
+  if (btnPatrolOpsSubmit) btnPatrolOpsSubmit.disabled = true;
+  const result = await safeFetch("/api/patrol/ops/create", {
+    method: "POST",
+    body: formData,
+  });
+  showPatrolOpsToast(result.ok ? "success" : "error", result.message || "Aktivitas diproses.");
+  if (result.ok) {
+    patrolOpsForm.reset();
+    setPatrolOpsCategory("activity");
+    await loadPatrolOpsTimeline();
+  }
+  if (btnPatrolOpsSubmit) btnPatrolOpsSubmit.disabled = false;
 }
 
 function patrolStatusClass(status){
@@ -1122,8 +1279,33 @@ function initPatrol(){
   }, 25000);
 }
 
+function initPatrolOps(){
+  patrolOpsTypeChips.forEach((chip) => {
+    chip.addEventListener("click", () => setPatrolOpsCategory(chip.dataset.noteCategory || "activity"));
+  });
+  patrolOpsQuickButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      setPatrolOpsCategory(button.dataset.patrolOpsQuick || "activity");
+      focusPatrolOpsNote();
+    });
+  });
+  btnPatrolOpsEmergency?.addEventListener("click", () => {
+    setPatrolOpsCategory("incident");
+    if (patrolOpsIncidentSeverity) patrolOpsIncidentSeverity.value = "critical";
+    if (patrolOpsEventType) patrolOpsEventType.value = "emergency";
+    if (patrolOpsNote && !patrolOpsNote.value.trim()) {
+      patrolOpsNote.value = "Emergency: ";
+    }
+    focusPatrolOpsNote();
+  });
+  patrolOpsForm?.addEventListener("submit", submitPatrolOps);
+  setPatrolOpsCategory(patrolOpsCategory?.value || "activity");
+  loadPatrolOpsTimeline();
+}
+
 function go(index){
-  const max = 3;
+  const paneCount = document.querySelectorAll(".swipe-pane").length;
+  const max = Math.max(0, paneCount - 1);
   swipeIndex = Math.max(0, Math.min(max, index));
   const offset = swipeIndex * 100;
   swipeTrack.style.transform = `translateX(-${offset}%)`;
@@ -1138,6 +1320,9 @@ function go(index){
   }
   if (swipeIndex === 3) {
     loadPatrolStatus({ silent: true });
+  }
+  if (swipeIndex === 4) {
+    loadPatrolOpsTimeline();
   }
 }
 
@@ -2076,6 +2261,7 @@ document.addEventListener("DOMContentLoaded", () => {
   loadMonthlySummary();
   loadDailyReport();
   initPatrol();
+  initPatrolOps();
 
   go(0);
   refreshLocationKpi();

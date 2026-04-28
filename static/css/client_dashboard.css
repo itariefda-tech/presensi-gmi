@@ -1520,6 +1520,135 @@ html[data-theme="light"] .nav-btn.active{
   gap: var(--card-gap);
 }
 
+.patrol-ops-filter{
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  align-items: end;
+}
+
+.patrol-ops-kpis,
+.patrol-ops-report-grid{
+  display: grid;
+  gap: 10px;
+}
+
+.patrol-ops-kpis{
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.patrol-ops-report-grid{
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.patrol-ops-kpi,
+.patrol-ops-item,
+.patrol-ops-mini-item{
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.36);
+  padding: 10px;
+}
+
+.patrol-ops-kpi span{
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.patrol-ops-kpi strong{
+  display: block;
+  font-size: 24px;
+  margin-top: 4px;
+}
+
+.patrol-ops-list,
+.patrol-ops-mini-list{
+  display: grid;
+  gap: 8px;
+}
+
+.patrol-ops-top,
+.patrol-ops-actions,
+.patrol-ops-mini-top{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.patrol-ops-title{
+  font-weight: 700;
+}
+
+.patrol-ops-meta,
+.patrol-ops-body{
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.patrol-ops-body{
+  color: var(--text);
+  margin: 8px 0;
+}
+
+.patrol-ops-evidence{
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.patrol-ops-actions .input{
+  flex: 1;
+  min-width: 180px;
+}
+
+.patrol-ops-status{
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  background: rgba(148, 163, 184, 0.18);
+  color: var(--muted);
+}
+
+.patrol-ops-status.is-open{
+  color: #fb7185;
+  background: rgba(251, 113, 133, 0.14);
+}
+
+.patrol-ops-status.is-reviewed{
+  color: var(--warning);
+  background: rgba(251, 191, 36, 0.14);
+}
+
+.patrol-ops-status.is-resolved{
+  color: var(--success);
+  background: rgba(34, 197, 94, 0.14);
+}
+
+.patrol-ops-score-track{
+  height: 8px;
+  border-radius: 999px;
+  overflow: hidden;
+  margin-top: 8px;
+  background: rgba(148, 163, 184, 0.22);
+}
+
+.patrol-ops-score-track span{
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--accent);
+}
+
 .patrol-hero-panel{
   background:
     radial-gradient(240px 140px at 12% 6%, rgba(34, 211, 238, 0.2), transparent 65%),

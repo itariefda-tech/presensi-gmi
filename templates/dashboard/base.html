@@ -126,6 +126,14 @@
           </span>
           <span class="nav-label" data-i18n="nav.guard_tour">Guard Tour</span>
         </a>
+        {% if permissions.get("view_patrol_ops") %}
+        <a href="{{ url_for('admin.patroli_ops') }}" class="{% if active == 'patroli_ops' %}active{% endif %}" title="Patroli Ops">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M5 4h14v16H5V4Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M8 8h8M8 12h5M8 16h7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          </span>
+          <span class="nav-label">Patroli Ops</span>
+        </a>
+        {% endif %}
         {% endif %}
         {% if permissions.get("view_payroll") %}
         <a href="{{ url_for('admin.payroll') }}" class="{% if active == 'payroll' %}active{% endif %}" title="Payroll" data-i18n-title="nav.payroll">

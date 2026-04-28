@@ -175,6 +175,7 @@ def create_app() -> Flask:
         permissions = _get_role_permissions(user.role)
         permissions["view_calendar"] = bool(permissions.get("view_calendar")) and _calendar_feature_enabled(user)
         permissions["view_ai_analysis"] = bool(permissions.get("view_ai_analysis")) and _ai_analysis_feature_enabled(user)
+        permissions["view_patrol_ops"] = bool(permissions.get("view_patrol")) and _patrol_ops_admin_enabled(user)
         return {"permissions": permissions}
 
     @app.context_processor
@@ -1100,6 +1101,205 @@ def create_app() -> Flask:
             can_manage=user.role == "client_admin",
         )
         return jsonify(ok=True, data=data), 200
+
+    @app.route("/api/patrol/ops/create", methods=["POST"])
+    def patrol_ops_create():
+        user = _current_user()
+        forbidden = _require_api_role(user, EMPLOYEE_ROLES)
+        if forbidden:
+            return forbidden
+        employee = _employee_by_email(user.email, only_active=False)
+        assignment = _get_active_assignment(user.id)
+        if not employee or not assignment:
+            return jsonify(ok=False, message="Pegawai belum memiliki assignment aktif."), 400
+        site = _get_site_by_id(_row_get(assignment, "site_id"))
+        if not site:
+            return jsonify(ok=False, message="Site aktif tidak ditemukan."), 400
+        addon_block = _require_client_addon(user, ADDON_PATROL_OPS, "Patroli Notes & Report", _row_get(site, "client_id"))
+        if addon_block:
+            return addon_block
+
+        data = request.form if request.form else _get_json()
+        category = _normalize_patrol_ops_category(data.get("category"))
+        if not category:
+            return jsonify(ok=False, message="Kategori patroli tidak valid."), 400
+        note = (data.get("note") or data.get("description") or "").strip()
+        event_type = (data.get("event_type") or data.get("type") or "").strip()
+        direction = (data.get("direction") or "").strip().lower()
+        vehicle_plate = (data.get("vehicle_plate") or "").strip().upper()
+        vehicle_type = (data.get("vehicle_type") or "").strip()
+        severity = _normalize_patrol_ops_severity(data.get("severity"), category)
+        checklist = _parse_patrol_ops_checklist(data.get("checklist"))
+        lat = _parse_optional_float(data.get("lat") or data.get("latitude"))
+        lng = _parse_optional_float(data.get("lng") or data.get("longitude"))
+        photo_path = ""
+        if "photo" in request.files and request.files["photo"].filename:
+            photo_path = _save_upload(request.files["photo"], "uploads/patrol_ops", 10 * 1024 * 1024)
+
+        if category == "activity" and not (event_type or note or photo_path):
+            return jsonify(ok=False, message="Catatan wajib berisi jenis aktivitas, catatan, atau foto."), 400
+        if category == "gate":
+            if direction not in {"in", "out"}:
+                return jsonify(ok=False, message="Gate log wajib memilih masuk atau keluar."), 400
+            if not vehicle_plate:
+                return jsonify(ok=False, message="Plat nomor wajib diisi."), 400
+        if category == "incident" and not note:
+            return jsonify(ok=False, message="Deskripsi insiden wajib diisi."), 400
+        if category == "handover" and not (checklist or note or photo_path):
+            return jsonify(ok=False, message="Handover wajib berisi checklist, catatan, atau foto."), 400
+
+        event_id = _insert_patrol_ops_event(
+            category=category,
+            event_type=event_type or category,
+            severity=severity,
+            direction=direction,
+            vehicle_plate=vehicle_plate,
+            vehicle_type=vehicle_type,
+            note=note,
+            checklist=checklist,
+            photo_path=photo_path,
+            lat=lat,
+            lng=lng,
+            user=user,
+            employee=employee,
+            assignment=assignment,
+            site=site,
+        )
+        if category == "incident" and severity == "critical":
+            _notify_patrol_ops_critical_incident(event_id, user, site, note)
+        return jsonify(ok=True, message="Aktivitas patroli tersimpan.", data={"id": event_id}), 200
+
+    @app.route("/api/patrol/ops/timeline", methods=["GET"])
+    def patrol_ops_timeline():
+        user = _current_user()
+        forbidden = _require_api_role(user, EMPLOYEE_ROLES)
+        if forbidden:
+            return forbidden
+        client = _client_for_user(user)
+        addon_block = _require_client_addon(user, ADDON_PATROL_OPS, "Patroli Notes & Report", _row_get(client, "id") if client else None)
+        if addon_block:
+            return addon_block
+        date_value = _normalize_date_input(request.args.get("date") or "") or _today_key()
+        rows = _patrol_ops_events(
+            employee_email=user.email,
+            date_from=date_value,
+            date_to=date_value,
+            limit=80,
+        )
+        return jsonify(ok=True, data=[_patrol_ops_event_payload(row) for row in rows]), 200
+
+    @app.route("/api/admin/patrol_ops/events", methods=["GET"])
+    def api_admin_patrol_ops_events():
+        user = _current_user()
+        forbidden = _require_api_role(user, ADMIN_ROLES)
+        if forbidden:
+            return forbidden
+        site_id_raw = (request.args.get("site_id") or "").strip()
+        if not site_id_raw.isdigit():
+            return jsonify(ok=False, message="site_id harus berupa angka."), 400
+        site_id = int(site_id_raw)
+        addon_block = _require_patrol_ops_admin_addon(user)
+        if addon_block:
+            return addon_block
+        if not _get_site_by_id(site_id):
+            return jsonify(ok=False, message="Site tidak ditemukan."), 404
+        date_from = _normalize_date_input(request.args.get("date_start") or "") or None
+        date_to = _normalize_date_input(request.args.get("date_end") or "") or None
+        category = _normalize_patrol_ops_category(request.args.get("category"))
+        output_format = (request.args.get("format") or "json").strip().lower()
+        rows = _patrol_ops_events(site_id=site_id, date_from=date_from, date_to=date_to, category=category, limit=1000)
+        payload_rows = [_patrol_ops_event_payload(row) for row in rows]
+        if output_format == "csv":
+            out = io.StringIO()
+            writer = csv.writer(out)
+            writer.writerow(["id", "created_at", "category", "severity", "status", "employee_name", "employee_email", "site_name", "event_type", "direction", "vehicle_plate", "vehicle_type", "note", "supervisor_note"])
+            for row in payload_rows:
+                writer.writerow([row["id"], row["created_at"], row["category"], row["severity"], row["status"], row["employee_name"], row["employee_email"], row["site_name"], row["event_type"], row["direction"], row["vehicle_plate"], row["vehicle_type"], row["note"], row["supervisor_note"]])
+            filename = f"patrol-ops-site-{site_id}-{datetime.now().strftime('%Y%m%d%H%M%S')}.csv"
+            response = Response(out.getvalue(), mimetype="text/csv; charset=utf-8")
+            response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+            return response
+        return jsonify(ok=True, data=payload_rows, summary=_patrol_ops_summary(payload_rows)), 200
+
+    @app.route("/api/admin/patrol_ops/events/update", methods=["POST"])
+    def api_admin_patrol_ops_events_update():
+        user = _current_user()
+        forbidden = _require_api_role(user, ADMIN_ROLES)
+        if forbidden:
+            return forbidden
+        addon_block = _require_patrol_ops_admin_addon(user)
+        if addon_block:
+            return addon_block
+        data = _get_json()
+        try:
+            event_id = int(data.get("id") or 0)
+        except (TypeError, ValueError):
+            return jsonify(ok=False, message="ID aktivitas tidak valid."), 400
+        status = _normalize_patrol_ops_status(data.get("status"))
+        supervisor_note = (data.get("supervisor_note") or "").strip()
+        if not status:
+            return jsonify(ok=False, message="Status validasi tidak valid."), 400
+        if not _patrol_ops_event_by_id(event_id):
+            return jsonify(ok=False, message="Aktivitas tidak ditemukan."), 404
+        _update_patrol_ops_event_status(event_id, status, supervisor_note, user)
+        updated = _patrol_ops_event_by_id(event_id)
+        return jsonify(ok=True, message="Status aktivitas diperbarui.", data=_patrol_ops_event_payload(updated)), 200
+
+    @app.route("/api/client/patrol_ops/events", methods=["GET"])
+    def client_patrol_ops_events():
+        user = _current_user()
+        _require_client_user(user)
+        client_id, site_id, _site, _client = _client_site_context(user)
+        addon_block = _require_client_addon(user, ADDON_PATROL_OPS, "Patroli Notes & Report", client_id)
+        if addon_block:
+            return addon_block
+        date_from = _normalize_date_input(request.args.get("date_start") or "") or None
+        date_to = _normalize_date_input(request.args.get("date_end") or "") or None
+        category = _normalize_patrol_ops_category(request.args.get("category"))
+        output_format = (request.args.get("format") or "json").strip().lower()
+        rows = _patrol_ops_events(
+            site_id=site_id,
+            date_from=date_from,
+            date_to=date_to,
+            category=category,
+            limit=1000,
+        )
+        payload_rows = [_patrol_ops_event_payload(row) for row in rows]
+        if output_format == "csv":
+            out = io.StringIO()
+            writer = csv.writer(out)
+            writer.writerow(["id", "created_at", "category", "severity", "status", "employee_name", "employee_email", "site_name", "event_type", "direction", "vehicle_plate", "vehicle_type", "note", "supervisor_note"])
+            for row in payload_rows:
+                writer.writerow([row["id"], row["created_at"], row["category"], row["severity"], row["status"], row["employee_name"], row["employee_email"], row["site_name"], row["event_type"], row["direction"], row["vehicle_plate"], row["vehicle_type"], row["note"], row["supervisor_note"]])
+            filename = f"client-patrol-ops-site-{site_id}-{datetime.now().strftime('%Y%m%d%H%M%S')}.csv"
+            response = Response(out.getvalue(), mimetype="text/csv; charset=utf-8")
+            response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+            return response
+        return jsonify(ok=True, data=payload_rows, summary=_patrol_ops_summary(payload_rows)), 200
+
+    @app.route("/api/client/patrol_ops/events/update", methods=["POST"])
+    def client_patrol_ops_events_update():
+        user = _current_user()
+        _require_client_user(user)
+        client_id, site_id, _site, _client = _client_site_context(user)
+        addon_block = _require_client_addon(user, ADDON_PATROL_OPS, "Patroli Notes & Report", client_id)
+        if addon_block:
+            return addon_block
+        data = _get_json()
+        try:
+            event_id = int(data.get("id") or 0)
+        except (TypeError, ValueError):
+            return jsonify(ok=False, message="ID aktivitas tidak valid."), 400
+        status = _normalize_patrol_ops_status(data.get("status"))
+        supervisor_note = (data.get("supervisor_note") or "").strip()
+        if not status:
+            return jsonify(ok=False, message="Status validasi tidak valid."), 400
+        row = _patrol_ops_event_by_id(event_id)
+        if not row or int(_row_get(row, "site_id") or 0) != site_id:
+            return jsonify(ok=False, message="Aktivitas tidak ditemukan untuk site ini."), 404
+        _update_patrol_ops_event_status(event_id, status, supervisor_note, user)
+        updated = _patrol_ops_event_by_id(event_id)
+        return jsonify(ok=True, message="Status aktivitas diperbarui.", data=_patrol_ops_event_payload(updated)), 200
 
     @app.route("/api/client/patrol/route", methods=["POST"])
     def client_patrol_route_save():
@@ -4110,6 +4310,7 @@ ADDON_REPORTING_ADVANCED = "reporting_advanced"
 ADDON_API_ACCESS = "api_access"
 ADDON_PAYROLL_PLUS = "payroll_plus"
 ADDON_AI = "ai"
+ADDON_PATROL_OPS = "patrol_ops"
 ADDON_ENTERPRISE_TIER = "enterprise_tier"
 ADDON_ALLOWED = {
     ADDON_PATROL,
@@ -4118,11 +4319,17 @@ ADDON_ALLOWED = {
     ADDON_API_ACCESS,
     ADDON_PAYROLL_PLUS,
     ADDON_AI,
+    ADDON_PATROL_OPS,
     ADDON_ENTERPRISE_TIER,
 }
 ADDON_FEATURE_ALIASES = {
     "patrol": ADDON_PATROL,
     "guard_tour": ADDON_PATROL,
+    "patrol_ops": ADDON_PATROL_OPS,
+    "patroli_ops": ADDON_PATROL_OPS,
+    "patrol_notes": ADDON_PATROL_OPS,
+    "patroli_notes": ADDON_PATROL_OPS,
+    "patrol_notes_report": ADDON_PATROL_OPS,
     "calendar": ADDON_CALENDAR,
     "calender": ADDON_CALENDAR,
     "hris_calendar": ADDON_CALENDAR,
@@ -4534,6 +4741,7 @@ def _permission_for_admin_endpoint(endpoint: str | None) -> str | None:
         "admin.policies_end": "manage_policies",
         "admin.attendance": "view_attendance",
         "admin.reports": "view_reports",
+        "admin.patroli_ops": "view_patrol",
         "admin.payroll": "view_payroll",
         "admin.approvals": "approve_requests",
         "admin.settings_registration_codes_create": "manage_settings_codes",
@@ -10228,6 +10436,42 @@ def _init_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS patrol_operational_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                client_id INTEGER,
+                site_id INTEGER NOT NULL,
+                assignment_id INTEGER,
+                employee_user_id INTEGER,
+                employee_id INTEGER,
+                employee_email TEXT NOT NULL,
+                employee_name TEXT,
+                category TEXT NOT NULL,
+                event_type TEXT,
+                severity TEXT DEFAULT 'low',
+                direction TEXT,
+                vehicle_plate TEXT,
+                vehicle_type TEXT,
+                note TEXT,
+                checklist_json TEXT,
+                photo_path TEXT,
+                lat REAL,
+                lng REAL,
+                status TEXT NOT NULL DEFAULT 'open',
+                supervisor_note TEXT,
+                reviewed_by_user_id INTEGER,
+                reviewed_by_email TEXT,
+                reviewed_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT,
+                FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE CASCADE,
+                FOREIGN KEY (assignment_id) REFERENCES assignments(id) ON DELETE SET NULL,
+                FOREIGN KEY (employee_user_id) REFERENCES users(id) ON DELETE SET NULL,
+                FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE SET NULL
+            )
+            """
+        )
         try:
             conn.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_patrol_checkpoint_sequence ON patrol_checkpoints(route_id, sequence_no)"
@@ -10248,6 +10492,12 @@ def _init_db() -> None:
         )
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_patrol_scans_validation ON patrol_scans(validation_status)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_patrol_ops_site_created ON patrol_operational_events(site_id, created_at)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_patrol_ops_employee_created ON patrol_operational_events(employee_email, created_at)"
         )
         conn.execute(
             """
@@ -10531,6 +10781,38 @@ def _init_db() -> None:
             )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_patrol_scans_validation ON patrol_scans(validation_status)"
+            )
+        if _table_exists(conn, "patrol_operational_events"):
+            _ensure_column(conn, "patrol_operational_events", "client_id", "client_id INTEGER")
+            _ensure_column(conn, "patrol_operational_events", "site_id", "site_id INTEGER")
+            _ensure_column(conn, "patrol_operational_events", "assignment_id", "assignment_id INTEGER")
+            _ensure_column(conn, "patrol_operational_events", "employee_user_id", "employee_user_id INTEGER")
+            _ensure_column(conn, "patrol_operational_events", "employee_id", "employee_id INTEGER")
+            _ensure_column(conn, "patrol_operational_events", "employee_email", "employee_email TEXT")
+            _ensure_column(conn, "patrol_operational_events", "employee_name", "employee_name TEXT")
+            _ensure_column(conn, "patrol_operational_events", "category", "category TEXT")
+            _ensure_column(conn, "patrol_operational_events", "event_type", "event_type TEXT")
+            _ensure_column(conn, "patrol_operational_events", "severity", "severity TEXT DEFAULT 'low'")
+            _ensure_column(conn, "patrol_operational_events", "direction", "direction TEXT")
+            _ensure_column(conn, "patrol_operational_events", "vehicle_plate", "vehicle_plate TEXT")
+            _ensure_column(conn, "patrol_operational_events", "vehicle_type", "vehicle_type TEXT")
+            _ensure_column(conn, "patrol_operational_events", "note", "note TEXT")
+            _ensure_column(conn, "patrol_operational_events", "checklist_json", "checklist_json TEXT")
+            _ensure_column(conn, "patrol_operational_events", "photo_path", "photo_path TEXT")
+            _ensure_column(conn, "patrol_operational_events", "lat", "lat REAL")
+            _ensure_column(conn, "patrol_operational_events", "lng", "lng REAL")
+            _ensure_column(conn, "patrol_operational_events", "status", "status TEXT NOT NULL DEFAULT 'open'")
+            _ensure_column(conn, "patrol_operational_events", "supervisor_note", "supervisor_note TEXT")
+            _ensure_column(conn, "patrol_operational_events", "reviewed_by_user_id", "reviewed_by_user_id INTEGER")
+            _ensure_column(conn, "patrol_operational_events", "reviewed_by_email", "reviewed_by_email TEXT")
+            _ensure_column(conn, "patrol_operational_events", "reviewed_at", "reviewed_at TEXT")
+            _ensure_column(conn, "patrol_operational_events", "created_at", "created_at TEXT")
+            _ensure_column(conn, "patrol_operational_events", "updated_at", "updated_at TEXT")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_patrol_ops_site_created ON patrol_operational_events(site_id, created_at)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_patrol_ops_employee_created ON patrol_operational_events(employee_email, created_at)"
             )
         if _table_exists(conn, "clients"):
             _ensure_column(conn, "clients", "is_active", "is_active INTEGER DEFAULT 1")
@@ -10962,7 +11244,10 @@ def has_addon(client: sqlite3.Row | dict | None, feature: str) -> bool:
     feature_key = _normalize_addon_key(feature)
     if not feature_key:
         return False
-    if feature_key in _global_addons():
+    active_global = _global_addons()
+    if feature_key in active_global:
+        return True
+    if ADDON_ENTERPRISE_TIER in active_global and feature_key in {ADDON_PATROL, ADDON_CALENDAR, ADDON_PATROL_OPS}:
         return True
     if not client:
         return False
@@ -11019,9 +11304,34 @@ def _admin_enterprise_addon_enabled(user: User | None, feature: str) -> bool:
         return False
     feature_key = _normalize_addon_key(feature)
     active_addons = _global_addons()
-    if ADDON_ENTERPRISE_TIER in active_addons and feature_key in {ADDON_PATROL, ADDON_CALENDAR}:
+    if ADDON_ENTERPRISE_TIER in active_addons and feature_key in {ADDON_PATROL, ADDON_CALENDAR, ADDON_PATROL_OPS}:
         return True
     return feature_key in active_addons
+
+
+def _patrol_ops_admin_enabled(user: User | None) -> bool:
+    if not user or user.role not in ADMIN_ROLES:
+        return False
+    active_addons = _global_addons()
+    if ADDON_PATROL_OPS in active_addons and _is_pro(user):
+        return True
+    if ADDON_ENTERPRISE_TIER in active_addons and _is_enterprise(user):
+        return True
+    return _is_enterprise(user) and ADDON_PATROL_OPS in active_addons
+
+
+def _require_patrol_ops_admin_addon(user: User | None):
+    if not user or user.role not in ADMIN_ROLES:
+        return _json_forbidden()
+    if not _patrol_ops_admin_enabled(user):
+        return (
+            jsonify(
+                ok=False,
+                message="Patroli Notes & Report membutuhkan add-on Patrol Ops aktif untuk tier Pro, atau paket Enterprise.",
+            ),
+            403,
+        )
+    return None
 
 
 def _calendar_feature_enabled(user: User | None) -> bool:
@@ -14545,6 +14855,307 @@ def _patrol_checkpoint_match(
     return None
 
 
+def _normalize_patrol_ops_category(value: object) -> str:
+    normalized = (str(value or "").strip().lower())
+    return normalized if normalized in {"activity", "gate", "incident", "handover"} else ""
+
+
+def _normalize_patrol_ops_severity(value: object, category: str = "activity") -> str:
+    normalized = (str(value or "").strip().lower())
+    if normalized in {"low", "warning", "critical"}:
+        return normalized
+    return "warning" if category == "incident" else "low"
+
+
+def _normalize_patrol_ops_status(value: object) -> str:
+    normalized = (str(value or "").strip().lower())
+    return normalized if normalized in {"open", "reviewed", "resolved"} else ""
+
+
+def _parse_patrol_ops_checklist(value: object) -> list[str]:
+    if value is None:
+        return []
+    parsed = value
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return []
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            parsed = [raw]
+    if not isinstance(parsed, list):
+        return []
+    return [str(item).strip() for item in parsed if str(item).strip()]
+
+
+def _insert_patrol_ops_event(
+    *,
+    category: str,
+    event_type: str,
+    severity: str,
+    direction: str,
+    vehicle_plate: str,
+    vehicle_type: str,
+    note: str,
+    checklist: list[str],
+    photo_path: str,
+    lat: float | None,
+    lng: float | None,
+    user: User,
+    employee: dict,
+    assignment: dict,
+    site: dict,
+) -> int:
+    now_ts = _now_ts()
+    conn = _db_connect()
+    try:
+        cur = conn.execute(
+            """
+            INSERT INTO patrol_operational_events (
+                client_id, site_id, assignment_id, employee_user_id, employee_id,
+                employee_email, employee_name, category, event_type, severity,
+                direction, vehicle_plate, vehicle_type, note, checklist_json,
+                photo_path, lat, lng, status, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)
+            """,
+            (
+                _row_get(site, "client_id"),
+                _row_get(site, "id"),
+                _row_get(assignment, "id"),
+                user.id,
+                _row_get(employee, "id"),
+                user.email,
+                _row_get(employee, "name") or user.email,
+                category,
+                event_type,
+                severity,
+                direction,
+                vehicle_plate,
+                vehicle_type,
+                note,
+                json.dumps(checklist or [], ensure_ascii=True),
+                photo_path,
+                lat,
+                lng,
+                now_ts,
+                now_ts,
+            ),
+        )
+        event_id = int(cur.lastrowid)
+        conn.commit()
+        return event_id
+    finally:
+        conn.close()
+
+
+def _patrol_ops_events(
+    *,
+    site_id: int | None = None,
+    employee_email: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    category: str | None = None,
+    limit: int = 300,
+) -> list[dict]:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "patrol_operational_events"):
+            return []
+        clauses: list[str] = []
+        params: list = []
+        if site_id:
+            clauses.append("e.site_id = ?")
+            params.append(site_id)
+        if employee_email:
+            clauses.append("lower(e.employee_email) = ?")
+            params.append(employee_email.strip().lower())
+        if date_from:
+            clauses.append("date(e.created_at) >= ?")
+            params.append(date_from)
+        if date_to:
+            clauses.append("date(e.created_at) <= ?")
+            params.append(date_to)
+        if category:
+            clauses.append("e.category = ?")
+            params.append(category)
+        where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        params.append(max(1, min(int(limit or 300), 1000)))
+        cur = conn.execute(
+            f"""
+            SELECT e.*, s.name AS site_name
+            FROM patrol_operational_events e
+            LEFT JOIN sites s ON s.id = e.site_id
+            {where_sql}
+            ORDER BY e.created_at DESC, e.id DESC
+            LIMIT ?
+            """,
+            tuple(params),
+        )
+        return [dict(row) for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def _patrol_ops_event_by_id(event_id: int) -> dict | None:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "patrol_operational_events"):
+            return None
+        cur = conn.execute(
+            """
+            SELECT e.*, s.name AS site_name
+            FROM patrol_operational_events e
+            LEFT JOIN sites s ON s.id = e.site_id
+            WHERE e.id = ?
+            """,
+            (event_id,),
+        )
+        row = cur.fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def _update_patrol_ops_event_status(event_id: int, status: str, supervisor_note: str, user: User) -> None:
+    conn = _db_connect()
+    try:
+        conn.execute(
+            """
+            UPDATE patrol_operational_events
+            SET status = ?, supervisor_note = ?, reviewed_by_user_id = ?,
+                reviewed_by_email = ?, reviewed_at = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (status, supervisor_note, user.id, user.email, _now_ts(), _now_ts(), event_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _notify_patrol_ops_critical_incident(event_id: int, user: User, site: dict, note: str) -> None:
+    site_id = int(_row_get(site, "id") or 0)
+    site_name = _row_get(site, "name") or "site"
+    title = "Critical Incident Patroli"
+    message = f"{user.email} melaporkan critical incident di {site_name}: {(note or '-')[:160]}"
+    targets: list[int] = []
+    for row in _list_users():
+        if str(row.get("is_active", 1)).strip().lower() in {"0", "false"}:
+            continue
+        role = row.get("role")
+        if role == "hr_superadmin":
+            targets.append(int(row["id"]))
+            continue
+        if role in {"manager_operational", "supervisor", "admin_asistent"}:
+            user_site_id = int(row.get("site_id") or 0)
+            if not user_site_id or user_site_id == site_id:
+                targets.append(int(row["id"]))
+    for target_id in sorted(set(targets)):
+        _send_notification(target_id, title, message, "critical")
+    _log_audit_event(
+        entity_type="patrol_operational_event",
+        entity_id=event_id,
+        action="CRITICAL_INCIDENT",
+        actor=user,
+        summary="Critical incident patroli dilaporkan.",
+        details={"site_id": site_id, "site_name": site_name},
+    )
+
+
+def _patrol_ops_event_payload(row: dict | None) -> dict:
+    if not row:
+        return {}
+    checklist = _parse_patrol_ops_checklist(_row_get(row, "checklist_json"))
+    return {
+        "id": int(_row_get(row, "id") or 0),
+        "created_at": _row_get(row, "created_at") or "",
+        "category": _row_get(row, "category") or "activity",
+        "event_type": _row_get(row, "event_type") or "",
+        "severity": _row_get(row, "severity") or "low",
+        "direction": _row_get(row, "direction") or "",
+        "vehicle_plate": _row_get(row, "vehicle_plate") or "",
+        "vehicle_type": _row_get(row, "vehicle_type") or "",
+        "note": _row_get(row, "note") or "",
+        "checklist": checklist,
+        "photo_path": _row_get(row, "photo_path") or "",
+        "lat": _row_get(row, "lat"),
+        "lng": _row_get(row, "lng"),
+        "status": _row_get(row, "status") or "open",
+        "supervisor_note": _row_get(row, "supervisor_note") or "",
+        "employee_name": _row_get(row, "employee_name") or _row_get(row, "employee_email") or "-",
+        "employee_email": _row_get(row, "employee_email") or "",
+        "site_name": _row_get(row, "site_name") or "",
+    }
+
+
+def _patrol_ops_summary(rows: list[dict]) -> dict:
+    total = len(rows)
+    category_counts = {key: 0 for key in ["activity", "gate", "incident", "handover"]}
+    daily: dict[str, dict] = {}
+    employees: dict[str, dict] = {}
+    for row in rows:
+        category = row.get("category") or "activity"
+        status = row.get("status") or "open"
+        severity = row.get("severity") or "low"
+        category_counts[category] = category_counts.get(category, 0) + 1
+        created_at = row.get("created_at") or ""
+        day = created_at[:10] if len(created_at) >= 10 else "-"
+        day_item = daily.setdefault(
+            day,
+            {"date": day, "total": 0, "critical": 0, "open": 0, "resolved": 0},
+        )
+        day_item["total"] += 1
+        if severity == "critical":
+            day_item["critical"] += 1
+        if status == "open":
+            day_item["open"] += 1
+        if status == "resolved":
+            day_item["resolved"] += 1
+        email = row.get("employee_email") or "-"
+        employee_item = employees.setdefault(
+            email,
+            {
+                "employee_email": email,
+                "employee_name": row.get("employee_name") or email,
+                "total": 0,
+                "incident": 0,
+                "critical": 0,
+                "open": 0,
+                "resolved": 0,
+                "score": 100,
+            },
+        )
+        employee_item["total"] += 1
+        if category == "incident":
+            employee_item["incident"] += 1
+        if severity == "critical":
+            employee_item["critical"] += 1
+        if status == "open":
+            employee_item["open"] += 1
+        if status == "resolved":
+            employee_item["resolved"] += 1
+    performance = []
+    for item in employees.values():
+        score = 100 - (item["critical"] * 12) - (item["incident"] * 5) - (item["open"] * 6) + min(item["resolved"] * 2, 10)
+        item["score"] = max(0, min(100, score))
+        performance.append(item)
+    performance.sort(key=lambda item: (-item["score"], -item["total"], item["employee_name"]))
+    daily_rows = sorted(daily.values(), key=lambda item: item["date"], reverse=True)
+    return {
+        "total": total,
+        "critical": len([row for row in rows if row.get("severity") == "critical"]),
+        "open": len([row for row in rows if row.get("status") == "open"]),
+        "reviewed": len([row for row in rows if row.get("status") == "reviewed"]),
+        "resolved": len([row for row in rows if row.get("status") == "resolved"]),
+        "gate": len([row for row in rows if row.get("category") == "gate"]),
+        "incident": len([row for row in rows if row.get("category") == "incident"]),
+        "category_counts": category_counts,
+        "performance": performance[:10],
+        "daily": daily_rows[:14],
+    }
+
+
 def _patrol_done_sequences(valid_scans: list[dict]) -> set[int]:
     done_sequences: set[int] = set()
     for row in valid_scans:
@@ -17449,6 +18060,25 @@ def admin_bp() -> Blueprint:
             )
         return render_template("dashboard/admin_guard_tour.html", user=user)
 
+    @bp.route("/patroli-ops", methods=["GET"])
+    def patroli_ops():
+        user = _current_user()
+        if not _is_pro(user):
+            return render_template(
+                "dashboard/upgrade_prompt.html",
+                user=user,
+                feature="Patroli Notes & Report",
+                message="Patroli Notes & Report hanya tersedia untuk tier Pro add-on atau Enterprise.",
+            )
+        if not _patrol_ops_admin_enabled(user):
+            return render_template(
+                "dashboard/upgrade_prompt.html",
+                user=user,
+                feature="Patroli Notes & Report",
+                message="Aktifkan add-on Patrol Ops di Settings Add-on owner, atau aktifkan paket Enterprise.",
+            )
+        return render_template("dashboard/admin_patroli_ops.html", user=user)
+
     @bp.route("/payroll", methods=["GET"])
     def payroll():
         user = _current_user()
@@ -18354,7 +18984,4 @@ def _leave_status_by_email_for_date(today: str, emails: set[str]) -> dict[str, d
 
 if __name__ == "__main__":
     app = create_app()
-    app.run(host="0.0.0.0", port=5020, debug=False)
-else:
-    # For WSGI/ASGI servers
-    app = create_app()
+   
