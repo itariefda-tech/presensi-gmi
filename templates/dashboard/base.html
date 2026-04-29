@@ -140,6 +140,22 @@
         </a>
         {% endif %}
         {% endif %}
+        {% if permissions.get("view_billing") %}
+        <a href="{{ url_for('admin.billing') }}" class="{% if active == 'billing' %}active{% endif %}" title="Billing" data-i18n-title="nav.billing">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M4 6h16v12H4V6Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M4 10h16M8 14h8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          </span>
+          <span class="nav-label" data-i18n="nav.billing">Billing</span>
+        </a>
+        {% endif %}
+        {% if permissions.get("view_contract") %}
+        <a href="{{ url_for('admin.contract') }}" class="{% if active == 'contract' %}active{% endif %}" title="Contract" data-i18n-title="nav.contract">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M6 2h12a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M9 7h6M9 11h6M9 15h3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          </span>
+          <span class="nav-label" data-i18n="nav.contract">Contract</span>
+        </a>
+        {% endif %}
         {% if permissions.get("view_payroll") %}
         <a href="{{ url_for('admin.payroll') }}" class="{% if active == 'payroll' %}active{% endif %}" title="Payroll" data-i18n-title="nav.payroll">
           <span class="nav-icon" aria-hidden="true">

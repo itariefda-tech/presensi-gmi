@@ -1,0 +1,74 @@
+{% extends "dashboard/base.html" %}
+
+{% block title %}Contract | Admin{% endblock %}
+
+{% block content %}
+<div class="container-main">
+  <div class="header-section">
+    <h1>Contract Management</h1>
+    <p class="muted">Kelola kontrak enterprise client dan track informasi penting seperti periode, SLA, dan notice period.</p>
+  </div>
+
+  <div class="alert info" style="margin-bottom: 20px;">
+    <strong>Contract Management</strong> memungkinkan Anda menyimpan dan mengelola kontrak client enterprise sebagai referensi sistem untuk attendance dan payroll.
+  </div>
+
+  <div class="card">
+    <div style="font-weight: 700; margin-bottom: 12px;">Kontrak Aktif</div>
+    <div class="muted" style="margin-bottom: 16px;">Informasi kontrak terkini untuk client Anda.</div>
+    
+    <div class="stack">
+      <div class="form-row">
+        <label class="label">Nomor Kontrak</label>
+        <input type="text" class="input" placeholder="Contoh: CTR-2026-001" disabled />
+      </div>
+      <div class="form-row">
+        <label class="label">Periode Kontrak</label>
+        <div class="form-inline">
+          <input type="date" class="input" placeholder="Tanggal mulai" disabled />
+          <span>hingga</span>
+          <input type="date" class="input" placeholder="Tanggal berakhir" disabled />
+        </div>
+      </div>
+      <div class="form-row">
+        <label class="label">Notice Period (hari)</label>
+        <input type="number" class="input" placeholder="Misal: 30" disabled />
+      </div>
+      <div class="form-row">
+        <label class="label">Cakupan Layanan</label>
+        <textarea class="input" rows="3" placeholder="Deskripsi layanan yang tercakup..." disabled></textarea>
+      </div>
+      <div class="form-row">
+        <label class="label">Ringkasan SLA</label>
+        <textarea class="input" rows="3" placeholder="Service Level Agreement..." disabled></textarea>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top: 16px;">
+    <div style="font-weight: 700; margin-bottom: 12px;">Riwayat Kontrak</div>
+    <div class="muted" style="margin-bottom: 12px;">Daftar kontrak sebelumnya untuk referensi.</div>
+    <div class="table-wrap">
+      <table class="table" aria-label="Contract history">
+        <thead>
+          <tr>
+            <th>Nomor Kontrak</th>
+            <th>Periode</th>
+            <th>Notice Period</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td colspan="4" class="muted">Tidak ada kontrak tersimpan. Hubungi GMI Support untuk setup kontrak.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="alert warning" style="margin-top: 16px;">
+    <strong>Catatan:</strong> Untuk menambah/edit kontrak, silakan hubungi tim GMI Support. Interface editing akan tersedia di fase pengembangan berikutnya.
+  </div>
+</div>
+{% endblock %}

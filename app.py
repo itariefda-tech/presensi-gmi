@@ -19811,6 +19811,58 @@ def admin_bp() -> Blueprint:
             payroll_plus_enabled=_payroll_plus_enabled(user),
         )
 
+    @bp.route("/billing", methods=["GET"])
+    def billing():
+        """Render the Billing admin page.
+        Requires Enterprise package with Billing Engine add-on.
+        """
+        user = _current_user()
+        if not _is_enterprise(user):
+            return render_template(
+                "dashboard/upgrade_prompt.html",
+                user=user,
+                feature="Billing",
+                message="Billing hanya tersedia untuk paket Enterprise dengan add-on Billing Engine.",
+            )
+        subscription = _phase15_subscription(_client_admin_client_id(user))
+        if not subscription.get("billing_enabled"):
+            return render_template(
+                "dashboard/upgrade_prompt.html",
+                user=user,
+                feature="Billing",
+                message="Aktifkan add-on Billing Engine di Settings → Subscription.",
+            )
+        return render_template(
+            "dashboard/admin_billing.html",
+            user=user,
+        )
+
+    @bp.route("/contract", methods=["GET"])
+    def contract():
+        """Render the Contract admin page.
+        Requires Enterprise package with Contract Management add-on.
+        """
+        user = _current_user()
+        if not _is_enterprise(user):
+            return render_template(
+                "dashboard/upgrade_prompt.html",
+                user=user,
+                feature="Contract",
+                message="Contract Management hanya tersedia untuk paket Enterprise dengan add-on Contract Management.",
+            )
+        subscription = _phase15_subscription(_client_admin_client_id(user))
+        if not subscription.get("contract_enabled"):
+            return render_template(
+                "dashboard/upgrade_prompt.html",
+                user=user,
+                feature="Contract",
+                message="Aktifkan add-on Contract Management di Settings → Subscription.",
+            )
+        return render_template(
+            "dashboard/admin_contract.html",
+            user=user,
+        )
+
     @bp.route("/attendance/csv", methods=["GET"])
     def attendance_csv():
         user = _current_user()

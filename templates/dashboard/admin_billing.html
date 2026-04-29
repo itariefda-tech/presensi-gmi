@@ -1,0 +1,48 @@
+{% extends "dashboard/base.html" %}
+
+{% block title %}Billing | Admin{% endblock %}
+
+{% block content %}
+<div class="container-main">
+  <div class="header-section">
+    <h1>Billing & Invoice</h1>
+    <p class="muted">Pantau biaya bulanan dan konfigurasi billing client enterprise.</p>
+  </div>
+
+  <div class="alert info" style="margin-bottom: 20px;">
+    <strong>Fitur Billing</strong> menampilkan ringkasan biaya berdasarkan kontrak dan konfigurasi billing client. Data diperbarui otomatis dari data operational (attendance, karyawan, site).
+  </div>
+
+  <div class="card">
+    <div style="font-weight: 700; margin-bottom: 12px;">Ringkasan Billing Bulan Ini</div>
+    <div class="muted" style="margin-bottom: 16px;">Pilih periode untuk melihat estimasi biaya.</div>
+    
+    <form class="form-inline" method="get" style="margin-bottom: 16px;">
+      <input type="month" id="billingPeriod" name="period" class="input" style="width: 150px;" />
+      <button type="submit" class="btn primary">Lihat</button>
+    </form>
+
+    <div class="alert warning" style="margin-top: 12px;">
+      <strong>Catatan:</strong> Fitur Invoice dan Payment tracking akan tersedia di fase berikutnya. Saat ini hanya menampilkan ringkasan kalkulasi biaya.
+    </div>
+  </div>
+
+  <div class="card" style="margin-top: 16px;">
+    <div style="font-weight: 700; margin-bottom: 12px;">Konfigurasi Billing</div>
+    <div class="muted" style="margin-bottom: 16px;">Hubungi GMI Support untuk mengatur konfigurasi billing client Anda.</div>
+    <div class="btn-row">
+      <button class="btn secondary" type="button" disabled>Edit Konfigurasi (via Support)</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  (function() {
+    // Set default month to current month
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    document.getElementById('billingPeriod').value = `${year}-${month}`;
+  })();
+</script>
+{% endblock %}
