@@ -189,6 +189,18 @@ html[data-theme="light"] body{
   letter-spacing: 0.06em;
 }
 
+.payroll-month-input{
+  width: 150px;
+  height: 36px;
+  padding: 7px 10px;
+}
+
+.payroll-filter-input{
+  width: 140px;
+  height: 36px;
+  padding: 7px 10px;
+}
+
 .payroll-kpi-grid{
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
@@ -296,6 +308,33 @@ html[data-theme="light"] body{
   font-size: 14px;
   font-weight: 700;
   color: var(--text);
+}
+
+.payroll-message{
+  min-height: 20px;
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.payroll-message.is-error{
+  color: var(--danger);
+}
+
+.payroll-message.is-success{
+  color: var(--success);
+}
+
+.payroll-generate-panel{
+  display: grid;
+  gap: 12px;
+}
+
+.payroll-row-actions{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 

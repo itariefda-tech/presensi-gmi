@@ -20,6 +20,11 @@
     checkpointPage: 1,
     recapPage: 1,
   };
+  const payrollState = {
+    rows: [],
+    loading: false,
+    initialized: false,
+  };
 
   const PATROL_EDIT_IDLE_CLOSE_MS = 10000;
   const PATROL_LIST_PAGE_SIZE = 5;
@@ -50,6 +55,7 @@
     } catch (e) {}
     scrollToTop();
     patrolHandleTabChange();
+    payrollHandleTabChange();
   }
 
   navButtons.forEach((btn) => {
@@ -1793,6 +1799,324 @@
     window.addEventListener("beforeunload", patrolStopPolling);
   }
 
+  function payrollPane(){
+    return document.getElementById("payroll");
+  }
+
+  function payrollCanManage(){
+    return payrollPane()?.dataset.canManagePayroll === "1";
+  }
+
+  function payrollPlusEnabled(){
+    return payrollPane()?.dataset.payrollPlus === "1";
+  }
+
+  function payrollCurrentPeriod(){
+    const input = document.getElementById("clientPayrollPeriod");
+    if (input?.value) return input.value;
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  }
+
+  function payrollFormatMoney(value){
+    const number = Number(value || 0);
+    return number.toLocaleString("id-ID", { maximumFractionDigits: 0 });
+  }
+
+  function payrollStatusClass(status){
+    const normalized = String(status || "draft").toLowerCase();
+    if (normalized === "approved") return "ok";
+    if (normalized === "draft") return "pending";
+    return "muted";
+  }
+
+  function payrollSetMessage(text, type){
+    const el = document.getElementById("clientPayrollMessage");
+    if (!el) return;
+    el.textContent = text || "";
+    el.classList.toggle("is-error", type === "error");
+    el.classList.toggle("is-success", type === "success");
+  }
+
+  async function payrollApi(path, options = {}){
+    const method = (options.method || "GET").toUpperCase();
+    const headers = { Accept: "application/json" };
+    const fetchOptions = { method, headers };
+    if (method !== "GET") {
+      headers["Content-Type"] = "application/json";
+      headers["X-CSRF-Token"] = csrfToken;
+      fetchOptions.body = JSON.stringify({ ...(options.body || {}), csrf_token: csrfToken });
+    }
+    const response = await fetch(path, fetchOptions);
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || !payload?.ok) {
+      throw new Error(payload?.message || "Permintaan payroll gagal diproses.");
+    }
+    return payload;
+  }
+
+  function payrollRenderSummary(rows){
+    const totalPayroll = rows.reduce((sum, row) => sum + Number(row.total_gaji || 0), 0);
+    const totalAllowance = rows.reduce((sum, row) => sum + Number(row.tunjangan || 0), 0);
+    const totalDeduction = rows.reduce((sum, row) => (
+      sum
+      + Number(row.potongan_telat || 0)
+      + Number(row.potongan_absen || 0)
+      + Number(row.potongan_lain || 0)
+    ), 0);
+    const pendingCount = rows.filter((row) => String(row.status || "draft").toLowerCase() !== "approved").length;
+    const totalEl = document.getElementById("clientPayrollTotal");
+    const metaEl = document.getElementById("clientPayrollMeta");
+    const allowanceEl = document.getElementById("clientPayrollAllowance");
+    const deductionEl = document.getElementById("clientPayrollDeduction");
+    const pendingEl = document.getElementById("clientPayrollPending");
+    const noteApproval = document.getElementById("clientPayrollNoteApproval");
+    const noteSync = document.getElementById("clientPayrollNoteSync");
+    if (totalEl) totalEl.textContent = payrollFormatMoney(totalPayroll);
+    if (metaEl) metaEl.textContent = `${rows.length} pegawai`;
+    if (allowanceEl) allowanceEl.textContent = payrollFormatMoney(totalAllowance);
+    if (deductionEl) deductionEl.textContent = payrollFormatMoney(totalDeduction);
+    if (pendingEl) pendingEl.textContent = `${pendingCount} slip`;
+    if (noteApproval) {
+      noteApproval.textContent = rows.length
+        ? `${pendingCount} slip masih draft, ${rows.length - pendingCount} slip approved.`
+        : "Belum ada data payroll.";
+    }
+    if (noteSync) {
+      noteSync.textContent = `Periode ${payrollCurrentPeriod()} mengikuti schedule payroll policy site.`;
+    }
+  }
+
+  function payrollRenderRows(rows){
+    const tbody = document.getElementById("clientPayrollRows");
+    if (!tbody) return;
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="3" class="muted">Belum ada payroll untuk periode ini.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = rows.map((row) => {
+      const id = Number(row.id || 0);
+      const status = String(row.status || "draft");
+      const approved = status.toLowerCase() === "approved";
+      const actionButtons = [
+        `<button class="mini-btn" type="button" data-payroll-action="detail" data-id="${id}">Detail</button>`,
+      ];
+      if (payrollCanManage() && !approved) {
+        actionButtons.push(`<button class="mini-btn" type="button" data-payroll-action="approve" data-id="${id}">Approve</button>`);
+      }
+      if (payrollCanManage() && payrollPlusEnabled() && !approved) {
+        actionButtons.push(`<button class="mini-btn" type="button" data-payroll-action="adjust" data-id="${id}">Edit</button>`);
+      }
+      return `
+        <tr>
+          <td>
+            <div class="contact-stack">
+              <span>${escapeHtml(row.employee_name || row.employee_email || "-")}</span>
+              <span class="muted">${escapeHtml(row.employee_email || "-")}</span>
+            </div>
+          </td>
+          <td>
+            <div class="contact-stack">
+              <span>${escapeHtml(row.period || payrollCurrentPeriod())}</span>
+              <span class="muted">${escapeHtml(row.period_start || "-")} - ${escapeHtml(row.period_end || "-")}</span>
+              <span class="muted">Pay ${escapeHtml(row.pay_date || "-")} | ${row.payroll_schedule === "MID_MONTH" ? "Tengah Bulan" : "Akhir Bulan"}</span>
+              <span class="muted">Rp ${payrollFormatMoney(row.total_gaji)}</span>
+            </div>
+          </td>
+          <td>
+            <div class="contact-stack">
+              <span class="status-pill ${payrollStatusClass(status)}">${escapeHtml(status)}</span>
+              <span class="payroll-row-actions">${actionButtons.join("")}</span>
+            </div>
+          </td>
+        </tr>
+      `;
+    }).join("");
+  }
+
+  async function payrollLoad({ silent = false } = {}){
+    const root = payrollPane();
+    if (!root || payrollState.loading) return;
+    payrollState.loading = true;
+    if (!silent) payrollSetMessage("Memuat payroll...");
+    try {
+      const period = payrollCurrentPeriod();
+      const params = new URLSearchParams({ period });
+      const schedule = document.getElementById("clientPayrollScheduleFilter")?.value || "";
+      const status = document.getElementById("clientPayrollStatusFilter")?.value || "";
+      if (schedule) params.set("payroll_schedule", schedule);
+      if (status) params.set("status", status);
+      const payload = await payrollApi(`/api/payroll/list?${params.toString()}`);
+      const rows = Array.isArray(payload.data) ? payload.data : [];
+      payrollState.rows = rows;
+      payrollRenderSummary(rows);
+      payrollRenderRows(rows);
+      payrollSetMessage(rows.length ? `Payroll ${period} tersinkron.` : `Belum ada payroll untuk ${period}.`, rows.length ? "success" : "");
+    } catch (err) {
+      payrollRenderSummary([]);
+      payrollRenderRows([]);
+      payrollSetMessage(err.message || "Gagal memuat payroll.", "error");
+    } finally {
+      payrollState.loading = false;
+    }
+  }
+
+  async function payrollGenerate(form){
+    const period = payrollCurrentPeriod();
+    const body = {
+      period,
+      employee_email: form.querySelector("[name='employee_email']")?.value || "",
+      salary_base: Number(form.querySelector("[name='salary_base']")?.value || 0),
+      potongan_telat_rate: Number(form.querySelector("[name='potongan_telat_rate']")?.value || 50000),
+      potongan_absen_rate: Number(form.querySelector("[name='potongan_absen_rate']")?.value || 100000),
+    };
+    await payrollApi("/api/payroll/generate", { method: "POST", body });
+    form.reset();
+    const late = document.getElementById("clientPayrollLateRate");
+    const absent = document.getElementById("clientPayrollAbsentRate");
+    if (late) late.value = "50000";
+    if (absent) absent.value = "100000";
+    await payrollLoad({ silent: true });
+    payrollSetMessage("Payroll berhasil dibuat.", "success");
+  }
+
+  async function payrollApprove(id){
+    await payrollApi(`/api/payroll/${id}/approve`, { method: "POST", body: {} });
+    await payrollLoad({ silent: true });
+    payrollSetMessage("Payroll approved.", "success");
+  }
+
+  async function payrollAdjust(id){
+    const record = payrollState.rows.find((row) => Number(row.id || 0) === Number(id));
+    if (!record) return;
+    const deductionRaw = window.prompt("Potongan lain", String(Number(record.potongan_lain || 0)));
+    if (deductionRaw === null) return;
+    const allowanceRaw = window.prompt("Tunjangan", String(Number(record.tunjangan || 0)));
+    if (allowanceRaw === null) return;
+    await payrollApi(`/api/payroll/${id}/update`, {
+      method: "POST",
+      body: {
+        potongan_lain: Number(deductionRaw || 0),
+        tunjangan: Number(allowanceRaw || 0),
+      },
+    });
+    await payrollLoad({ silent: true });
+    payrollSetMessage("Payroll diperbarui.", "success");
+  }
+
+  function payrollShowDetail(id){
+    const record = payrollState.rows.find((row) => Number(row.id || 0) === Number(id));
+    if (!record) return;
+    const detail = [
+      `Pegawai: ${record.employee_name || record.employee_email || "-"}`,
+      `Periode: ${record.period || "-"}`,
+      `Attendance period: ${record.period_start || "-"} sampai ${record.period_end || "-"}`,
+      `Pay date: ${record.pay_date || "-"}`,
+      `Schedule: ${record.payroll_schedule === "MID_MONTH" ? "Tengah Bulan" : "Akhir Bulan"}`,
+      `Hadir: ${record.attendance_days || 0}, telat: ${record.late_days || 0}, absen: ${record.absent_days || 0}, leave: ${record.leave_days || 0}`,
+      `Gaji pokok: Rp ${payrollFormatMoney(record.salary_base)}`,
+      `Potongan: Rp ${payrollFormatMoney(Number(record.potongan_telat || 0) + Number(record.potongan_absen || 0) + Number(record.potongan_lain || 0))}`,
+      `Tunjangan: Rp ${payrollFormatMoney(record.tunjangan)}`,
+      `Total: Rp ${payrollFormatMoney(record.total_gaji)}`,
+      `Status: ${record.status || "draft"}`,
+    ].join(" | ");
+    payrollSetMessage(detail);
+  }
+
+  function payrollExportCsv(){
+    const rows = payrollState.rows || [];
+    if (!rows.length) {
+      payrollSetMessage("Tidak ada data payroll untuk export.", "error");
+      return;
+    }
+    const headers = ["Pegawai", "Email", "Periode", "Attendance Period", "Pay Date", "Schedule", "Gaji Pokok", "Hadir", "Telat", "Absen", "Leave", "Potongan Telat", "Potongan Absen", "Potongan Lain", "Tunjangan", "Total", "Status"];
+    const csvRows = rows.map((row) => [
+      row.employee_name || "",
+      row.employee_email || "",
+      row.period || "",
+      `${row.period_start || ""} - ${row.period_end || ""}`,
+      row.pay_date || "",
+      row.payroll_schedule || "MONTH_END",
+      row.salary_base || 0,
+      row.attendance_days || 0,
+      row.late_days || 0,
+      row.absent_days || 0,
+      row.leave_days || 0,
+      row.potongan_telat || 0,
+      row.potongan_absen || 0,
+      row.potongan_lain || 0,
+      row.tunjangan || 0,
+      row.total_gaji || 0,
+      row.status || "draft",
+    ]);
+    const csv = [headers, ...csvRows]
+      .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","))
+      .join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `payroll-${payrollCurrentPeriod()}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function payrollHandleTabChange(){
+    if (swipeIndex !== 5) return;
+    payrollLoad({ silent: true });
+  }
+
+  function initPayrollDashboard(){
+    const root = payrollPane();
+    if (!root || payrollState.initialized) return;
+    payrollState.initialized = true;
+    const periodInput = document.getElementById("clientPayrollPeriod");
+    const scheduleFilter = document.getElementById("clientPayrollScheduleFilter");
+    const statusFilter = document.getElementById("clientPayrollStatusFilter");
+    const form = document.getElementById("clientPayrollGenerateForm");
+    const rows = document.getElementById("clientPayrollRows");
+    const refresh = document.getElementById("clientPayrollRefresh");
+    const exportBtn = document.getElementById("clientPayrollExport");
+    const noteDetail = document.getElementById("clientPayrollNoteDetail");
+    const lateRate = document.getElementById("clientPayrollLateRate");
+    const absentRate = document.getElementById("clientPayrollAbsentRate");
+    const now = new Date();
+    if (periodInput && !periodInput.value) {
+      periodInput.value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    }
+    if (!payrollPlusEnabled()) {
+      if (lateRate) lateRate.readOnly = true;
+      if (absentRate) absentRate.readOnly = true;
+    }
+    periodInput?.addEventListener("change", () => payrollLoad({ silent: false }));
+    scheduleFilter?.addEventListener("change", () => payrollLoad({ silent: false }));
+    statusFilter?.addEventListener("change", () => payrollLoad({ silent: false }));
+    refresh?.addEventListener("click", () => payrollLoad({ silent: false }));
+    exportBtn?.addEventListener("click", payrollExportCsv);
+    noteDetail?.addEventListener("click", () => payrollLoad({ silent: false }));
+    form?.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      try {
+        await payrollGenerate(form);
+      } catch (err) {
+        payrollSetMessage(err.message || "Gagal generate payroll.", "error");
+      }
+    });
+    rows?.addEventListener("click", async (event) => {
+      const button = event.target.closest("button[data-payroll-action]");
+      if (!button) return;
+      const id = Number(button.dataset.id || 0);
+      if (!id) return;
+      try {
+        if (button.dataset.payrollAction === "detail") payrollShowDetail(id);
+        if (button.dataset.payrollAction === "approve") await payrollApprove(id);
+        if (button.dataset.payrollAction === "adjust") await payrollAdjust(id);
+      } catch (err) {
+        payrollSetMessage(err.message || "Aksi payroll gagal.", "error");
+      }
+    });
+  }
+
   function initEmployeeActionMenus(){
     const menus = Array.from(document.querySelectorAll(".employee-actions"));
     if (!menus.length) return;
@@ -1991,6 +2315,7 @@
     initAttendanceReportToggle();
     initAttendanceRangeReport();
     initPatrolDashboard();
+    initPayrollDashboard();
     try {
       localStorage.removeItem(tabStorageKey);
     } catch (e) {}

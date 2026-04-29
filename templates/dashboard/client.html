@@ -235,6 +235,8 @@
                 <span>GPS {{ "On" if current_policy.allow_gps else "Off" }}</span>
                 <span>QR {{ "On" if current_policy.allow_qr else "Off" }}</span>
                 <span>Selfie {{ "On" if current_policy.require_selfie else "Off" }}</span>
+                <span>Payroll {{ "Full Monthly" if current_policy.payroll_scheme == "FULL_MONTHLY_DEDUCTION" else "Prorated" }}</span>
+                <span>Schedule {{ "Tengah Bulan" if current_policy.payroll_schedule == "MID_MONTH" else "Akhir Bulan" }}</span>
               </div>
               {% else %}
               <div class="empty-state">Belum ada policy untuk site ini.</div>
@@ -277,6 +279,20 @@
                     <div class="form-row">
                       <label class="label">Waktu cutoff</label>
                       <input class="input" name="cutoff_time" type="text" value="{{ current_policy.cutoff_time or '' }}" />
+                    </div>
+                    <div class="form-row full">
+                      <label class="label">Payroll Scheme</label>
+                      <select class="input" name="payroll_scheme">
+                        <option value="PRORATED_ATTENDANCE" {% if (current_policy.payroll_scheme or "PRORATED_ATTENDANCE") == "PRORATED_ATTENDANCE" %}selected{% endif %}>Prorated by Attendance</option>
+                        <option value="FULL_MONTHLY_DEDUCTION" {% if current_policy.payroll_scheme == "FULL_MONTHLY_DEDUCTION" %}selected{% endif %}>Full Monthly Minus Deductions</option>
+                      </select>
+                    </div>
+                    <div class="form-row full">
+                      <label class="label">Payroll Schedule</label>
+                      <select class="input" name="payroll_schedule">
+                        <option value="MONTH_END" {% if (current_policy.payroll_schedule or "MONTH_END") == "MONTH_END" %}selected{% endif %}>Akhir Bulan / Tanggal 30</option>
+                        <option value="MID_MONTH" {% if current_policy.payroll_schedule == "MID_MONTH" %}selected{% endif %}>Tengah Bulan / Tanggal 16</option>
+                      </select>
                     </div>
                     <div class="form-row">
                       <label class="toggle-line">
@@ -335,6 +351,20 @@
                     <div class="form-row">
                       <label class="label" for="policy-cutoff">Waktu cutoff</label>
                       <input class="input" id="policy-cutoff" name="cutoff_time" type="text" placeholder="HH:MM" />
+                    </div>
+                    <div class="form-row full">
+                      <label class="label" for="policy-payroll-scheme">Payroll Scheme</label>
+                      <select class="input" id="policy-payroll-scheme" name="payroll_scheme">
+                        <option value="PRORATED_ATTENDANCE" selected>Prorated by Attendance</option>
+                        <option value="FULL_MONTHLY_DEDUCTION">Full Monthly Minus Deductions</option>
+                      </select>
+                    </div>
+                    <div class="form-row full">
+                      <label class="label" for="policy-payroll-schedule">Payroll Schedule</label>
+                      <select class="input" id="policy-payroll-schedule" name="payroll_schedule">
+                        <option value="MONTH_END" selected>Akhir Bulan / Tanggal 30</option>
+                        <option value="MID_MONTH">Tengah Bulan / Tanggal 16</option>
+                      </select>
                     </div>
                     <div class="form-row">
                       <label class="toggle-line">
@@ -1026,7 +1056,7 @@
         </section>
 
         <section class="swipe-pane" data-pane="5" aria-label="Payroll">
-          <article class="panel payroll-hero" id="payroll">
+          <article class="panel payroll-hero" id="payroll" data-can-manage-payroll="{{ 1 if can_manage_payroll else 0 }}" data-payroll-plus="{{ 1 if client and client.addons and 'payroll_plus' in client.addons else 0 }}">
             <div class="panel-head">
               <div>
                 <h3>Payroll</h3>
@@ -1034,32 +1064,83 @@
               </div>
               <div class="payroll-period">
                 <span class="status-pill muted">Periode</span>
-                <div class="payroll-period-chip">Jan 2026</div>
+                <input class="input payroll-month-input" id="clientPayrollPeriod" type="month" />
+                <select class="input payroll-filter-input" id="clientPayrollScheduleFilter">
+                  <option value="">Semua Jadwal</option>
+                  <option value="MONTH_END">Akhir Bulan</option>
+                  <option value="MID_MONTH">Tengah Bulan</option>
+                </select>
+                <select class="input payroll-filter-input" id="clientPayrollStatusFilter">
+                  <option value="">Semua Status</option>
+                  <option value="draft">Draft</option>
+                  <option value="approved">Approved</option>
+                </select>
               </div>
             </div>
             <div class="payroll-kpi-grid">
               <div class="payroll-kpi">
                 <div class="label">TOTAL Payroll</div>
-                <div class="value">128.450.000</div>
-                <div class="meta">24 pegawai • 1 site</div>
+                <div class="value" id="clientPayrollTotal">0</div>
+                <div class="meta" id="clientPayrollMeta">0 pegawai</div>
               </div>
               <div class="payroll-kpi">
                 <div class="label">TUNJANGAN Rp.</div>
-                <div class="value">18.200.000</div>
-                <div class="meta">Transport + makan</div>
+                <div class="value" id="clientPayrollAllowance">0</div>
+                <div class="meta">Komponen tambahan</div>
               </div>
               <div class="payroll-kpi">
                 <div class="label">POTONGAN Rp.</div>
-                <div class="value">6.750.000</div>
-                <div class="meta">Alpha + keterlambatan</div>
+                <div class="value" id="clientPayrollDeduction">0</div>
+                <div class="meta">Telat + absen + lain</div>
               </div>
               <div class="payroll-kpi highlight">
                 <div class="label">Pending Approval</div>
-                <div class="value">5 slip</div>
-                <div class="meta">Butuh persetujuan</div>
+                <div class="value" id="clientPayrollPending">0 slip</div>
+                <div class="meta">Draft menunggu approval</div>
               </div>
             </div>
+            <div class="payroll-message" id="clientPayrollMessage" role="status"></div>
           </article>
+
+          {% if can_manage_payroll %}
+          <article class="panel payroll-generate-panel">
+            <div class="panel-head">
+              <div>
+                <h3>Generate Payroll</h3>
+                <div class="panel-sub">Buat slip untuk pegawai di site client ini.</div>
+              </div>
+              <span class="panel-badge muted">Tenant Scope</span>
+            </div>
+            <form class="form-grid payroll-generate-form" id="clientPayrollGenerateForm">
+              <div class="form-row">
+                <label class="label" for="clientPayrollEmployee">Pegawai</label>
+                <input class="input" id="clientPayrollEmployee" name="employee_email" type="email" list="clientPayrollEmployees" placeholder="email@pegawai.com" required />
+                <datalist id="clientPayrollEmployees">
+                  {% for employee in employees %}
+                  {% if employee.email %}
+                  <option value="{{ employee.email }}">{{ employee.name or employee.email }}</option>
+                  {% endif %}
+                  {% endfor %}
+                </datalist>
+              </div>
+              <div class="form-row">
+                <label class="label" for="clientPayrollSalary">Gaji Pokok</label>
+                <input class="input" id="clientPayrollSalary" name="salary_base" type="number" min="1" step="1000" placeholder="5000000" required />
+              </div>
+              <div class="form-row">
+                <label class="label" for="clientPayrollLateRate">Potongan Telat</label>
+                <input class="input" id="clientPayrollLateRate" name="potongan_telat_rate" type="number" min="0" step="1000" value="50000" />
+              </div>
+              <div class="form-row">
+                <label class="label" for="clientPayrollAbsentRate">Potongan Absen</label>
+                <input class="input" id="clientPayrollAbsentRate" name="potongan_absen_rate" type="number" min="0" step="1000" value="100000" />
+              </div>
+              <div class="form-actions">
+                <button class="btn primary" type="submit">Generate</button>
+              </div>
+            </form>
+          </article>
+          {% endif %}
 
           <article class="panel table-card payroll-table">
             <div class="panel-head">
@@ -1068,12 +1149,12 @@
                 <div class="panel-sub">Ringkas payroll per pegawai.</div>
               </div>
               <div class="panel-actions">
-                <button class="btn ghost" type="button">Export</button>
-                <button class="btn primary" type="button">Generate</button>
+                <button class="btn ghost" id="clientPayrollExport" type="button">Export</button>
+                <button class="btn primary" id="clientPayrollRefresh" type="button">Refresh</button>
               </div>
             </div>
             <div class="table-wrap employee-table-wrap">
-              <table class="data-table">
+              <table class="data-table" id="clientPayrollTable">
                 <thead>
                   <tr>
                     <th>Pegawai/ Email</th>
@@ -1081,67 +1162,8 @@
                     <th>Status/ Aksi</th>
                   </tr>
                 </thead>
-                <tbody>
-                  <tr>
-                    <td>
-                      <div class="contact-stack">
-                        <span>Baim Wonka</span>
-                        <span class="muted">baim@gmail.com</span>
-                      </div>
-                    </td>
-                    <td>
-                      <div class="contact-stack">
-                        <span>Jan 2026</span>
-                        <span class="muted">5.450.000</span>
-                      </div>
-                    </td>
-                    <td>
-                      <div class="contact-stack">
-                        <span class="status-pill ok">Approved</span>
-                        <button class="mini-btn" type="button">Detail</button>
-                      </div>
-                    </td>
-                  </tr>
-                  <tr>
-                    <td>
-                      <div class="contact-stack">
-                        <span>Sita Dwi</span>
-                        <span class="muted">sita@site.co</span>
-                      </div>
-                    </td>
-                    <td>
-                      <div class="contact-stack">
-                        <span>Jan 2026</span>
-                        <span class="muted">4.980.000</span>
-                      </div>
-                    </td>
-                    <td>
-                      <div class="contact-stack">
-                        <span class="status-pill warning">Pending</span>
-                        <button class="mini-btn" type="button">Review</button>
-                      </div>
-                    </td>
-                  </tr>
-                  <tr>
-                    <td>
-                      <div class="contact-stack">
-                        <span>Rama Putra</span>
-                        <span class="muted">rama@site.co</span>
-                      </div>
-                    </td>
-                    <td>
-                      <div class="contact-stack">
-                        <span>Jan 2026</span>
-                        <span class="muted">5.120.000</span>
-                      </div>
-                    </td>
-                    <td>
-                      <div class="contact-stack">
-                        <span class="status-pill muted">Draft</span>
-                        <button class="mini-btn" type="button">Edit</button>
-                      </div>
-                    </td>
-                  </tr>
+                <tbody id="clientPayrollRows">
+                  <tr><td colspan="3" class="muted">Memuat data payroll...</td></tr>
                 </tbody>
               </table>
             </div>
@@ -1180,9 +1202,9 @@
               </div>
               <div class="payroll-note-card">
                 <div class="note-title">Catatan Payroll</div>
-                <p>Sinkronisasi absensi terakhir: 03 Feb 2026, 21:30.</p>
-                <p>5 pegawai menunggu approval supervisor.</p>
-                <button class="btn ghost" type="button">Lihat Detail</button>
+                <p id="clientPayrollNoteSync">Sinkronisasi mengikuti data attendance periode aktif.</p>
+                <p id="clientPayrollNoteApproval">Belum ada data payroll.</p>
+                <button class="btn ghost" id="clientPayrollNoteDetail" type="button">Lihat Detail</button>
               </div>
             </div>
           </article>

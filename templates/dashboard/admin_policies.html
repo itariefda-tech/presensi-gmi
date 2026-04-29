@@ -23,6 +23,7 @@
     <div class="form-row">
       <label class="label" for="policy-scope">Scope :</label>
       <select class="input" id="policy-scope" name="scope_type" required>
+        <option value="GLOBAL">GLOBAL</option>
         <option value="CLIENT" selected>CLIENT</option>
         <option value="SITE">SITE</option>
       </select>
@@ -64,6 +65,20 @@
     <div class="form-row">
       <label class="label" for="policy-cutoff">Cutoff Time :</label>
       <input class="input" id="policy-cutoff" type="time" name="cutoff_time" />
+    </div>
+    <div class="form-row">
+      <label class="label" for="policy-payroll-scheme">Payroll Scheme :</label>
+      <select class="input" id="policy-payroll-scheme" name="payroll_scheme">
+        <option value="PRORATED_ATTENDANCE" selected>Prorated by Attendance</option>
+        <option value="FULL_MONTHLY_DEDUCTION">Full Monthly Minus Deductions</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <label class="label" for="policy-payroll-schedule">Payroll Schedule :</label>
+      <select class="input" id="policy-payroll-schedule" name="payroll_schedule">
+        <option value="MONTH_END" selected>Akhir Bulan / Tanggal 30</option>
+        <option value="MID_MONTH">Tengah Bulan / Tanggal 16</option>
+      </select>
     </div>
     <div class="form-row">
       <label class="label" for="policy-gps">Allow GPS :</label>
@@ -127,7 +142,9 @@
         <td>
           GPS: {{ 'Ya' if p.allow_gps else 'Tidak' }},
           QR: {{ 'Ya' if p.allow_qr else 'Tidak' }},
-          Selfie: {{ 'Ya' if p.require_selfie else 'Tidak' }}
+          Selfie: {{ 'Ya' if p.require_selfie else 'Tidak' }},
+          Payroll: {{ 'Full Monthly' if p.payroll_scheme == 'FULL_MONTHLY_DEDUCTION' else 'Prorated' }},
+          Schedule: {{ 'Tengah Bulan' if p.payroll_schedule == 'MID_MONTH' else 'Akhir Bulan' }}
         </td>
           <td>
           <details class="dropdown">
@@ -165,6 +182,7 @@
         <div class="form-row">
           <label class="label" for="policy-scope-{{ p.id }}">Scope</label>
           <select class="input" id="policy-scope-{{ p.id }}" name="scope_type" required>
+            <option value="GLOBAL" {% if p.scope_type == "GLOBAL" %}selected{% endif %}>GLOBAL</option>
             <option value="CLIENT" {% if p.scope_type == "CLIENT" %}selected{% endif %}>CLIENT</option>
             <option value="SITE" {% if p.scope_type == "SITE" %}selected{% endif %}>SITE</option>
           </select>
@@ -206,6 +224,20 @@
         <div class="form-row">
           <label class="label" for="policy-cutoff-{{ p.id }}">Cutoff Time</label>
           <input class="input" id="policy-cutoff-{{ p.id }}" type="time" name="cutoff_time" value="{{ p.cutoff_time or '' }}" />
+        </div>
+        <div class="form-row">
+          <label class="label" for="policy-payroll-scheme-{{ p.id }}">Payroll Scheme</label>
+          <select class="input" id="policy-payroll-scheme-{{ p.id }}" name="payroll_scheme">
+            <option value="PRORATED_ATTENDANCE" {% if (p.payroll_scheme or "PRORATED_ATTENDANCE") == "PRORATED_ATTENDANCE" %}selected{% endif %}>Prorated by Attendance</option>
+            <option value="FULL_MONTHLY_DEDUCTION" {% if p.payroll_scheme == "FULL_MONTHLY_DEDUCTION" %}selected{% endif %}>Full Monthly Minus Deductions</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label class="label" for="policy-payroll-schedule-{{ p.id }}">Payroll Schedule</label>
+          <select class="input" id="policy-payroll-schedule-{{ p.id }}" name="payroll_schedule">
+            <option value="MONTH_END" {% if (p.payroll_schedule or "MONTH_END") == "MONTH_END" %}selected{% endif %}>Akhir Bulan / Tanggal 30</option>
+            <option value="MID_MONTH" {% if p.payroll_schedule == "MID_MONTH" %}selected{% endif %}>Tengah Bulan / Tanggal 16</option>
+          </select>
         </div>
         <div class="form-row">
           <label class="label" for="policy-gps-{{ p.id }}">Allow GPS</label>
@@ -257,7 +289,12 @@
         return;
       }
       const scope = scopeSelect.value;
-      if (scope === "CLIENT") {
+      if (scope === "GLOBAL") {
+        clientSelect.disabled = true;
+        clientSelect.value = "";
+        siteSelect.disabled = true;
+        siteSelect.value = "";
+      } else if (scope === "CLIENT") {
         clientSelect.disabled = false;
         siteSelect.disabled = true;
         siteSelect.value = "";

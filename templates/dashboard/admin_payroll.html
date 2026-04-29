@@ -12,8 +12,21 @@
         <select id="periodSelect" class="input">
           <option value="">Select Period</option>
         </select>
+        <select id="clientSelect" class="input">
+          <option value="">All Clients</option>
+        </select>
         <select id="siteSelect" class="input">
           <option value="">All Sites</option>
+        </select>
+        <select id="scheduleSelect" class="input">
+          <option value="">All Schedules</option>
+          <option value="MONTH_END">Akhir Bulan</option>
+          <option value="MID_MONTH">Tengah Bulan</option>
+        </select>
+        <select id="statusSelect" class="input">
+          <option value="">All Status</option>
+          <option value="draft">Draft</option>
+          <option value="approved">Approved</option>
         </select>
         <button class="btn primary" id="btnLoadPayroll">Load Payroll</button>
         <button class="btn secondary" id="btnGeneratePayroll">Generate New</button>
@@ -35,7 +48,7 @@
           </select>
         </div>
         <div class="field-group">
-          <label for="period">Period</label>
+          <label for="period">Pay Cycle Period</label>
           <input type="text" id="period" class="input" placeholder="YYYY-MM" required>
         </div>
         <div class="field-group">
@@ -71,6 +84,10 @@
             <tr>
               <th>Employee</th>
               <th>Period</th>
+              <th>Attendance Period</th>
+              <th>Pay Date</th>
+              <th>Schedule</th>
+              <th>Site</th>
               <th>Base Salary</th>
               <th>Attendance Days</th>
               <th>Late Days</th>
@@ -85,7 +102,7 @@
           </thead>
           <tbody id="payrollRows">
             <tr>
-              <td colspan="12" class="muted">
+              <td colspan="16" class="muted">
                 <span class="spinner" aria-hidden="true"></span>
                 Select period to load payroll data...
               </td>
@@ -117,6 +134,18 @@
             <div class="detail-item">
               <label>Period:</label>
               <span id="detailPeriod">-</span>
+            </div>
+            <div class="detail-item">
+              <label>Attendance Period:</label>
+              <span id="detailAttendancePeriod">-</span>
+            </div>
+            <div class="detail-item">
+              <label>Pay Date:</label>
+              <span id="detailPayDate">-</span>
+            </div>
+            <div class="detail-item">
+              <label>Schedule:</label>
+              <span id="detailPayrollSchedule">-</span>
             </div>
           </div>
         </div>
@@ -401,6 +430,24 @@
         console.error('Failed to load sites');
       });
   }
+
+  function loadClients() {
+    const clientSelect = document.getElementById('clientSelect');
+    fetch('/api/clients')
+      .then(r => r.json())
+      .then(response => {
+        if (response.ok) {
+          clientSelect.innerHTML = '<option value="">All Clients</option>';
+          response.data.forEach(c => {
+            const option = new Option(c.name || `Client ${c.id}`, c.id);
+            clientSelect.add(option);
+          });
+        }
+      })
+      .catch(() => {
+        console.error('Failed to load clients');
+      });
+  }
   
   // Load payroll data
   function loadPayrollData() {
@@ -411,22 +458,29 @@
     }
     
     const tbody = document.getElementById('payrollRows');
-    tbody.innerHTML = '<tr><td colspan="12" class="muted"><span class="spinner"></span> Loading payroll data...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="16" class="muted"><span class="spinner"></span> Loading payroll data...</td></tr>';
     
+  const params = new URLSearchParams({ period });
+  const client = document.getElementById('clientSelect')?.value || '';
   const site = document.getElementById('siteSelect')?.value || '';
-  const siteQuery = site ? `&site_id=${encodeURIComponent(site)}` : '';
-  fetch(`/api/payroll/list?period=${period}${siteQuery}`)
+  const schedule = document.getElementById('scheduleSelect')?.value || '';
+  const status = document.getElementById('statusSelect')?.value || '';
+  if (client) params.set('client_id', client);
+  if (site) params.set('site_id', site);
+  if (schedule) params.set('payroll_schedule', schedule);
+  if (status) params.set('status', status);
+  fetch(`/api/payroll/list?${params.toString()}`)
       .then(r => r.json())
       .then(response => {
         if (response.ok) {
           renderPayrollTable(response.data);
         } else {
-          tbody.innerHTML = '<tr><td colspan="12" class="muted">Failed to load payroll data</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="16" class="muted">Failed to load payroll data</td></tr>';
           showAlert(response.message || 'Failed to load payroll data', 'error');
         }
       })
       .catch(() => {
-        tbody.innerHTML = '<tr><td colspan="12" class="muted">Error loading payroll data</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="16" class="muted">Error loading payroll data</td></tr>';
         showAlert('Error loading payroll data', 'error');
       });
   }
@@ -436,7 +490,7 @@
     const tbody = document.getElementById('payrollRows');
     
     if (!data || data.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="12" class="muted">No payroll records found for this period</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="16" class="muted">No payroll records found for this period</td></tr>';
       return;
     }
     
@@ -444,6 +498,10 @@
       <tr>
         <td>${record.employee_name || record.employee_email}</td>
         <td>${record.period}</td>
+        <td>${record.period_start || '-'} - ${record.period_end || '-'}</td>
+        <td>${record.pay_date || '-'}</td>
+        <td>${record.payroll_schedule === 'MID_MONTH' ? 'Tengah Bulan' : 'Akhir Bulan'}</td>
+        <td>${record.site_name || '-'}</td>
         <td>Rp ${formatNumber(record.salary_base)}</td>
         <td>${record.attendance_days}</td>
         <td>${record.late_days}</td>
@@ -481,6 +539,9 @@
     document.getElementById('detailEmployeeName').textContent = record.employee_name || '-';
     document.getElementById('detailEmployeeEmail').textContent = record.employee_email;
     document.getElementById('detailPeriod').textContent = record.period;
+    document.getElementById('detailAttendancePeriod').textContent = `${record.period_start || '-'} - ${record.period_end || '-'}`;
+    document.getElementById('detailPayDate').textContent = record.pay_date || '-';
+    document.getElementById('detailPayrollSchedule').textContent = record.payroll_schedule === 'MID_MONTH' ? 'Tengah Bulan' : 'Akhir Bulan';
     
     document.getElementById('detailAttendanceDays').textContent = record.attendance_days;
     document.getElementById('detailLateDays').textContent = record.late_days;
@@ -539,7 +600,16 @@
     }
     
     // Simple CSV export (can be enhanced with proper Excel library)
-    fetch(`/api/payroll/list?period=${period}`)
+    const params = new URLSearchParams({ period });
+    const client = document.getElementById('clientSelect')?.value || '';
+    const site = document.getElementById('siteSelect')?.value || '';
+    const schedule = document.getElementById('scheduleSelect')?.value || '';
+    const status = document.getElementById('statusSelect')?.value || '';
+    if (client) params.set('client_id', client);
+    if (site) params.set('site_id', site);
+    if (schedule) params.set('payroll_schedule', schedule);
+    if (status) params.set('status', status);
+    fetch(`/api/payroll/list?${params.toString()}`)
       .then(r => r.json())
       .then(response => {
         if (response.ok && response.data.length > 0) {
@@ -552,12 +622,16 @@
   
   // Export to CSV
   function exportToCSV(data, filename) {
-    const headers = ['Employee', 'Period', 'Base Salary', 'Attendance Days', 'Late Days', 'Absent Days', 'Leave Days', 'Late Deduction', 'Absent Deduction', 'Total Salary', 'Status'];
+    const headers = ['Employee', 'Period', 'Attendance Period', 'Pay Date', 'Schedule', 'Site', 'Base Salary', 'Attendance Days', 'Late Days', 'Absent Days', 'Leave Days', 'Late Deduction', 'Absent Deduction', 'Total Salary', 'Status'];
     const csvContent = [
       headers.join(','),
       ...data.map(record => [
         record.employee_name || record.employee_email,
         record.period,
+        `${record.period_start || ''} - ${record.period_end || ''}`,
+        record.pay_date || '',
+        record.payroll_schedule || 'MONTH_END',
+        record.site_name || '',
         record.salary_base,
         record.attendance_days,
         record.late_days,
@@ -648,7 +722,8 @@
   document.addEventListener('DOMContentLoaded', () => {
     initializePeriodOptions();
     loadEmployees();
-  loadSites();
+    loadClients();
+    loadSites();
     
     // Period select change
     document.getElementById('periodSelect').addEventListener('change', (e) => {

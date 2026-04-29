@@ -746,6 +746,7 @@ def create_app() -> Flask:
             can_manage_employees=user.role == "client_admin",
             can_manage_policies=user.role == "client_admin",
             can_manage_patrol=user.role == "client_admin",
+            can_manage_payroll=user.role == "client_admin",
             can_manage_users=user.role == "client_admin",
             can_change_password=user.role == "client_admin",
         )
@@ -1729,6 +1730,9 @@ def create_app() -> Flask:
         allow_qr = 1 if request.form.get("allow_qr") == "1" else 0
         auto_checkout = 1 if request.form.get("auto_checkout") == "1" else 0
         cutoff_time = (request.form.get("cutoff_time") or "").strip()
+        payroll_scheme = _normalize_payroll_scheme(request.form.get("payroll_scheme"))
+        payroll_schedule = _normalize_payroll_schedule(request.form.get("payroll_schedule"))
+        payroll_schedule = _normalize_payroll_schedule(request.form.get("payroll_schedule"))
         effective_from = _normalize_date_input(effective_from_raw)
         if not effective_from:
             flash("Tanggal mulai wajib format DD-MM-YYYY (contoh 01-02-2026) atau 1 Feb 2026.")
@@ -1755,6 +1759,8 @@ def create_app() -> Flask:
             allow_qr=allow_qr,
             auto_checkout=auto_checkout,
             cutoff_time=cutoff_time or None,
+            payroll_scheme=payroll_scheme,
+            payroll_schedule=payroll_schedule,
         )
         _log_audit_event(
             entity_type="policy",
@@ -1766,6 +1772,8 @@ def create_app() -> Flask:
                 "site_id": site_id,
                 "effective_from": effective_from,
                 "effective_to": effective_to,
+                "payroll_scheme": payroll_scheme,
+                "payroll_schedule": payroll_schedule,
             },
         )
         flash("Policy berhasil ditambahkan.")
@@ -1790,6 +1798,8 @@ def create_app() -> Flask:
         allow_qr = 1 if request.form.get("allow_qr") == "1" else 0
         auto_checkout = 1 if request.form.get("auto_checkout") == "1" else 0
         cutoff_time = (request.form.get("cutoff_time") or "").strip()
+        payroll_scheme = _normalize_payroll_scheme(request.form.get("payroll_scheme"))
+        payroll_schedule = _normalize_payroll_schedule(request.form.get("payroll_schedule"))
         effective_from = _normalize_date_input(effective_from_raw)
         if not effective_from:
             flash("Tanggal mulai wajib format DD-MM-YYYY (contoh 01-02-2026) atau 1 Feb 2026.")
@@ -1817,6 +1827,8 @@ def create_app() -> Flask:
             allow_qr=allow_qr,
             auto_checkout=auto_checkout,
             cutoff_time=cutoff_time or None,
+            payroll_scheme=payroll_scheme,
+            payroll_schedule=payroll_schedule,
         )
         _log_audit_event(
             entity_type="policy",
@@ -1824,7 +1836,11 @@ def create_app() -> Flask:
             action="UPDATE",
             actor=user,
             summary="Policy site diperbarui dari dashboard client.",
-            details={"site_id": site_id},
+            details={
+                "site_id": site_id,
+                "payroll_scheme": payroll_scheme,
+                "payroll_schedule": payroll_schedule,
+            },
         )
         flash("Policy berhasil diperbarui.")
         return redirect(url_for("dashboard_client", _anchor="policies"))
@@ -2914,7 +2930,20 @@ def create_app() -> Flask:
     @app.route("/api/payroll/generate", methods=["POST"])
     def payroll_generate():
         user = _current_user()
-        if not user or user.role not in ADMIN_ROLES or not _is_pro(user):
+        if not user:
+            return _json_forbidden()
+        is_client_admin = user.role == "client_admin"
+        if user.role in ADMIN_ROLES:
+            if not _is_pro(user):
+                return _json_forbidden()
+            client_scope = None
+            site_scope = None
+        elif is_client_admin:
+            client_scope = _client_user_client_id(user)
+            site_scope = _client_user_site_id(user)
+            if not client_scope or not site_scope:
+                return _json_forbidden()
+        else:
             return _json_forbidden()
         
         data = _get_json()
@@ -2943,8 +2972,14 @@ def create_app() -> Flask:
             potongan_telat_rate != PAYROLL_DEFAULT_LATE_DEDUCTION
             or potongan_absen_rate != PAYROLL_DEFAULT_ABSENT_DEDUCTION
         )
-        if uses_custom_rates and not _payroll_plus_enabled(user):
+        if uses_custom_rates and not _payroll_plus_enabled(user, client_scope):
             return _addon_required_response("Custom payroll rate")
+        if is_client_admin and not _employee_email_in_payroll_scope(
+            employee_email,
+            client_id=client_scope,
+            site_id=site_scope,
+        ):
+            return jsonify(ok=False, message="Pegawai tidak berada dalam scope client/site ini."), 403
         
         try:
             payroll_id = _create_payroll_record(
@@ -2964,7 +2999,19 @@ def create_app() -> Flask:
     @app.route("/api/payroll/list", methods=["GET"])
     def payroll_list():
         user = _current_user()
-        if not user or user.role not in ADMIN_ROLES or not _is_pro(user):
+        if not user:
+            return _json_forbidden()
+        if user.role in ADMIN_ROLES:
+            if not _is_pro(user):
+                return _json_forbidden()
+            client_scope = None
+            site_scope_default = None
+        elif user.role in CLIENT_ROLES:
+            client_scope = _client_user_client_id(user)
+            site_scope_default = _client_user_site_id(user)
+            if not client_scope or not site_scope_default:
+                return _json_forbidden()
+        else:
             return _json_forbidden()
         
         period = _normalize_period_input(request.args.get("period"))
@@ -2972,13 +3019,33 @@ def create_app() -> Flask:
             # Default to current period
             now = datetime.now()
             period = f"{now.year:04d}-{now.month:02d}"
+        status_filter = (request.args.get("status") or "").strip().lower()
+        if status_filter not in {"draft", "approved"}:
+            status_filter = None
+        schedule_filter = _normalize_payroll_schedule(request.args.get("payroll_schedule"))
+        if not (request.args.get("payroll_schedule") or "").strip():
+            schedule_filter = None
+        client_filter = None
+        if user.role in ADMIN_ROLES:
+            client_id_raw = (request.args.get("client_id") or "").strip()
+            if client_id_raw.isdigit():
+                client_filter = int(client_id_raw)
         site_id = request.args.get("site_id")
         try:
             site_id_val = int(site_id) if site_id is not None and site_id != "" else None
         except ValueError:
             site_id_val = None
+        if user.role in CLIENT_ROLES:
+            site_id_val = site_scope_default
+            client_filter = client_scope
 
-        payroll_list = _list_payroll_by_period(period, site_id=site_id_val)
+        payroll_list = _list_payroll_by_period(
+            period,
+            site_id=site_id_val,
+            client_id=client_filter,
+            payroll_schedule=schedule_filter,
+            status=status_filter,
+        )
         return jsonify(ok=True, data=payroll_list), 200
     
     @app.route("/api/payroll/my", methods=["GET"])
@@ -3015,19 +3082,49 @@ def create_app() -> Flask:
     @app.route("/api/payroll/<int:payroll_id>", methods=["GET"])
     def payroll_detail(payroll_id: int):
         user = _current_user()
-        if not user or user.role not in ADMIN_ROLES or not _is_pro(user):
+        if not user:
+            return _json_forbidden()
+        if user.role in ADMIN_ROLES:
+            if not _is_pro(user):
+                return _json_forbidden()
+            client_scope = None
+            site_scope = None
+        elif user.role in CLIENT_ROLES:
+            client_scope = _client_user_client_id(user)
+            site_scope = _client_user_site_id(user)
+            if not client_scope or not site_scope:
+                return _json_forbidden()
+        else:
             return _json_forbidden()
         record = _get_payroll_by_id(payroll_id)
         if not record:
             return jsonify(ok=False, message="Payroll tidak ditemukan."), 404
+        if user.role in CLIENT_ROLES and not _payroll_record_in_scope(
+            record,
+            client_id=client_scope,
+            site_id=site_scope,
+        ):
+            return _json_forbidden()
         return jsonify(ok=True, data=record), 200
 
     @app.route("/api/payroll/<int:payroll_id>/update", methods=["POST"])
     def payroll_update(payroll_id: int):
         user = _current_user()
-        if not user or user.role not in ADMIN_ROLES or not _is_pro(user):
+        if not user:
             return _json_forbidden()
-        if not _payroll_plus_enabled(user):
+        if user.role in ADMIN_ROLES:
+            if not _is_pro(user):
+                return _json_forbidden()
+            client_scope = None
+            site_scope = None
+        elif user.role == "client_admin":
+            client_scope = _client_user_client_id(user)
+            site_scope = _client_user_site_id(user)
+            if not client_scope or not site_scope:
+                return _json_forbidden()
+        else:
+            return _json_forbidden()
+        if not _payroll_plus_enabled(user, client_scope):
             return _addon_required_response("Payroll plus")
         data = _get_json()
         try:
@@ -3040,6 +3137,12 @@ def create_app() -> Flask:
         record = _get_payroll_by_id(payroll_id)
         if not record:
             return jsonify(ok=False, message="Payroll tidak ditemukan."), 404
+        if user.role == "client_admin" and not _payroll_record_in_scope(
+            record,
+            client_id=client_scope,
+            site_id=site_scope,
+        ):
+            return _json_forbidden()
         if (record.get("status") or "").lower() == "approved":
             return jsonify(ok=False, message="Payroll approved tidak dapat diubah."), 400
         updated = _update_payroll_adjustments(payroll_id, potongan_lain, tunjangan)
@@ -3048,11 +3151,29 @@ def create_app() -> Flask:
     @app.route("/api/payroll/<int:payroll_id>/approve", methods=["POST"])
     def payroll_approve(payroll_id: int):
         user = _current_user()
-        if not user or user.role not in ADMIN_ROLES or not _is_pro(user):
+        if not user:
+            return _json_forbidden()
+        if user.role in ADMIN_ROLES:
+            if not _is_pro(user):
+                return _json_forbidden()
+            client_scope = None
+            site_scope = None
+        elif user.role == "client_admin":
+            client_scope = _client_user_client_id(user)
+            site_scope = _client_user_site_id(user)
+            if not client_scope or not site_scope:
+                return _json_forbidden()
+        else:
             return _json_forbidden()
         record = _get_payroll_by_id(payroll_id)
         if not record:
             return jsonify(ok=False, message="Payroll tidak ditemukan."), 404
+        if user.role == "client_admin" and not _payroll_record_in_scope(
+            record,
+            client_id=client_scope,
+            site_id=site_scope,
+        ):
+            return _json_forbidden()
         if (record.get("status") or "").lower() == "approved":
             return jsonify(ok=False, message="Payroll sudah approved."), 400
         approved = _approve_payroll_record(payroll_id, user)
@@ -4304,6 +4425,12 @@ RESET_SMTP_TLS = (os.environ.get("RESET_SMTP_TLS") or "1").lower() not in {"0", 
 RESET_WHATSAPP_WEBHOOK_URL = (os.environ.get("RESET_WHATSAPP_WEBHOOK_URL") or "").strip()
 PAYROLL_DEFAULT_LATE_DEDUCTION = 50000.0
 PAYROLL_DEFAULT_ABSENT_DEDUCTION = 100000.0
+PAYROLL_SCHEME_PRORATED = "PRORATED_ATTENDANCE"
+PAYROLL_SCHEME_FULL_MONTHLY = "FULL_MONTHLY_DEDUCTION"
+PAYROLL_SCHEME_OPTIONS = {PAYROLL_SCHEME_PRORATED, PAYROLL_SCHEME_FULL_MONTHLY}
+PAYROLL_SCHEDULE_MONTH_END = "MONTH_END"
+PAYROLL_SCHEDULE_MID_MONTH = "MID_MONTH"
+PAYROLL_SCHEDULE_OPTIONS = {PAYROLL_SCHEDULE_MONTH_END, PAYROLL_SCHEDULE_MID_MONTH}
 ADDON_PATROL = "patrol"
 ADDON_CALENDAR = "calendar"
 ADDON_REPORTING_ADVANCED = "reporting_advanced"
@@ -4352,6 +4479,8 @@ DEFAULT_ATTENDANCE_POLICY = {
     "allow_qr": 1,
     "auto_checkout": 0,
     "cutoff_time": None,
+    "payroll_scheme": PAYROLL_SCHEME_PRORATED,
+    "payroll_schedule": PAYROLL_SCHEDULE_MONTH_END,
 }
 ATTENDANCE_ACTION_CHECKIN = "checkin"
 ATTENDANCE_ACTION_CHECKOUT = "checkout"
@@ -5279,6 +5408,20 @@ def _normalize_period_input(value: str | None) -> str | None:
     if year < 2000 or year > 2100 or month < 1 or month > 12:
         return None
     return f"{year:04d}-{month:02d}"
+
+
+def _normalize_payroll_scheme(value: object) -> str:
+    scheme = (str(value or "").strip().upper())
+    if scheme in PAYROLL_SCHEME_OPTIONS:
+        return scheme
+    return PAYROLL_SCHEME_PRORATED
+
+
+def _normalize_payroll_schedule(value: object) -> str:
+    schedule = (str(value or "").strip().upper())
+    if schedule in PAYROLL_SCHEDULE_OPTIONS:
+        return schedule
+    return PAYROLL_SCHEDULE_MONTH_END
 
 
 def _date_keys_between(start_date: date, end_date: date) -> list[str]:
@@ -6359,17 +6502,22 @@ def _policy_with_defaults(row: sqlite3.Row | None) -> dict:
     for key in policy.keys():
         if key in row.keys() and row[key] is not None:
             policy[key] = row[key]
+    policy["payroll_scheme"] = _normalize_payroll_scheme(policy.get("payroll_scheme"))
+    policy["payroll_schedule"] = _normalize_payroll_schedule(policy.get("payroll_schedule"))
     return policy
 
 
 def _resolve_attendance_policy(
-    site_id: int | None, client_id: int | None, shift_id: int | None
+    site_id: int | None,
+    client_id: int | None,
+    shift_id: int | None,
+    as_of_date: str | None = None,
 ) -> dict:
     conn = _db_connect()
     try:
         if not _table_exists(conn, "attendance_policies"):
             return DEFAULT_ATTENDANCE_POLICY.copy()
-        today = _today_key()
+        today = _normalize_date_input(as_of_date) or _today_key()
         if site_id:
             cur = conn.execute(
                 """
@@ -6406,6 +6554,22 @@ def _resolve_attendance_policy(
             row = cur.fetchone()
             if row:
                 return _policy_with_defaults(row)
+        cur = conn.execute(
+            """
+            SELECT *
+            FROM attendance_policies
+            WHERE scope_type = 'GLOBAL'
+              AND (shift_id IS NULL OR shift_id = ?)
+              AND effective_from <= ?
+              AND (effective_to IS NULL OR effective_to = '' OR effective_to >= ?)
+            ORDER BY CASE WHEN shift_id = ? THEN 0 ELSE 1 END, effective_from DESC
+            LIMIT 1
+            """,
+            (shift_id, today, today, shift_id),
+        )
+        row = cur.fetchone()
+        if row:
+            return _policy_with_defaults(row)
         return DEFAULT_ATTENDANCE_POLICY.copy()
     finally:
         conn.close()
@@ -7863,12 +8027,19 @@ def _create_policy(
     allow_qr: int,
     auto_checkout: int,
     cutoff_time: str | None,
+    payroll_scheme: str = PAYROLL_SCHEME_PRORATED,
+    payroll_schedule: str = PAYROLL_SCHEDULE_MONTH_END,
 ) -> int:
     scope = scope_type.upper()
     if scope == "CLIENT":
         site_id = None
     elif scope == "SITE":
         client_id = None
+    elif scope == "GLOBAL":
+        client_id = None
+        site_id = None
+    payroll_scheme = _normalize_payroll_scheme(payroll_scheme)
+    payroll_schedule = _normalize_payroll_schedule(payroll_schedule)
     conn = _db_connect()
     try:
         cur = conn.execute(
@@ -7876,9 +8047,9 @@ def _create_policy(
             INSERT INTO attendance_policies (
                 scope_type, client_id, site_id, shift_id, effective_from, effective_to,
                 work_duration_minutes, grace_minutes, late_threshold_minutes,
-                allow_gps, require_selfie, allow_qr, auto_checkout, cutoff_time,
+                allow_gps, require_selfie, allow_qr, auto_checkout, cutoff_time, payroll_scheme, payroll_schedule,
                 created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 scope,
@@ -7895,6 +8066,8 @@ def _create_policy(
                 allow_qr,
                 auto_checkout,
                 cutoff_time or None,
+                payroll_scheme,
+                payroll_schedule,
                 _now_ts(),
                 _now_ts(),
             ),
@@ -7922,12 +8095,19 @@ def _update_policy(
     allow_qr: int,
     auto_checkout: int,
     cutoff_time: str | None,
+    payroll_scheme: str = PAYROLL_SCHEME_PRORATED,
+    payroll_schedule: str = PAYROLL_SCHEDULE_MONTH_END,
 ) -> None:
     scope = scope_type.upper()
     if scope == "CLIENT":
         site_id = None
     elif scope == "SITE":
         client_id = None
+    elif scope == "GLOBAL":
+        client_id = None
+        site_id = None
+    payroll_scheme = _normalize_payroll_scheme(payroll_scheme)
+    payroll_schedule = _normalize_payroll_schedule(payroll_schedule)
     conn = _db_connect()
     try:
         conn.execute(
@@ -7936,6 +8116,7 @@ def _update_policy(
             SET scope_type = ?, client_id = ?, site_id = ?, shift_id = ?, effective_from = ?, effective_to = ?,
                 work_duration_minutes = ?, grace_minutes = ?, late_threshold_minutes = ?,
                 allow_gps = ?, require_selfie = ?, allow_qr = ?, auto_checkout = ?, cutoff_time = ?,
+                payroll_scheme = ?, payroll_schedule = ?,
                 updated_at = ?
             WHERE id = ?
             """,
@@ -7954,6 +8135,8 @@ def _update_policy(
                 allow_qr,
                 auto_checkout,
                 cutoff_time or None,
+                payroll_scheme,
+                payroll_schedule,
                 _now_ts(),
                 policy_id,
             ),
@@ -10206,6 +10389,8 @@ def _init_db() -> None:
                 allow_qr INTEGER DEFAULT 1,
                 auto_checkout INTEGER DEFAULT 0,
                 cutoff_time TEXT,
+                payroll_scheme TEXT DEFAULT 'PRORATED_ATTENDANCE',
+                payroll_schedule TEXT DEFAULT 'MONTH_END',
                 created_at TEXT,
                 updated_at TEXT,
                 FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE RESTRICT,
@@ -10540,6 +10725,7 @@ def _init_db() -> None:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 employee_id INTEGER NOT NULL,
                 client_id INTEGER,
+                site_id INTEGER,
                 branch_id INTEGER,
                 employee_email TEXT NOT NULL,
                 period TEXT NOT NULL,
@@ -10553,6 +10739,11 @@ def _init_db() -> None:
                 potongan_lain REAL DEFAULT 0,
                 tunjangan REAL DEFAULT 0,
                 total_gaji REAL NOT NULL DEFAULT 0,
+                period_start TEXT,
+                period_end TEXT,
+                pay_date TEXT,
+                payroll_schedule TEXT,
+                payroll_scheme TEXT,
                 status TEXT DEFAULT 'draft',
                 approved_by_email TEXT,
                 approved_at TEXT,
@@ -10571,9 +10762,22 @@ def _init_db() -> None:
         )
         if _table_exists(conn, "payroll"):
             _ensure_column(conn, "payroll", "client_id", "client_id INTEGER")
+            _ensure_column(conn, "payroll", "site_id", "site_id INTEGER")
             _ensure_column(conn, "payroll", "branch_id", "branch_id INTEGER")
             _ensure_column(conn, "payroll", "approved_by_email", "approved_by_email TEXT")
             _ensure_column(conn, "payroll", "approved_at", "approved_at TEXT")
+            _ensure_column(conn, "payroll", "period_start", "period_start TEXT")
+            _ensure_column(conn, "payroll", "period_end", "period_end TEXT")
+            _ensure_column(conn, "payroll", "pay_date", "pay_date TEXT")
+            _ensure_column(conn, "payroll", "payroll_schedule", "payroll_schedule TEXT")
+            _ensure_column(conn, "payroll", "payroll_scheme", "payroll_scheme TEXT")
+            conn.execute(
+                """
+                UPDATE payroll
+                SET site_id = branch_id
+                WHERE site_id IS NULL AND branch_id IS NOT NULL
+                """
+            )
 
         if not _table_exists(conn, "attendance"):
             conn.execute(
@@ -10881,6 +11085,32 @@ def _init_db() -> None:
             _ensure_column(conn, "pending_employee_assignments", "assignment_id", "assignment_id INTEGER")
         if _table_exists(conn, "attendance_policies"):
             _ensure_column(conn, "attendance_policies", "shift_id", "shift_id INTEGER")
+            _ensure_column(
+                conn,
+                "attendance_policies",
+                "payroll_scheme",
+                "payroll_scheme TEXT DEFAULT 'PRORATED_ATTENDANCE'",
+            )
+            _ensure_column(
+                conn,
+                "attendance_policies",
+                "payroll_schedule",
+                "payroll_schedule TEXT DEFAULT 'MONTH_END'",
+            )
+            conn.execute(
+                """
+                UPDATE attendance_policies
+                SET payroll_scheme = 'PRORATED_ATTENDANCE'
+                WHERE payroll_scheme IS NULL OR payroll_scheme = ''
+                """
+            )
+            conn.execute(
+                """
+                UPDATE attendance_policies
+                SET payroll_schedule = 'MONTH_END'
+                WHERE payroll_schedule IS NULL OR payroll_schedule = ''
+                """
+            )
         if _table_exists(conn, "manual_attendance_requests"):
             _ensure_column(conn, "manual_attendance_requests", "created_by_email", "created_by_email TEXT")
             conn.execute(
@@ -11876,16 +12106,28 @@ def _late_cutoff_minutes_for_assignment(assignment: dict | None) -> int:
     return start_minutes + max(grace_minutes, late_threshold)
 
 
-def _calculate_attendance_summary(employee_email: str, period: str) -> dict:
+def _calculate_attendance_summary(
+    employee_email: str,
+    period: str,
+    period_start: str | None = None,
+    period_end: str | None = None,
+) -> dict:
     """Calculate attendance summary for an employee in a period"""
     start = time.perf_counter()
     conn = _db_connect()
     try:
         period_key = _normalize_period_input(period)
-        if not period_key:
+        start_override = _normalize_date_input(period_start)
+        end_override = _normalize_date_input(period_end)
+        if start_override and end_override:
+            start_dt = datetime.fromisoformat(start_override).date()
+            end_dt = datetime.fromisoformat(end_override).date()
+            if start_dt > end_dt:
+                start_dt, end_dt = end_dt, start_dt
+        elif period_key:
+            start_dt, end_dt = _month_bounds(period_key)
+        else:
             return {"attendance_days": 0, "late_days": 0, "absent_days": 0, "leave_days": 0, "working_days": 0}
-
-        start_dt, end_dt = _month_bounds(period_key)
         start_date = start_dt.strftime("%Y-%m-%d")
         end_date = end_dt.strftime("%Y-%m-%d")
         email_key = (employee_email or "").strip().lower()
@@ -11973,25 +12215,31 @@ def _calculate_payroll(employee_email: str, period: str, salary_base: float,
                        potongan_telat_rate: float = 50000, 
                        potongan_absen_rate: float = 100000) -> dict:
     """Calculate payroll for an employee"""
-    attendance_summary = _calculate_attendance_summary(employee_email, period)
+    payroll_policy = _resolve_payroll_policy_for_employee(employee_email, period)
+    payroll_scheme = _normalize_payroll_scheme(payroll_policy.get("payroll_scheme"))
+    period_info = _payroll_period_info(period, payroll_policy.get("payroll_schedule"))
+    attendance_summary = _calculate_attendance_summary(
+        employee_email,
+        period,
+        period_start=period_info["period_start"],
+        period_end=period_info["period_end"],
+    )
     
     attendance_days = attendance_summary["attendance_days"]
     late_days = attendance_summary["late_days"]
     absent_days = attendance_summary["absent_days"]
     leave_days = attendance_summary["leave_days"]
     
-    # Calculate deductions
-    potongan_telat = late_days * potongan_telat_rate
-    potongan_absen = absent_days * potongan_absen_rate
-    
     working_days = max(1, int(attendance_summary.get("working_days") or 0))
     daily_rate = salary_base / working_days
-    
-    # Calculate base pay (only for attendance days)
-    base_pay = attendance_days * daily_rate
-    
-    # Total salary
-    total_gaji = base_pay - potongan_telat - potongan_absen
+    potongan_telat = late_days * potongan_telat_rate
+    if payroll_scheme == PAYROLL_SCHEME_FULL_MONTHLY:
+        gross_salary = salary_base
+        potongan_absen = absent_days * daily_rate
+    else:
+        gross_salary = attendance_days * daily_rate
+        potongan_absen = 0
+    total_gaji = gross_salary - potongan_telat - potongan_absen
     
     return {
         "salary_base": salary_base,
@@ -12005,8 +12253,114 @@ def _calculate_payroll(employee_email: str, period: str, salary_base: float,
         "potongan_lain": 0,
         "tunjangan": 0,
         "total_gaji": max(0, total_gaji),  # Ensure non-negative
-        "daily_rate": daily_rate
+        "daily_rate": daily_rate,
+        "gross_salary": gross_salary,
+        "payroll_scheme": payroll_scheme,
+        "payroll_schedule": period_info["payroll_schedule"],
+        "period_start": period_info["period_start"],
+        "period_end": period_info["period_end"],
+        "pay_date": period_info["pay_date"],
     }
+
+
+def _resolve_payroll_policy_for_employee(employee_email: str, period: str) -> dict:
+    period_key = _normalize_period_input(period)
+    if not period_key:
+        return DEFAULT_ATTENDANCE_POLICY.copy()
+    start_dt, end_dt = _month_bounds(period_key)
+    email_key = (employee_email or "").strip().lower()
+    for date_key in reversed(_date_keys_between(start_dt, end_dt)):
+        assignment = _assignment_for_employee_date(email_key, date_key)
+        if assignment:
+            initial_policy = _resolve_attendance_policy(
+                assignment.get("site_id"),
+                assignment.get("client_id"),
+                assignment.get("shift_id"),
+                date_key,
+            )
+            period_info = _payroll_period_info(period_key, initial_policy.get("payroll_schedule"))
+            return _resolve_attendance_policy(
+                assignment.get("site_id"),
+                assignment.get("client_id"),
+                assignment.get("shift_id"),
+                period_info["pay_date"],
+            )
+    client_id, site_id = _enterprise_scope_for_employee_email(email_key)
+    initial_policy = _resolve_attendance_policy(site_id, client_id, None, end_dt.strftime("%Y-%m-%d"))
+    period_info = _payroll_period_info(period_key, initial_policy.get("payroll_schedule"))
+    return _resolve_attendance_policy(site_id, client_id, None, period_info["pay_date"])
+
+
+def _payroll_period_info(period: str, payroll_schedule: object) -> dict:
+    period_key = _normalize_period_input(period)
+    if not period_key:
+        now = datetime.now()
+        period_key = f"{now.year:04d}-{now.month:02d}"
+    year_raw, month_raw = period_key.split("-")
+    year = int(year_raw)
+    month = int(month_raw)
+    schedule = _normalize_payroll_schedule(payroll_schedule)
+    if schedule == PAYROLL_SCHEDULE_MID_MONTH:
+        pay_dt = date(year, month, 16)
+        if month == 1:
+            prev_year, prev_month = year - 1, 12
+        else:
+            prev_year, prev_month = year, month - 1
+        start_dt = date(prev_year, prev_month, 16)
+        end_dt = date(year, month, 15)
+    else:
+        start_dt = date(year, month, 1)
+        _, last_day = calendar.monthrange(year, month)
+        end_dt = date(year, month, last_day)
+        pay_dt = date(year, month, min(30, last_day))
+    return {
+        "period_start": start_dt.strftime("%Y-%m-%d"),
+        "period_end": end_dt.strftime("%Y-%m-%d"),
+        "pay_date": pay_dt.strftime("%Y-%m-%d"),
+        "payroll_schedule": schedule,
+    }
+
+
+def _employee_email_in_payroll_scope(
+    employee_email: str,
+    *,
+    client_id: int | None,
+    site_id: int | None,
+) -> bool:
+    normalized = (employee_email or "").strip().lower()
+    if not normalized or not client_id or not site_id:
+        return False
+    employee = _employee_by_email(normalized, only_active=False)
+    if employee:
+        employee_client_id = int(employee.get("client_id") or 0)
+        employee_site_id = int(employee.get("branch_id") or employee.get("site_id") or 0)
+        if employee_client_id == int(client_id) and employee_site_id == int(site_id):
+            return True
+        if employee_site_id == int(site_id):
+            site = _get_site_by_id(employee_site_id)
+            if site and int(_row_get(site, "client_id") or 0) == int(client_id):
+                return True
+    scoped_client_id, scoped_site_id = _enterprise_scope_for_employee_email(normalized)
+    return scoped_client_id == int(client_id) and scoped_site_id == int(site_id)
+
+
+def _payroll_record_in_scope(
+    record: dict | None,
+    *,
+    client_id: int | None,
+    site_id: int | None,
+) -> bool:
+    if not record or not client_id or not site_id:
+        return False
+    record_client_id = int(record.get("client_id") or 0)
+    record_site_id = int(record.get("site_id") or record.get("branch_id") or 0)
+    if record_client_id == int(client_id) and record_site_id == int(site_id):
+        return True
+    return _employee_email_in_payroll_scope(
+        record.get("employee_email") or "",
+        client_id=client_id,
+        site_id=site_id,
+    )
 
 
 def _create_payroll_record(
@@ -12017,12 +12371,16 @@ def _create_payroll_record(
     potongan_absen_rate: float = 100000,
 ) -> int:
     """Create payroll record for an employee"""
+    employee_email = (employee_email or "").strip().lower()
     conn = _db_connect()
     try:
         # Get employee info
         employee = _employee_by_email(employee_email)
         if not employee:
             raise ValueError(f"Employee {employee_email} not found")
+        existing = _get_payroll_by_employee_period(employee_email, period)
+        if existing and (existing.get("status") or "").lower() == "approved":
+            raise ValueError("Payroll approved tidak dapat digenerate ulang.")
         client_id, branch_id = _enterprise_scope_for_employee_email(employee_email)
         
         # Calculate payroll
@@ -12033,36 +12391,98 @@ def _create_payroll_record(
             potongan_telat_rate=potongan_telat_rate,
             potongan_absen_rate=potongan_absen_rate,
         )
-        
-        # Insert or update payroll record
+
+        if existing:
+            payroll_id = int(existing.get("id") or 0)
+            conn.execute(
+                """
+                UPDATE payroll
+                SET employee_id = ?,
+                    client_id = ?,
+                    site_id = ?,
+                    branch_id = ?,
+                    employee_email = ?,
+                    salary_base = ?,
+                    attendance_days = ?,
+                    late_days = ?,
+                    absent_days = ?,
+                    leave_days = ?,
+                    potongan_telat = ?,
+                    potongan_absen = ?,
+                    potongan_lain = 0,
+                    tunjangan = 0,
+                    total_gaji = ?,
+                    period_start = ?,
+                    period_end = ?,
+                    pay_date = ?,
+                    payroll_schedule = ?,
+                    payroll_scheme = ?,
+                    status = 'draft',
+                    approved_by_email = NULL,
+                    approved_at = NULL,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    employee.get("id"),
+                    client_id,
+                    branch_id,
+                    branch_id,
+                    employee_email,
+                    payroll_data["salary_base"],
+                    payroll_data["attendance_days"],
+                    payroll_data["late_days"],
+                    payroll_data["absent_days"],
+                    payroll_data["leave_days"],
+                    payroll_data["potongan_telat"],
+                    payroll_data["potongan_absen"],
+                    payroll_data["total_gaji"],
+                    payroll_data["period_start"],
+                    payroll_data["period_end"],
+                    payroll_data["pay_date"],
+                    payroll_data["payroll_schedule"],
+                    payroll_data["payroll_scheme"],
+                    _now_ts(),
+                    payroll_id,
+                ),
+            )
+            return payroll_id
+
         cur = conn.execute(
             """
-            INSERT OR REPLACE INTO payroll (
-                employee_id, client_id, branch_id, employee_email, period, salary_base, attendance_days,
+            INSERT INTO payroll (
+                employee_id, client_id, site_id, branch_id, employee_email, period, salary_base, attendance_days,
                 late_days, absent_days, leave_days, potongan_telat, potongan_absen,
-                potongan_lain, tunjangan, total_gaji, status, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                potongan_lain, tunjangan, total_gaji, period_start, period_end, pay_date,
+                payroll_schedule, payroll_scheme, status, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                employee.get('id'),
+                employee.get("id"),
                 client_id,
+                branch_id,
                 branch_id,
                 employee_email,
                 period,
-                payroll_data['salary_base'],
-                payroll_data['attendance_days'],
-                payroll_data['late_days'],
-                payroll_data['absent_days'],
-                payroll_data['leave_days'],
-                payroll_data['potongan_telat'],
-                payroll_data['potongan_absen'],
-                payroll_data['potongan_lain'],
-                payroll_data['tunjangan'],
-                payroll_data['total_gaji'],
-                'draft',
+                payroll_data["salary_base"],
+                payroll_data["attendance_days"],
+                payroll_data["late_days"],
+                payroll_data["absent_days"],
+                payroll_data["leave_days"],
+                payroll_data["potongan_telat"],
+                payroll_data["potongan_absen"],
+                payroll_data["potongan_lain"],
+                payroll_data["tunjangan"],
+                payroll_data["total_gaji"],
+                payroll_data["period_start"],
+                payroll_data["period_end"],
+                payroll_data["pay_date"],
+                payroll_data["payroll_schedule"],
+                payroll_data["payroll_scheme"],
+                "draft",
                 _now_ts(),
-                _now_ts()
-            )
+                _now_ts(),
+            ),
         )
         return int(cur.lastrowid)
     finally:
@@ -12070,46 +12490,58 @@ def _create_payroll_record(
         conn.close()
 
 
-def _list_payroll_by_period(period: str, site_id: int | None = None) -> list[dict]:
-    """List all payroll records for a period. Optionally filter by site_id (employee assignment site)."""
+def _list_payroll_by_period(
+    period: str,
+    site_id: int | None = None,
+    client_id: int | None = None,
+    payroll_schedule: str | None = None,
+    status: str | None = None,
+) -> list[dict]:
+    """List payroll records for a period with optional tenant/site filters."""
     conn = _db_connect()
     try:
         if not _table_exists(conn, "payroll"):
             return []
-        if site_id is None:
-            cur = conn.execute(
+        clauses = ["p.period = ?"]
+        params: list[object] = [period]
+        if client_id is not None:
+            clauses.append("(p.client_id = ? OR e.client_id = ? OR s.client_id = ?)")
+            params.extend([client_id, client_id, client_id])
+        if site_id is not None:
+            clauses.append(
                 """
-                SELECT p.*, e.name as employee_name
-                FROM payroll p
-                LEFT JOIN employees e ON p.employee_id = e.id
-                WHERE p.period = ?
-                ORDER BY e.name
-                """,
-                (period,)
-            )
-        else:
-            # Only include payrolls for employees who have an active assignment at the given site
-            cur = conn.execute(
-                """
-                SELECT p.*, e.name as employee_name
-                FROM payroll p
-                LEFT JOIN employees e ON p.employee_id = e.id
-                WHERE p.period = ?
-                  AND (
-                    p.branch_id = ?
-                    OR e.site_id = ?
-                    OR EXISTS (
-                      SELECT 1 FROM assignments a
-                      JOIN users u ON u.id = a.employee_user_id
-                      WHERE lower(u.email) = lower(p.employee_email)
-                        AND a.site_id = ?
-                        AND (a.status IS NULL OR upper(a.status) = 'ACTIVE')
-                    )
+                (
+                  p.branch_id = ?
+                  OR p.site_id = ?
+                  OR e.site_id = ?
+                  OR EXISTS (
+                    SELECT 1 FROM assignments a
+                    JOIN users u ON u.id = a.employee_user_id
+                    WHERE lower(u.email) = lower(p.employee_email)
+                      AND a.site_id = ?
+                      AND (a.status IS NULL OR upper(a.status) = 'ACTIVE')
                   )
-                ORDER BY e.name
-                """,
-                (period, site_id, site_id, site_id),
+                )
+                """
             )
+            params.extend([site_id, site_id, site_id, site_id])
+        schedule = _normalize_payroll_schedule(payroll_schedule) if payroll_schedule else None
+        if schedule:
+            clauses.append("COALESCE(p.payroll_schedule, 'MONTH_END') = ?")
+            params.append(schedule)
+        if status:
+            clauses.append("lower(COALESCE(p.status, 'draft')) = ?")
+            params.append(status.lower())
+        query = f"""
+            SELECT p.*, e.name as employee_name, s.name AS site_name, COALESCE(c.name, s.client_name) AS client_name
+            FROM payroll p
+            LEFT JOIN employees e ON p.employee_id = e.id
+            LEFT JOIN sites s ON s.id = e.site_id
+            LEFT JOIN clients c ON c.id = COALESCE(p.client_id, e.client_id, s.client_id)
+            WHERE {' AND '.join(clauses)}
+            ORDER BY e.name
+        """
+        cur = conn.execute(query, tuple(params))
         return [dict(row) for row in cur.fetchall()]
     finally:
         conn.close()
@@ -12126,7 +12558,7 @@ def _get_payroll_by_employee_period(employee_email: str, period: str) -> dict | 
             SELECT p.*, e.name as employee_name
             FROM payroll p
             LEFT JOIN employees e ON p.employee_id = e.id
-            WHERE p.employee_email = ? AND p.period = ?
+            WHERE lower(p.employee_email) = lower(?) AND p.period = ?
             """,
             (employee_email, period)
         )
@@ -14399,6 +14831,23 @@ def _enterprise_scope_for_employee_email(email: str | None) -> tuple[int | None,
                 (normalized,),
             ).fetchone()
             if row:
+                return (
+                    int(row["client_id"]) if row["client_id"] is not None else None,
+                    int(row["branch_id"]) if row["branch_id"] is not None else None,
+                )
+        if _table_exists(conn, "employees") and _table_exists(conn, "sites"):
+            row = conn.execute(
+                """
+                SELECT COALESCE(e.client_id, s.client_id) AS client_id,
+                       COALESCE(e.branch_id, e.site_id) AS branch_id
+                FROM employees e
+                LEFT JOIN sites s ON s.id = e.site_id
+                WHERE lower(e.email) = ?
+                LIMIT 1
+                """,
+                (normalized,),
+            ).fetchone()
+            if row and (row["client_id"] is not None or row["branch_id"] is not None):
                 return (
                     int(row["client_id"]) if row["client_id"] is not None else None,
                     int(row["branch_id"]) if row["branch_id"] is not None else None,
@@ -17583,8 +18032,9 @@ def admin_bp() -> Blueprint:
         allow_qr = 1 if request.form.get("allow_qr") == "1" else 0
         auto_checkout = 1 if request.form.get("auto_checkout") == "1" else 0
         cutoff_time = (request.form.get("cutoff_time") or "").strip()
+        payroll_scheme = _normalize_payroll_scheme(request.form.get("payroll_scheme"))
 
-        if scope_type not in {"CLIENT", "SITE"}:
+        if scope_type not in {"GLOBAL", "CLIENT", "SITE"}:
             scope_type = "CLIENT"
         if not effective_from:
             flash("Tanggal mulai wajib diisi.")
@@ -17599,6 +18049,8 @@ def admin_bp() -> Blueprint:
             flash("Site wajib dipilih untuk scope SITE.")
             return redirect(url_for("admin.policies", _anchor="add-policy"))
         if user and user.role == "client_admin":
+            if scope_type == "GLOBAL":
+                return _json_forbidden()
             if scope_type == "CLIENT":
                 _require_client_admin_client(user, client_id)
             else:
@@ -17623,6 +18075,8 @@ def admin_bp() -> Blueprint:
             allow_qr=allow_qr,
             auto_checkout=auto_checkout,
             cutoff_time=cutoff_time or None,
+            payroll_scheme=payroll_scheme,
+            payroll_schedule=payroll_schedule,
         )
         _log_audit_event(
             entity_type="policy",
@@ -17645,6 +18099,8 @@ def admin_bp() -> Blueprint:
                 "allow_qr": allow_qr,
                 "auto_checkout": auto_checkout,
                 "cutoff_time": cutoff_time or None,
+                "payroll_scheme": payroll_scheme,
+                "payroll_schedule": payroll_schedule,
             },
         )
         flash("Policy berhasil ditambahkan.")
@@ -17667,8 +18123,10 @@ def admin_bp() -> Blueprint:
         allow_qr = 1 if request.form.get("allow_qr") == "1" else 0
         auto_checkout = 1 if request.form.get("auto_checkout") == "1" else 0
         cutoff_time = (request.form.get("cutoff_time") or "").strip()
+        payroll_scheme = _normalize_payroll_scheme(request.form.get("payroll_scheme"))
+        payroll_schedule = _normalize_payroll_schedule(request.form.get("payroll_schedule"))
 
-        if scope_type not in {"CLIENT", "SITE"}:
+        if scope_type not in {"GLOBAL", "CLIENT", "SITE"}:
             scope_type = "CLIENT"
         if not effective_from:
             flash("Tanggal mulai wajib diisi.")
@@ -17683,12 +18141,16 @@ def admin_bp() -> Blueprint:
             flash("Site wajib dipilih untuk scope SITE.")
             return redirect(url_for("admin.policies"))
         if user and user.role == "client_admin":
+            if scope_type == "GLOBAL":
+                return _json_forbidden()
             if before:
                 before_scope = before.get("scope_type")
                 if before_scope == "CLIENT":
                     _require_client_admin_client(user, before.get("client_id"))
                 elif before_scope == "SITE":
                     _require_client_admin_site(user, before.get("site_id"))
+                elif before_scope == "GLOBAL":
+                    return _json_forbidden()
             if scope_type == "CLIENT":
                 _require_client_admin_client(user, client_id)
             else:
@@ -17714,6 +18176,8 @@ def admin_bp() -> Blueprint:
             allow_qr=allow_qr,
             auto_checkout=auto_checkout,
             cutoff_time=cutoff_time or None,
+            payroll_scheme=payroll_scheme,
+            payroll_schedule=payroll_schedule,
         )
         _log_audit_event(
             entity_type="policy",
@@ -17738,6 +18202,8 @@ def admin_bp() -> Blueprint:
                     "allow_qr": allow_qr,
                     "auto_checkout": auto_checkout,
                     "cutoff_time": cutoff_time or None,
+                    "payroll_scheme": payroll_scheme,
+                    "payroll_schedule": payroll_schedule,
                 },
             },
         )
