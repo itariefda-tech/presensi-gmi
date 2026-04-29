@@ -516,6 +516,19 @@ function updateReportField(field, value){
   el.textContent = Number.isFinite(numeric) ? String(Math.max(0, numeric)) : "0";
 }
 
+function formatPayrollScheduleLabel(schedule){
+  return schedule === "MID_MONTH" ? "Tengah Bulan" : "Akhir Bulan";
+}
+
+function updateAttendanceSummaryMeta(data){
+  const meta = document.getElementById("attendanceSummaryMeta");
+  if (!meta) return;
+  const start = data?.period_start || "-";
+  const end = data?.period_end || "-";
+  const schedule = formatPayrollScheduleLabel(data?.payroll_schedule);
+  meta.textContent = `${start} - ${end} | ${schedule}`;
+}
+
 async function loadMonthlySummary(){
   try {
     const result = await safeFetch("/api/attendance/summary");
@@ -525,6 +538,7 @@ async function loadMonthlySummary(){
     updateReportField("late", data.late ?? 0);
     updateReportField("izin", data.izin ?? 0);
     updateReportField("sakit", data.sakit ?? 0);
+    updateAttendanceSummaryMeta(data);
   } catch (err) {
     console.error("Failed to load monthly summary", err);
   }

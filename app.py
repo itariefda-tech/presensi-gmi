@@ -2294,7 +2294,7 @@ def create_app() -> Flask:
             return _json_forbidden()
         month_param = (request.args.get("month") or "").strip()
         month_value = month_param if month_param else None
-        data = _attendance_month_summary_for_user(user, month_value)
+        data = _attendance_pay_cycle_summary_for_user(user, month_value)
         return jsonify(ok=True, data=data), 200
 
     @app.route("/api/attendance/manual", methods=["POST"])
@@ -3008,8 +3008,7 @@ def create_app() -> Flask:
             site_scope_default = None
         elif user.role in CLIENT_ROLES:
             client_scope = _client_user_client_id(user)
-            site_scope_default = _client_user_site_id(user)
-            if not client_scope or not site_scope_default:
+            if not client_scope:
                 return _json_forbidden()
         else:
             return _json_forbidden()
@@ -3031,13 +3030,17 @@ def create_app() -> Flask:
             if client_id_raw.isdigit():
                 client_filter = int(client_id_raw)
         site_id = request.args.get("site_id")
+        site_id_provided = site_id is not None and site_id != ""
         try:
-            site_id_val = int(site_id) if site_id is not None and site_id != "" else None
+            site_id_val = int(site_id) if site_id_provided else None
         except ValueError:
-            site_id_val = None
+            return jsonify(ok=False, message="site_id tidak valid."), 400
         if user.role in CLIENT_ROLES:
-            site_id_val = site_scope_default
             client_filter = client_scope
+            if site_id_val is not None:
+                site = _get_site_by_id(site_id_val)
+                if not site or int(_row_get(site, "client_id") or 0) != int(client_scope):
+                    return jsonify(ok=False, message="Site tidak berada dalam scope client ini."), 403
 
         payroll_list = _list_payroll_by_period(
             period,
@@ -4431,6 +4434,7 @@ PAYROLL_SCHEME_OPTIONS = {PAYROLL_SCHEME_PRORATED, PAYROLL_SCHEME_FULL_MONTHLY}
 PAYROLL_SCHEDULE_MONTH_END = "MONTH_END"
 PAYROLL_SCHEDULE_MID_MONTH = "MID_MONTH"
 PAYROLL_SCHEDULE_OPTIONS = {PAYROLL_SCHEDULE_MONTH_END, PAYROLL_SCHEDULE_MID_MONTH}
+PAYROLL_CALCULATION_VERSION = "attendance_policy_v1"
 ADDON_PATROL = "patrol"
 ADDON_CALENDAR = "calendar"
 ADDON_REPORTING_ADVANCED = "reporting_advanced"
@@ -5618,6 +5622,97 @@ def _attendance_month_summary_for_user(user: User | None, year_month: str | None
     return _attendance_month_summary_for_employee(user.email, assignment, year_month)
 
 
+def _attendance_pay_cycle_summary_for_user(user: User | None, period: str | None = None) -> dict:
+    summary = {
+        "present": 0,
+        "late": 0,
+        "izin": 0,
+        "sakit": 0,
+        "leave": 0,
+        "absent": 0,
+        "working_days": 0,
+        "period": _normalize_period_input(period),
+        "period_start": None,
+        "period_end": None,
+        "pay_date": None,
+        "payroll_scheme": PAYROLL_SCHEME_PRORATED,
+        "payroll_schedule": PAYROLL_SCHEDULE_MONTH_END,
+        "summary_type": "pay_cycle",
+    }
+    if not user:
+        return summary
+    pay_cycle = _resolve_pay_cycle(user.email, period or "")
+    attendance = _calculate_attendance_summary_by_cycle(
+        user.email,
+        pay_cycle["period"],
+        pay_cycle["period_start"],
+        pay_cycle["period_end"],
+    )
+    leave_counts = _leave_type_counts_for_employee_period(
+        user.email,
+        pay_cycle["period_start"],
+        pay_cycle["period_end"],
+    )
+    summary.update(
+        {
+            "present": attendance.get("attendance_days", 0),
+            "late": attendance.get("late_days", 0),
+            "izin": leave_counts.get("izin", 0),
+            "sakit": leave_counts.get("sakit", 0),
+            "leave": attendance.get("leave_days", 0),
+            "absent": attendance.get("absent_days", 0),
+            "working_days": attendance.get("working_days", 0),
+            "period": pay_cycle["period"],
+            "period_start": pay_cycle["period_start"],
+            "period_end": pay_cycle["period_end"],
+            "pay_date": pay_cycle["pay_date"],
+            "payroll_scheme": pay_cycle["payroll_scheme"],
+            "payroll_schedule": pay_cycle["payroll_schedule"],
+        }
+    )
+    return summary
+
+
+def _leave_type_counts_for_employee_period(
+    employee_email: str | None,
+    period_start: str,
+    period_end: str,
+) -> dict[str, int]:
+    email_key = (employee_email or "").strip().lower()
+    start = _date_from_input(period_start)
+    end = _date_from_input(period_end)
+    counts = {"izin": 0, "sakit": 0}
+    if not email_key or not start or not end:
+        return counts
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "leave_requests"):
+            return counts
+        cur = conn.execute(
+            """
+            SELECT leave_type, date_from, date_to
+            FROM leave_requests
+            WHERE lower(employee_email) = ?
+              AND status = 'approved'
+              AND date_from <= ?
+              AND date_to >= ?
+            """,
+            (email_key, period_end, period_start),
+        )
+        for row in cur.fetchall():
+            leave_type = (row["leave_type"] or "").strip().lower()
+            if leave_type not in counts:
+                continue
+            leave_start = _date_from_input(row["date_from"])
+            leave_end = _date_from_input(row["date_to"]) or leave_start
+            counted = _count_overlap_days(leave_start, leave_end, start, end)
+            if counted:
+                counts[leave_type] += counted
+        return counts
+    finally:
+        conn.close()
+
+
 def _client_operational_summary(
     today: str, user: User | None, clients: list[dict] | None = None
 ) -> list[dict]:
@@ -6499,6 +6594,8 @@ def _policy_with_defaults(row: sqlite3.Row | None) -> dict:
     policy = DEFAULT_ATTENDANCE_POLICY.copy()
     if not row:
         return policy
+    if "id" in row.keys():
+        policy["policy_id"] = row["id"]
     for key in policy.keys():
         if key in row.keys() and row[key] is not None:
             policy[key] = row[key]
@@ -10731,11 +10828,16 @@ def _init_db() -> None:
                 period TEXT NOT NULL,
                 salary_base REAL NOT NULL DEFAULT 0,
                 attendance_days INTEGER DEFAULT 0,
+                working_days INTEGER DEFAULT 0,
                 late_days INTEGER DEFAULT 0,
                 absent_days INTEGER DEFAULT 0,
                 leave_days INTEGER DEFAULT 0,
+                daily_rate REAL DEFAULT 0,
+                gross_salary REAL DEFAULT 0,
                 potongan_telat REAL DEFAULT 0,
                 potongan_absen REAL DEFAULT 0,
+                late_deduction_rate REAL DEFAULT 0,
+                absent_deduction_rate REAL DEFAULT 0,
                 potongan_lain REAL DEFAULT 0,
                 tunjangan REAL DEFAULT 0,
                 total_gaji REAL NOT NULL DEFAULT 0,
@@ -10744,6 +10846,7 @@ def _init_db() -> None:
                 pay_date TEXT,
                 payroll_schedule TEXT,
                 payroll_scheme TEXT,
+                calculation_version TEXT,
                 status TEXT DEFAULT 'draft',
                 approved_by_email TEXT,
                 approved_at TEXT,
@@ -10771,11 +10874,31 @@ def _init_db() -> None:
             _ensure_column(conn, "payroll", "pay_date", "pay_date TEXT")
             _ensure_column(conn, "payroll", "payroll_schedule", "payroll_schedule TEXT")
             _ensure_column(conn, "payroll", "payroll_scheme", "payroll_scheme TEXT")
+            _ensure_column(conn, "payroll", "working_days", "working_days INTEGER DEFAULT 0")
+            _ensure_column(conn, "payroll", "daily_rate", "daily_rate REAL DEFAULT 0")
+            _ensure_column(conn, "payroll", "gross_salary", "gross_salary REAL DEFAULT 0")
+            _ensure_column(conn, "payroll", "late_deduction_rate", "late_deduction_rate REAL DEFAULT 0")
+            _ensure_column(conn, "payroll", "absent_deduction_rate", "absent_deduction_rate REAL DEFAULT 0")
+            _ensure_column(conn, "payroll", "calculation_version", "calculation_version TEXT")
             conn.execute(
                 """
                 UPDATE payroll
                 SET site_id = branch_id
                 WHERE site_id IS NULL AND branch_id IS NOT NULL
+                """
+            )
+            conn.execute(
+                """
+                UPDATE payroll
+                SET working_days = COALESCE(attendance_days, 0) + COALESCE(absent_days, 0) + COALESCE(leave_days, 0)
+                WHERE working_days IS NULL OR working_days = 0
+                """
+            )
+            conn.execute(
+                """
+                UPDATE payroll
+                SET calculation_version = 'legacy'
+                WHERE calculation_version IS NULL OR calculation_version = ''
                 """
             )
 
@@ -12112,22 +12235,46 @@ def _calculate_attendance_summary(
     period_start: str | None = None,
     period_end: str | None = None,
 ) -> dict:
-    """Calculate attendance summary for an employee in a period"""
+    """Calculate attendance summary for an employee in a period."""
+    period_key = _normalize_period_input(period)
+    start_override = _normalize_date_input(period_start)
+    end_override = _normalize_date_input(period_end)
+    if start_override and end_override:
+        return _calculate_attendance_summary_by_cycle(
+            employee_email,
+            period_key or period or "",
+            start_override,
+            end_override,
+        )
+    if period_key:
+        start_dt, end_dt = _month_bounds(period_key)
+        return _calculate_attendance_summary_by_cycle(
+            employee_email,
+            period_key,
+            start_dt.strftime("%Y-%m-%d"),
+            end_dt.strftime("%Y-%m-%d"),
+        )
+    return {"attendance_days": 0, "late_days": 0, "absent_days": 0, "leave_days": 0, "working_days": 0}
+
+
+def _calculate_attendance_summary_by_cycle(
+    employee_email: str,
+    period: str,
+    period_start: str,
+    period_end: str,
+) -> dict:
+    """Calculate attendance summary using an explicit payroll pay-cycle window."""
     start = time.perf_counter()
     conn = _db_connect()
     try:
-        period_key = _normalize_period_input(period)
-        start_override = _normalize_date_input(period_start)
-        end_override = _normalize_date_input(period_end)
-        if start_override and end_override:
-            start_dt = datetime.fromisoformat(start_override).date()
-            end_dt = datetime.fromisoformat(end_override).date()
-            if start_dt > end_dt:
-                start_dt, end_dt = end_dt, start_dt
-        elif period_key:
-            start_dt, end_dt = _month_bounds(period_key)
-        else:
+        start_key = _normalize_date_input(period_start)
+        end_key = _normalize_date_input(period_end)
+        if not start_key or not end_key:
             return {"attendance_days": 0, "late_days": 0, "absent_days": 0, "leave_days": 0, "working_days": 0}
+        start_dt = datetime.fromisoformat(start_key).date()
+        end_dt = datetime.fromisoformat(end_key).date()
+        if start_dt > end_dt:
+            start_dt, end_dt = end_dt, start_dt
         start_date = start_dt.strftime("%Y-%m-%d")
         end_date = end_dt.strftime("%Y-%m-%d")
         email_key = (employee_email or "").strip().lower()
@@ -12203,9 +12350,15 @@ def _calculate_attendance_summary(
             "absent_days": absent_days,
             "leave_days": leave_days,
             "working_days": working_days,
+            "period_start": start_date,
+            "period_end": end_date,
         }
         
-        _perf_log("calculate_attendance_summary", start, f"employee={employee_email}, period={period}")
+        _perf_log(
+            "calculate_attendance_summary_by_cycle",
+            start,
+            f"employee={employee_email}, period={period}, start={start_date}, end={end_date}",
+        )
         return result
     finally:
         conn.close()
@@ -12215,14 +12368,13 @@ def _calculate_payroll(employee_email: str, period: str, salary_base: float,
                        potongan_telat_rate: float = 50000, 
                        potongan_absen_rate: float = 100000) -> dict:
     """Calculate payroll for an employee"""
-    payroll_policy = _resolve_payroll_policy_for_employee(employee_email, period)
-    payroll_scheme = _normalize_payroll_scheme(payroll_policy.get("payroll_scheme"))
-    period_info = _payroll_period_info(period, payroll_policy.get("payroll_schedule"))
-    attendance_summary = _calculate_attendance_summary(
+    pay_cycle = _resolve_pay_cycle(employee_email, period)
+    payroll_scheme = _normalize_payroll_scheme(pay_cycle.get("payroll_scheme"))
+    attendance_summary = _calculate_attendance_summary_by_cycle(
         employee_email,
-        period,
-        period_start=period_info["period_start"],
-        period_end=period_info["period_end"],
+        pay_cycle["period"],
+        pay_cycle["period_start"],
+        pay_cycle["period_end"],
     )
     
     attendance_days = attendance_summary["attendance_days"]
@@ -12255,21 +12407,40 @@ def _calculate_payroll(employee_email: str, period: str, salary_base: float,
         "total_gaji": max(0, total_gaji),  # Ensure non-negative
         "daily_rate": daily_rate,
         "gross_salary": gross_salary,
+        "late_deduction_rate": potongan_telat_rate,
+        "absent_deduction_rate": potongan_absen_rate,
         "payroll_scheme": payroll_scheme,
-        "payroll_schedule": period_info["payroll_schedule"],
-        "period_start": period_info["period_start"],
-        "period_end": period_info["period_end"],
-        "pay_date": period_info["pay_date"],
+        "payroll_schedule": pay_cycle["payroll_schedule"],
+        "period_start": pay_cycle["period_start"],
+        "period_end": pay_cycle["period_end"],
+        "pay_date": pay_cycle["pay_date"],
+        "calculation_version": PAYROLL_CALCULATION_VERSION,
     }
 
 
 def _resolve_payroll_policy_for_employee(employee_email: str, period: str) -> dict:
+    return _resolve_pay_cycle(employee_email, period).get("policy") or DEFAULT_ATTENDANCE_POLICY.copy()
+
+
+def _resolve_pay_cycle(employee_email: str, period: str) -> dict:
+    """Resolve the policy-backed payroll cycle for an employee and period."""
     period_key = _normalize_period_input(period)
     if not period_key:
-        return DEFAULT_ATTENDANCE_POLICY.copy()
-    start_dt, end_dt = _month_bounds(period_key)
+        now = datetime.now()
+        period_key = f"{now.year:04d}-{now.month:02d}"
     email_key = (employee_email or "").strip().lower()
-    for date_key in reversed(_date_keys_between(start_dt, end_dt)):
+    month_start, month_end = _month_bounds(period_key)
+    mid_info = _payroll_period_info(period_key, PAYROLL_SCHEDULE_MID_MONTH)
+    mid_start = datetime.fromisoformat(mid_info["period_start"]).date()
+    mid_end = datetime.fromisoformat(mid_info["period_end"]).date()
+    candidate_dates = sorted(
+        {
+            *_date_keys_between(month_start, month_end),
+            *_date_keys_between(mid_start, mid_end),
+        },
+        reverse=True,
+    )
+    for date_key in candidate_dates:
         assignment = _assignment_for_employee_date(email_key, date_key)
         if assignment:
             initial_policy = _resolve_attendance_policy(
@@ -12278,17 +12449,41 @@ def _resolve_payroll_policy_for_employee(employee_email: str, period: str) -> di
                 assignment.get("shift_id"),
                 date_key,
             )
-            period_info = _payroll_period_info(period_key, initial_policy.get("payroll_schedule"))
-            return _resolve_attendance_policy(
+            cycle = _payroll_period_info(period_key, initial_policy.get("payroll_schedule"))
+            policy = _resolve_attendance_policy(
                 assignment.get("site_id"),
                 assignment.get("client_id"),
                 assignment.get("shift_id"),
-                period_info["pay_date"],
+                cycle["pay_date"],
             )
+            cycle.update(
+                {
+                    "period": period_key,
+                    "payroll_scheme": _normalize_payroll_scheme(policy.get("payroll_scheme")),
+                    "policy": policy,
+                    "policy_id": policy.get("policy_id"),
+                    "site_id": assignment.get("site_id"),
+                    "client_id": assignment.get("client_id"),
+                    "shift_id": assignment.get("shift_id"),
+                }
+            )
+            return cycle
     client_id, site_id = _enterprise_scope_for_employee_email(email_key)
-    initial_policy = _resolve_attendance_policy(site_id, client_id, None, end_dt.strftime("%Y-%m-%d"))
-    period_info = _payroll_period_info(period_key, initial_policy.get("payroll_schedule"))
-    return _resolve_attendance_policy(site_id, client_id, None, period_info["pay_date"])
+    initial_policy = _resolve_attendance_policy(site_id, client_id, None, month_end.strftime("%Y-%m-%d"))
+    cycle = _payroll_period_info(period_key, initial_policy.get("payroll_schedule"))
+    policy = _resolve_attendance_policy(site_id, client_id, None, cycle["pay_date"])
+    cycle.update(
+        {
+            "period": period_key,
+            "payroll_scheme": _normalize_payroll_scheme(policy.get("payroll_scheme")),
+            "policy": policy,
+            "policy_id": policy.get("policy_id"),
+            "site_id": site_id,
+            "client_id": client_id,
+            "shift_id": None,
+        }
+    )
+    return cycle
 
 
 def _payroll_period_info(period: str, payroll_schedule: object) -> dict:
@@ -12404,11 +12599,16 @@ def _create_payroll_record(
                     employee_email = ?,
                     salary_base = ?,
                     attendance_days = ?,
+                    working_days = ?,
                     late_days = ?,
                     absent_days = ?,
                     leave_days = ?,
+                    daily_rate = ?,
+                    gross_salary = ?,
                     potongan_telat = ?,
                     potongan_absen = ?,
+                    late_deduction_rate = ?,
+                    absent_deduction_rate = ?,
                     potongan_lain = 0,
                     tunjangan = 0,
                     total_gaji = ?,
@@ -12417,6 +12617,7 @@ def _create_payroll_record(
                     pay_date = ?,
                     payroll_schedule = ?,
                     payroll_scheme = ?,
+                    calculation_version = ?,
                     status = 'draft',
                     approved_by_email = NULL,
                     approved_at = NULL,
@@ -12431,17 +12632,23 @@ def _create_payroll_record(
                     employee_email,
                     payroll_data["salary_base"],
                     payroll_data["attendance_days"],
+                    payroll_data["working_days"],
                     payroll_data["late_days"],
                     payroll_data["absent_days"],
                     payroll_data["leave_days"],
+                    payroll_data["daily_rate"],
+                    payroll_data["gross_salary"],
                     payroll_data["potongan_telat"],
                     payroll_data["potongan_absen"],
+                    payroll_data["late_deduction_rate"],
+                    payroll_data["absent_deduction_rate"],
                     payroll_data["total_gaji"],
                     payroll_data["period_start"],
                     payroll_data["period_end"],
                     payroll_data["pay_date"],
                     payroll_data["payroll_schedule"],
                     payroll_data["payroll_scheme"],
+                    payroll_data["calculation_version"],
                     _now_ts(),
                     payroll_id,
                 ),
@@ -12452,10 +12659,11 @@ def _create_payroll_record(
             """
             INSERT INTO payroll (
                 employee_id, client_id, site_id, branch_id, employee_email, period, salary_base, attendance_days,
-                late_days, absent_days, leave_days, potongan_telat, potongan_absen,
+                working_days, late_days, absent_days, leave_days, daily_rate, gross_salary,
+                potongan_telat, potongan_absen, late_deduction_rate, absent_deduction_rate,
                 potongan_lain, tunjangan, total_gaji, period_start, period_end, pay_date,
-                payroll_schedule, payroll_scheme, status, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                payroll_schedule, payroll_scheme, calculation_version, status, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 employee.get("id"),
@@ -12466,11 +12674,16 @@ def _create_payroll_record(
                 period,
                 payroll_data["salary_base"],
                 payroll_data["attendance_days"],
+                payroll_data["working_days"],
                 payroll_data["late_days"],
                 payroll_data["absent_days"],
                 payroll_data["leave_days"],
+                payroll_data["daily_rate"],
+                payroll_data["gross_salary"],
                 payroll_data["potongan_telat"],
                 payroll_data["potongan_absen"],
+                payroll_data["late_deduction_rate"],
+                payroll_data["absent_deduction_rate"],
                 payroll_data["potongan_lain"],
                 payroll_data["tunjangan"],
                 payroll_data["total_gaji"],
@@ -12479,6 +12692,7 @@ def _create_payroll_record(
                 payroll_data["pay_date"],
                 payroll_data["payroll_schedule"],
                 payroll_data["payroll_scheme"],
+                payroll_data["calculation_version"],
                 "draft",
                 _now_ts(),
                 _now_ts(),

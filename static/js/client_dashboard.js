@@ -1830,6 +1830,10 @@
     return "muted";
   }
 
+  function payrollSchemeLabel(scheme){
+    return scheme === "FULL_MONTHLY_DEDUCTION" ? "Full Monthly" : "Prorated";
+  }
+
   function payrollSetMessage(text, type){
     const el = document.getElementById("clientPayrollMessage");
     if (!el) return;
@@ -1920,6 +1924,7 @@
               <span>${escapeHtml(row.period || payrollCurrentPeriod())}</span>
               <span class="muted">${escapeHtml(row.period_start || "-")} - ${escapeHtml(row.period_end || "-")}</span>
               <span class="muted">Pay ${escapeHtml(row.pay_date || "-")} | ${row.payroll_schedule === "MID_MONTH" ? "Tengah Bulan" : "Akhir Bulan"}</span>
+              <span class="muted">${payrollSchemeLabel(row.payroll_scheme)}</span>
               <span class="muted">Rp ${payrollFormatMoney(row.total_gaji)}</span>
             </div>
           </td>
@@ -2013,6 +2018,7 @@
       `Attendance period: ${record.period_start || "-"} sampai ${record.period_end || "-"}`,
       `Pay date: ${record.pay_date || "-"}`,
       `Schedule: ${record.payroll_schedule === "MID_MONTH" ? "Tengah Bulan" : "Akhir Bulan"}`,
+      `Scheme: ${payrollSchemeLabel(record.payroll_scheme)}`,
       `Hadir: ${record.attendance_days || 0}, telat: ${record.late_days || 0}, absen: ${record.absent_days || 0}, leave: ${record.leave_days || 0}`,
       `Gaji pokok: Rp ${payrollFormatMoney(record.salary_base)}`,
       `Potongan: Rp ${payrollFormatMoney(Number(record.potongan_telat || 0) + Number(record.potongan_absen || 0) + Number(record.potongan_lain || 0))}`,
@@ -2029,7 +2035,7 @@
       payrollSetMessage("Tidak ada data payroll untuk export.", "error");
       return;
     }
-    const headers = ["Pegawai", "Email", "Periode", "Attendance Period", "Pay Date", "Schedule", "Gaji Pokok", "Hadir", "Telat", "Absen", "Leave", "Potongan Telat", "Potongan Absen", "Potongan Lain", "Tunjangan", "Total", "Status"];
+    const headers = ["Pegawai", "Email", "Periode", "Attendance Period", "Pay Date", "Schedule", "Scheme", "Gaji Pokok", "Hadir", "Telat", "Absen", "Leave", "Potongan Telat", "Potongan Absen", "Potongan Lain", "Tunjangan", "Total", "Status"];
     const csvRows = rows.map((row) => [
       row.employee_name || "",
       row.employee_email || "",
@@ -2037,6 +2043,7 @@
       `${row.period_start || ""} - ${row.period_end || ""}`,
       row.pay_date || "",
       row.payroll_schedule || "MONTH_END",
+      row.payroll_scheme || "PRORATED_ATTENDANCE",
       row.salary_base || 0,
       row.attendance_days || 0,
       row.late_days || 0,

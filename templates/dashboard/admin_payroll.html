@@ -87,6 +87,7 @@
               <th>Attendance Period</th>
               <th>Pay Date</th>
               <th>Schedule</th>
+              <th>Scheme</th>
               <th>Site</th>
               <th>Base Salary</th>
               <th>Attendance Days</th>
@@ -102,7 +103,7 @@
           </thead>
           <tbody id="payrollRows">
             <tr>
-              <td colspan="16" class="muted">
+              <td colspan="17" class="muted">
                 <span class="spinner" aria-hidden="true"></span>
                 Select period to load payroll data...
               </td>
@@ -146,6 +147,10 @@
             <div class="detail-item">
               <label>Schedule:</label>
               <span id="detailPayrollSchedule">-</span>
+            </div>
+            <div class="detail-item">
+              <label>Scheme:</label>
+              <span id="detailPayrollScheme">-</span>
             </div>
           </div>
         </div>
@@ -458,7 +463,7 @@
     }
     
     const tbody = document.getElementById('payrollRows');
-    tbody.innerHTML = '<tr><td colspan="16" class="muted"><span class="spinner"></span> Loading payroll data...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="17" class="muted"><span class="spinner"></span> Loading payroll data...</td></tr>';
     
   const params = new URLSearchParams({ period });
   const client = document.getElementById('clientSelect')?.value || '';
@@ -475,12 +480,12 @@
         if (response.ok) {
           renderPayrollTable(response.data);
         } else {
-          tbody.innerHTML = '<tr><td colspan="16" class="muted">Failed to load payroll data</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="17" class="muted">Failed to load payroll data</td></tr>';
           showAlert(response.message || 'Failed to load payroll data', 'error');
         }
       })
       .catch(() => {
-        tbody.innerHTML = '<tr><td colspan="16" class="muted">Error loading payroll data</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="17" class="muted">Error loading payroll data</td></tr>';
         showAlert('Error loading payroll data', 'error');
       });
   }
@@ -490,7 +495,7 @@
     const tbody = document.getElementById('payrollRows');
     
     if (!data || data.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="16" class="muted">No payroll records found for this period</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="17" class="muted">No payroll records found for this period</td></tr>';
       return;
     }
     
@@ -501,6 +506,7 @@
         <td>${record.period_start || '-'} - ${record.period_end || '-'}</td>
         <td>${record.pay_date || '-'}</td>
         <td>${record.payroll_schedule === 'MID_MONTH' ? 'Tengah Bulan' : 'Akhir Bulan'}</td>
+        <td>${record.payroll_scheme === 'FULL_MONTHLY_DEDUCTION' ? 'Full Monthly' : 'Prorated'}</td>
         <td>${record.site_name || '-'}</td>
         <td>Rp ${formatNumber(record.salary_base)}</td>
         <td>${record.attendance_days}</td>
@@ -542,6 +548,7 @@
     document.getElementById('detailAttendancePeriod').textContent = `${record.period_start || '-'} - ${record.period_end || '-'}`;
     document.getElementById('detailPayDate').textContent = record.pay_date || '-';
     document.getElementById('detailPayrollSchedule').textContent = record.payroll_schedule === 'MID_MONTH' ? 'Tengah Bulan' : 'Akhir Bulan';
+    document.getElementById('detailPayrollScheme').textContent = record.payroll_scheme === 'FULL_MONTHLY_DEDUCTION' ? 'Full Monthly' : 'Prorated';
     
     document.getElementById('detailAttendanceDays').textContent = record.attendance_days;
     document.getElementById('detailLateDays').textContent = record.late_days;
@@ -622,7 +629,7 @@
   
   // Export to CSV
   function exportToCSV(data, filename) {
-    const headers = ['Employee', 'Period', 'Attendance Period', 'Pay Date', 'Schedule', 'Site', 'Base Salary', 'Attendance Days', 'Late Days', 'Absent Days', 'Leave Days', 'Late Deduction', 'Absent Deduction', 'Total Salary', 'Status'];
+    const headers = ['Employee', 'Period', 'Attendance Period', 'Pay Date', 'Schedule', 'Scheme', 'Site', 'Base Salary', 'Attendance Days', 'Late Days', 'Absent Days', 'Leave Days', 'Late Deduction', 'Absent Deduction', 'Total Salary', 'Status'];
     const csvContent = [
       headers.join(','),
       ...data.map(record => [
@@ -631,6 +638,7 @@
         `${record.period_start || ''} - ${record.period_end || ''}`,
         record.pay_date || '',
         record.payroll_schedule || 'MONTH_END',
+        record.payroll_scheme || 'PRORATED_ATTENDANCE',
         record.site_name || '',
         record.salary_base,
         record.attendance_days,
