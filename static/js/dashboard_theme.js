@@ -1,8 +1,10 @@
 const themeToggle = document.querySelector("[data-theme-toggle]");
-const THEME_OPTIONS = ["dark", "light", "sage_calm", "silver_line", "noir_warm"];
+const THEME_OPTIONS = Array.isArray(window.__GMI_ENABLED_THEMES)
+  ? window.__GMI_ENABLED_THEMES
+  : ["dark", "light", "sage_calm", "silver_line", "noir_warm"];
 
 function normalizeTheme(theme){
-  return THEME_OPTIONS.includes(theme) ? theme : "silver_line";
+  return THEME_OPTIONS.includes(theme) ? theme : (THEME_OPTIONS.includes("dark") ? "dark" : THEME_OPTIONS[0] || "dark");
 }
 
 function csrfToken(){
@@ -40,11 +42,11 @@ function setTheme(theme, options = {}){
 }
 
 function currentTheme(){
-  return normalizeTheme(document.documentElement.getAttribute("data-theme") || "silver_line");
+  return normalizeTheme(document.documentElement.getAttribute("data-theme") || "dark");
 }
 
 function initTheme(){
-  const initial = document.documentElement.getAttribute("data-theme") || localStorage.getItem("theme") || localStorage.getItem("gmi_theme") || "silver_line";
+  const initial = document.documentElement.getAttribute("data-theme") || localStorage.getItem("theme") || localStorage.getItem("gmi_theme") || "dark";
   setTheme(initial, { persist: false });
 }
 
@@ -58,7 +60,7 @@ if (themeToggle) {
 function updateThemeControls(theme){
   document.querySelectorAll("[data-theme-select]").forEach((select) => {
     const hasOption = Array.from(select.options).some((option) => option.value === theme);
-    const value = hasOption ? theme : "silver_line";
+    const value = hasOption ? theme : "";
     if (select.value !== value) select.value = value;
   });
   document.querySelectorAll("[data-theme-choice]").forEach((button) => {

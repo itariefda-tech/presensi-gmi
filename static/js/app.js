@@ -31,7 +31,11 @@ document.querySelectorAll("[data-go]").forEach(el => {
 ========================= */
 const themeBtns = Array.from(document.querySelectorAll(".themeBtn"));
 const themeToggle = document.querySelector("[data-theme-toggle]");
-const THEME_OPTIONS = ["dark", "light", "sage_calm", "silver_line", "noir_warm"];
+const THEME_DEFAULT_OPTIONS = ["dark", "light"];
+const THEME_EXTRA_OPTIONS = ["sage_calm", "silver_line", "noir_warm"];
+let THEME_OPTIONS = Array.isArray(window.__GMI_ENABLED_THEMES)
+  ? window.__GMI_ENABLED_THEMES
+  : ["dark", "light", "sage_calm", "silver_line", "noir_warm"];
 const themeInputs = [
   document.getElementById("themeEmp"),
   document.getElementById("themeAdmin"),
@@ -40,7 +44,7 @@ const themeInputs = [
 ];
 
 function normalizeTheme(theme){
-  return THEME_OPTIONS.includes(theme) ? theme : "silver_line";
+  return THEME_OPTIONS.includes(theme) ? theme : (THEME_OPTIONS.includes("dark") ? "dark" : THEME_OPTIONS[0] || "dark");
 }
 
 function setTheme(theme){
@@ -67,12 +71,15 @@ if (themeToggle){
   });
 }
 
-const initialTheme = window.__GMI_INITIAL_THEME || document.documentElement.getAttribute("data-theme") || "silver_line";
-const savedTheme = normalizeTheme(localStorage.getItem("theme") || localStorage.getItem("gmi_theme") || initialTheme);
+const initialTheme = normalizeTheme(window.__GMI_INITIAL_THEME || document.documentElement.getAttribute("data-theme") || "dark");
+const storedTheme = normalizeTheme(localStorage.getItem("theme") || localStorage.getItem("gmi_theme") || initialTheme);
+const savedTheme = THEME_EXTRA_OPTIONS.includes(storedTheme) && !THEME_EXTRA_OPTIONS.includes(initialTheme)
+  ? initialTheme
+  : storedTheme;
 setTheme(savedTheme);
 
 function currentTheme(){
-  return normalizeTheme(document.documentElement.getAttribute("data-theme") || "silver_line");
+  return normalizeTheme(document.documentElement.getAttribute("data-theme") || "dark");
 }
 
 function csrfJsonHeaders(){
@@ -408,6 +415,7 @@ const ownerAddonSave = document.getElementById("ownerAddonSave");
 const ownerAddonStatus = document.getElementById("ownerAddonStatus");
 const ownerAddonTogglesStatus = document.getElementById("ownerAddonTogglesStatus");
 const ownerAddonToggles = Array.from(document.querySelectorAll("[data-owner-addon]"));
+const ownerExtraThemesEnabled = document.getElementById("ownerExtraThemesEnabled");
 const ownerAddonOpen = document.getElementById("ownerAddonOpen");
 const ownerAddonModal = document.getElementById("ownerAddonModal");
 const ownerAddonTogglesModal = document.getElementById("ownerAddonTogglesModal");
@@ -485,6 +493,7 @@ function setOwnerAddonUnlocked(unlocked){
   ownerAddonToggles.forEach(toggle => {
     toggle.disabled = !unlocked;
   });
+  if (ownerExtraThemesEnabled) ownerExtraThemesEnabled.disabled = !unlocked;
   if (ownerAddonSave){
     ownerAddonSave.disabled = !unlocked;
   }
@@ -497,11 +506,19 @@ function setOwnerAddonValues(addons){
   });
 }
 
+function setOwnerThemeValues(enabled){
+  if (ownerExtraThemesEnabled) ownerExtraThemesEnabled.checked = Boolean(enabled);
+}
+
 function selectedOwnerAddons(){
   return ownerAddonToggles
     .filter(toggle => toggle.checked)
     .map(toggle => toggle.dataset.ownerAddon)
     .filter(Boolean);
+}
+
+function ownerExtraThemesSelected(){
+  return Boolean(ownerExtraThemesEnabled?.checked);
 }
 
 async function loadOwnerAddons(){
@@ -512,6 +529,7 @@ async function loadOwnerAddons(){
     const payload = await response.json().catch(() => ({}));
     if (response.ok && payload.ok){
       setOwnerAddonValues(payload.data?.addons || []);
+      setOwnerThemeValues(payload.data?.extra_themes_enabled);
       setOwnerAddonUnlocked(Boolean(payload.data?.unlocked));
       setOwnerAddonTogglesStatus("", null);
     } else if (response.status === 401 || response.status === 403){
@@ -542,6 +560,7 @@ async function unlockOwnerAddons(){
       throw new Error(ownerAddonErrorMessage(response, payload, "Akses owner gagal."));
     }
     setOwnerAddonValues(payload.data?.addons || []);
+    setOwnerThemeValues(payload.data?.extra_themes_enabled);
     setOwnerAddonUnlocked(true);
     ownerAddonPassword.value = "";
     setOwnerAddonStatus(payload.message || "Akses owner aktif.", "success");
@@ -561,14 +580,25 @@ async function saveOwnerAddons(){
     const response = await fetchApi("/api/owner/addons", {
       method: "POST",
       headers: csrfJsonHeaders(),
-      body: JSON.stringify({addons: selectedOwnerAddons()}),
+      body: JSON.stringify({
+        addons: selectedOwnerAddons(),
+        extra_themes_enabled: ownerExtraThemesSelected(),
+      }),
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok || !payload.ok){
       throw new Error(ownerAddonErrorMessage(response, payload, "Add-on gagal disimpan."));
     }
     setOwnerAddonValues(payload.data?.addons || []);
-    setOwnerAddonTogglesStatus(payload.message || "Add-on tersimpan.", "success");
+    const enabledThemes = payload.data?.enabled_extra_themes || [];
+    setOwnerThemeValues(Boolean(payload.data?.extra_themes_enabled));
+    window.__GMI_ENABLED_EXTRA_THEMES = enabledThemes;
+    window.__GMI_ENABLED_THEMES = [...THEME_DEFAULT_OPTIONS, ...enabledThemes];
+    THEME_OPTIONS = window.__GMI_ENABLED_THEMES;
+    if (!window.__GMI_ENABLED_THEMES.includes(currentTheme())){
+      setTheme("dark");
+    }
+    setOwnerAddonTogglesStatus(payload.message || "Pengaturan owner tersimpan.", "success");
   } catch (err){
     const message = err instanceof Error ? err.message : "Add-on gagal disimpan.";
     setOwnerAddonTogglesStatus(message, "error");

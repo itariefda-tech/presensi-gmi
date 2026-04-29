@@ -24,7 +24,7 @@ from typing import Dict
 
 import qrcode
 
-from flask import Flask, jsonify, render_template, request, session, Blueprint, abort, redirect, url_for, flash, g, Response
+from flask import Flask, jsonify, render_template, request, session, Blueprint, abort, redirect, url_for, flash, g, Response, has_request_context
 from werkzeug.utils import secure_filename
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -40,6 +40,8 @@ APP_BOOT_ID = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
 PERF_LOG = (os.environ.get("PERF_LOG") or "").lower() in {"1", "true", "yes"}
 PERF_LOGGER = logging.getLogger("perf")
 API_ACCESS_TOKEN = (os.environ.get("API_ACCESS_TOKEN") or os.environ.get("HRIS_API_TOKEN") or "").strip()
+LOGIN_RATE_LIMIT_MAX = 5
+LOGIN_RATE_LIMIT_WINDOW_MINUTES = 15
 try:
     ADMIN_LIST_LIMIT = int(os.environ.get("ADMIN_LIST_LIMIT") or 0)
 except ValueError:
@@ -201,7 +203,11 @@ def create_app() -> Flask:
         return {
             "theme": _resolve_theme_preference(user),
             "theme_options": THEME_OPTIONS,
-            "theme_setting_options": THEME_SETTING_OPTIONS,
+            "theme_setting_options": _enabled_theme_setting_options(),
+            "extra_theme_options": THEME_SETTING_OPTIONS,
+            "extra_themes_enabled": _extra_themes_enabled(),
+            "enabled_theme_options": _enabled_theme_options(),
+            "enabled_extra_themes": _enabled_extra_themes(),
             "theme_labels": THEME_LABELS,
             "hris_brand_title": hris_brand_title,
         }
@@ -258,7 +264,18 @@ def create_app() -> Flask:
     @app.route("/api/auth/login", methods=["POST"])
     def login():
         data = _get_json()
+        identifier = _login_attempt_identifier(data)
+        if _login_rate_limited(identifier, request.remote_addr):
+            return (
+                jsonify(
+                    ok=False,
+                    message="Terlalu banyak percobaan login. Coba lagi beberapa menit lagi.",
+                    next_url=None,
+                ),
+                429,
+            )
         result = _validate_login(data)
+        _record_login_attempt(identifier, request.remote_addr, result.ok)
         if result.ok:
             user = _current_user()
             _log_audit_event(
@@ -278,7 +295,7 @@ def create_app() -> Flask:
         if not user:
             return _json_forbidden()
         data = _get_json()
-        theme = _normalize_theme(data.get("theme"))
+        theme = _normalize_enabled_theme(data.get("theme"))
         _update_user_theme_preference(user.id, theme)
         user.theme = theme
         _persist_user(user)
@@ -292,7 +309,7 @@ def create_app() -> Flask:
         if not client_id:
             return _json_forbidden()
         data = _get_json()
-        theme = _normalize_theme(data.get("theme"))
+        theme = _normalize_enabled_theme(data.get("theme"))
         _update_client_theme_preference(client_id, theme)
         return jsonify(ok=True, data={"theme": theme}), 200
 
@@ -602,12 +619,22 @@ def create_app() -> Flask:
     def owner_addons_get():
         owner_unlocked = bool(session.get("owner_addons_unlocked"))
         if not owner_unlocked:
-            return jsonify(ok=True, data={"addons": [], "unlocked": False}), 200
+            return jsonify(
+                ok=True,
+                data={
+                    "addons": [],
+                    "extra_themes_enabled": False,
+                    "enabled_extra_themes": [],
+                    "unlocked": False,
+                },
+            ), 200
         return (
             jsonify(
                 ok=True,
                 data={
                     "addons": _global_addons(),
+                    "extra_themes_enabled": _extra_themes_enabled(),
+                    "enabled_extra_themes": _enabled_extra_themes(),
                     "unlocked": owner_unlocked,
                 },
             ),
@@ -623,7 +650,15 @@ def create_app() -> Flask:
         if not hmac.compare_digest(password, OWNER_ADDON_PASSWORD):
             return jsonify(ok=False, message="Password owner salah."), 403
         session["owner_addons_unlocked"] = True
-        return jsonify(ok=True, message="Akses owner aktif.", data={"addons": _global_addons()}), 200
+        return jsonify(
+            ok=True,
+            message="Akses owner aktif.",
+            data={
+                "addons": _global_addons(),
+                "extra_themes_enabled": _extra_themes_enabled(),
+                "enabled_extra_themes": _enabled_extra_themes(),
+            },
+        ), 200
 
     @app.route("/api/owner/addons", methods=["POST"])
     def owner_addons_update():
@@ -631,20 +666,34 @@ def create_app() -> Flask:
             return jsonify(ok=False, message="Akses owner wajib dibuka dengan password."), 403
         data = _get_json()
         addons = _set_global_addons(data.get("addons", []))
-        return jsonify(ok=True, message="Add-on tersimpan.", data={"addons": addons}), 200
+        extra_themes_enabled = (
+            _set_extra_themes_enabled(data.get("extra_themes_enabled"))
+            if "extra_themes_enabled" in data
+            else _extra_themes_enabled()
+        )
+        enabled_extra_themes = _enabled_extra_themes()
+        return jsonify(
+            ok=True,
+            message="Pengaturan owner tersimpan.",
+            data={
+                "addons": addons,
+                "extra_themes_enabled": extra_themes_enabled,
+                "enabled_extra_themes": enabled_extra_themes,
+            },
+        ), 200
 
     @app.route("/", methods=["GET"])
     def index():
         return render_template(
             "index.html",
-            theme="silver_line",
+            theme="dark",
             hero_gallery_images=_list_hero_gallery_images(),
         )
 
     @app.route("/reset-password", methods=["GET"])
     def reset_password_page():
         token = (request.args.get("token") or "").strip()
-        return render_template("reset_password.html", token=token, theme="silver_line")
+        return render_template("reset_password.html", token=token, theme="dark")
 
     @app.route("/dashboard/pegawai", methods=["GET"])
     def dashboard_employee():
@@ -663,7 +712,7 @@ def create_app() -> Flask:
             active_assignment=assignment,
             active_site=site,
             active_client=client,
-            theme=_normalize_theme(_row_get(client, "client_theme", user.theme) if client else user.theme),
+            theme=_normalize_enabled_theme(_row_get(client, "client_theme", user.theme) if client else user.theme),
         )
 
     @app.route("/dashboard/client", methods=["GET"])
@@ -2940,9 +2989,9 @@ def create_app() -> Flask:
             site_scope = None
         elif is_client_admin:
             client_scope = _client_user_client_id(user)
-            site_scope = _client_user_site_id(user)
-            if not client_scope or not site_scope:
+            if not client_scope:
                 return _json_forbidden()
+            site_scope = None
         else:
             return _json_forbidden()
         
@@ -3094,9 +3143,9 @@ def create_app() -> Flask:
             site_scope = None
         elif user.role in CLIENT_ROLES:
             client_scope = _client_user_client_id(user)
-            site_scope = _client_user_site_id(user)
-            if not client_scope or not site_scope:
+            if not client_scope:
                 return _json_forbidden()
+            site_scope = None
         else:
             return _json_forbidden()
         record = _get_payroll_by_id(payroll_id)
@@ -3122,9 +3171,9 @@ def create_app() -> Flask:
             site_scope = None
         elif user.role == "client_admin":
             client_scope = _client_user_client_id(user)
-            site_scope = _client_user_site_id(user)
-            if not client_scope or not site_scope:
+            if not client_scope:
                 return _json_forbidden()
+            site_scope = None
         else:
             return _json_forbidden()
         if not _payroll_plus_enabled(user, client_scope):
@@ -3163,9 +3212,9 @@ def create_app() -> Flask:
             site_scope = None
         elif user.role == "client_admin":
             client_scope = _client_user_client_id(user)
-            site_scope = _client_user_site_id(user)
-            if not client_scope or not site_scope:
+            if not client_scope:
                 return _json_forbidden()
+            site_scope = None
         else:
             return _json_forbidden()
         record = _get_payroll_by_id(payroll_id)
@@ -3191,6 +3240,7 @@ def create_app() -> Flask:
         start_date = _normalize_date_input(request.args.get("start_date"))
         end_date = _normalize_date_input(request.args.get("end_date"))
         client_id_raw = (request.args.get("client_id") or "").strip()
+        site_id_raw = (request.args.get("site_id") or request.args.get("branch_id") or "").strip()
         
         if not start_date or not end_date:
             # Default to current month
@@ -3201,14 +3251,25 @@ def create_app() -> Flask:
             return jsonify(ok=False, message="Rentang tanggal tidak valid."), 400
         
         client_id = None
+        site_id = None
         try:
             if client_id_raw:
                 client_id = int(client_id_raw)
+            if site_id_raw:
+                site_id = int(site_id_raw)
         except (TypeError, ValueError):
-            return jsonify(ok=False, message="client_id tidak valid."), 400
+            return jsonify(ok=False, message="client_id/site_id tidak valid."), 400
+        if site_id:
+            site = _get_site_by_id(site_id)
+            if not site:
+                return jsonify(ok=False, message="site_id tidak terdaftar."), 400
+            site_client_id = int(_row_get(site, "client_id") or 0)
+            if client_id and site_client_id != int(client_id):
+                return jsonify(ok=False, message="site_id tidak berada dalam client ini."), 400
+            client_id = client_id or site_client_id
         
         try:
-            report_data = _generate_attendance_report(start_date, end_date, client_id)
+            report_data = _generate_attendance_report(start_date, end_date, client_id, site_id)
             return jsonify(ok=True, data=report_data), 200
         except Exception:
             return jsonify(ok=False, message="Failed to generate attendance report"), 500
@@ -3710,6 +3771,7 @@ def create_app() -> Flask:
             ok=True,
             data={
                 "client_id": client_id,
+                "site_id": branch_id,
                 "branch_id": branch_id,
                 "date_from": date_from,
                 "date_to": date_to,
@@ -4265,11 +4327,59 @@ def _normalize_phone(value: str) -> str:
     return re.sub(r"\D", "", value)
 
 
+def _login_attempt_identifier(data: dict | None) -> str:
+    payload = data or {}
+    login_type = (payload.get("login_type") or "email").strip().lower()
+    identifier = (payload.get("identifier") or payload.get("email") or payload.get("phone") or "").strip().lower()
+    if login_type == "phone":
+        identifier = _normalize_phone(identifier)
+    return identifier or "unknown"
+
+
+def _login_rate_limited(identifier: str, ip_address: str | None) -> bool:
+    since = (datetime.now() - timedelta(minutes=LOGIN_RATE_LIMIT_WINDOW_MINUTES)).strftime("%Y-%m-%d %H:%M:%S")
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "login_attempts"):
+            return False
+        row = conn.execute(
+            """
+            SELECT COUNT(*) AS total
+            FROM login_attempts
+            WHERE identifier = ?
+              AND COALESCE(ip_address, '') = COALESCE(?, '')
+              AND success = 0
+              AND created_at >= ?
+            """,
+            (identifier, ip_address, since),
+        ).fetchone()
+        return int(row["total"] or 0) >= LOGIN_RATE_LIMIT_MAX if row else False
+    finally:
+        conn.close()
+
+
+def _record_login_attempt(identifier: str, ip_address: str | None, success: bool) -> None:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "login_attempts"):
+            return
+        conn.execute(
+            """
+            INSERT INTO login_attempts (identifier, ip_address, success, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (identifier, ip_address, 1 if success else 0, _now_ts()),
+        )
+    finally:
+        conn.commit()
+        conn.close()
+
+
 def _validate_login(data: Dict[str, str]) -> AuthResult:
     login_type = (data.get("login_type") or "email").strip().lower()
     identifier = (data.get("identifier") or data.get("email") or data.get("phone") or "").strip()
     password = data.get("password", "")
-    submitted_theme = _normalize_theme(data.get("theme", "silver_line"))
+    submitted_theme = _normalize_enabled_theme(data.get("theme", "dark"))
 
     if login_type == "phone":
         phone = _normalize_phone(identifier)
@@ -4304,7 +4414,7 @@ def _validate_login(data: Dict[str, str]) -> AuthResult:
         if "theme_preference" in row.keys() and row["theme_preference"]
         else submitted_theme
     )
-    theme = _normalize_theme(theme)
+    theme = _normalize_enabled_theme(theme)
     user = _user_row_to_user(row, theme)
     _persist_user(user)
 
@@ -4359,6 +4469,7 @@ CLIENT_ROLE_OPTIONS = ["client_admin", "client_assistant", "client_supervisor", 
 ROLE_OPTIONS = ADMIN_ROLE_OPTIONS + CLIENT_ROLE_OPTIONS + ["employee"]
 USER_TIER_OPTIONS = ["basic", "pro", "enterprise"]
 THEME_OPTIONS = ["dark", "light", "sage_calm", "silver_line", "noir_warm"]
+THEME_DEFAULT_OPTIONS = ["dark", "light"]
 THEME_SETTING_OPTIONS = ["sage_calm", "silver_line", "noir_warm"]
 THEME_LABELS = {
     "dark": "Dark",
@@ -4443,6 +4554,9 @@ ADDON_PAYROLL_PLUS = "payroll_plus"
 ADDON_AI = "ai"
 ADDON_PATROL_OPS = "patrol_ops"
 ADDON_ENTERPRISE_TIER = "enterprise_tier"
+ADDON_BILLING_ENGINE = "billing_engine"
+ADDON_CONTRACT_MANAGEMENT = "contract_management"
+ADDON_SLA_TRACKING = "sla_tracking"
 ADDON_ALLOWED = {
     ADDON_PATROL,
     ADDON_CALENDAR,
@@ -4452,6 +4566,9 @@ ADDON_ALLOWED = {
     ADDON_AI,
     ADDON_PATROL_OPS,
     ADDON_ENTERPRISE_TIER,
+    ADDON_BILLING_ENGINE,
+    ADDON_CONTRACT_MANAGEMENT,
+    ADDON_SLA_TRACKING,
 }
 ADDON_FEATURE_ALIASES = {
     "patrol": ADDON_PATROL,
@@ -4473,7 +4590,26 @@ ADDON_FEATURE_ALIASES = {
     "ai": ADDON_AI,
     "enterprise": ADDON_ENTERPRISE_TIER,
     "enterprise_tier": ADDON_ENTERPRISE_TIER,
+    "billing": ADDON_BILLING_ENGINE,
+    "billing_engine": ADDON_BILLING_ENGINE,
+    "contract": ADDON_CONTRACT_MANAGEMENT,
+    "contract_management": ADDON_CONTRACT_MANAGEMENT,
+    "sla": ADDON_SLA_TRACKING,
+    "sla_tracking": ADDON_SLA_TRACKING,
 }
+CLIENT_PACKAGE_BASIC = "BASIC"
+CLIENT_PACKAGE_PRO = "PRO"
+CLIENT_PACKAGE_ENTERPRISE = "ENTERPRISE"
+CLIENT_PACKAGE_OPTIONS = {CLIENT_PACKAGE_BASIC, CLIENT_PACKAGE_PRO, CLIENT_PACKAGE_ENTERPRISE}
+CLIENT_ADDON_OPTIONS = {
+    ADDON_BILLING_ENGINE: "Billing Engine",
+    ADDON_CONTRACT_MANAGEMENT: "Contract Management",
+    ADDON_SLA_TRACKING: "SLA Tracking",
+}
+BILLING_TYPE_PER_HEAD = "PER_HEAD"
+BILLING_TYPE_PER_SITE = "PER_SITE"
+BILLING_TYPE_PER_SHIFT = "PER_SHIFT"
+BILLING_TYPE_OPTIONS = {BILLING_TYPE_PER_HEAD, BILLING_TYPE_PER_SITE, BILLING_TYPE_PER_SHIFT}
 DEFAULT_ATTENDANCE_POLICY = {
     "work_duration_minutes": None,
     "grace_minutes": None,
@@ -4585,7 +4721,7 @@ def _current_user() -> User | None:
         email=email,
         role=role,
         name=name,
-        theme=_normalize_theme(theme),
+        theme=_normalize_enabled_theme(theme),
         tier=_normalize_user_tier(str(tier or "basic")),
         selfie_path=data.get("selfie_path"),
         must_change_password=int(data.get("must_change_password") or 0),
@@ -4745,18 +4881,92 @@ def _normalize_user_tier(value: str | None) -> str:
 
 
 def _normalize_theme(value: str | None) -> str:
-    theme = (value or "silver_line").strip().lower()
-    return theme if theme in THEME_OPTIONS else "silver_line"
+    theme = (value or "dark").strip().lower()
+    return theme if theme in THEME_OPTIONS else "dark"
+
+
+def _enabled_extra_themes() -> list[str]:
+    return THEME_SETTING_OPTIONS.copy() if _extra_themes_enabled() else []
+
+
+def _extra_themes_enabled() -> bool:
+    value = _get_app_setting("extra_themes_enabled", True)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() not in {"0", "false", "off", "no"}
+    return bool(value)
+
+
+def _set_extra_themes_enabled(enabled: object) -> bool:
+    next_enabled = bool(enabled)
+    _set_app_setting("extra_themes_enabled", next_enabled)
+    _set_app_setting("enabled_extra_themes", THEME_SETTING_OPTIONS.copy() if next_enabled else [])
+    if not next_enabled:
+        _reset_extra_theme_preferences()
+    return next_enabled
+
+
+def _reset_extra_theme_preferences() -> None:
+    placeholders = ",".join("?" for _ in THEME_SETTING_OPTIONS)
+    conn = _db_connect()
+    try:
+        if _table_exists(conn, "users"):
+            conn.execute(
+                f"""
+                UPDATE users
+                SET theme_preference = 'dark', updated_at = ?
+                WHERE lower(COALESCE(theme_preference, '')) IN ({placeholders})
+                """,
+                (_now_ts(), *THEME_SETTING_OPTIONS),
+            )
+        if _table_exists(conn, "clients"):
+            conn.execute(
+                f"""
+                UPDATE clients
+                SET client_theme = 'dark', updated_at = ?
+                WHERE lower(COALESCE(client_theme, '')) IN ({placeholders})
+                """,
+                (_now_ts(), *THEME_SETTING_OPTIONS),
+            )
+    finally:
+        conn.commit()
+        conn.close()
+
+
+def _set_enabled_extra_themes(themes: object) -> list[str]:
+    if isinstance(themes, bool):
+        return _enabled_extra_themes() if _set_extra_themes_enabled(themes) else []
+    if isinstance(themes, dict):
+        enabled = any(bool(value) for value in themes.values())
+    elif isinstance(themes, list):
+        enabled = bool(themes)
+    else:
+        enabled = bool(themes)
+    return _enabled_extra_themes() if _set_extra_themes_enabled(enabled) else []
+
+
+def _enabled_theme_options() -> list[str]:
+    return [*THEME_DEFAULT_OPTIONS, *_enabled_extra_themes()]
+
+
+def _enabled_theme_setting_options() -> list[str]:
+    return _enabled_extra_themes()
+
+
+def _normalize_enabled_theme(value: str | None) -> str:
+    theme = _normalize_theme(value)
+    return theme if theme in _enabled_theme_options() else "dark"
 
 
 def _resolve_theme_preference(user: User | None) -> str:
     if not user:
-        return "silver_line"
+        return "dark"
     if user.role != "client_admin" and user.client_id:
         client = _get_client_by_id(user.client_id)
         if client and "client_theme" in client.keys() and client["client_theme"]:
-            return _normalize_theme(client["client_theme"])
-    return _normalize_theme(user.theme)
+            return _normalize_enabled_theme(client["client_theme"])
+    return _normalize_enabled_theme(user.theme)
 
 
 def _normalize_role(value: str | None) -> str:
@@ -6128,13 +6338,21 @@ def _log_audit_event(
         if not _table_exists(conn, "audit_logs") and not _table_exists(conn, "logs"):
             return
         if _table_exists(conn, "audit_logs"):
+            before_json = details_payload.get("before_json") if isinstance(details_payload, dict) else None
+            after_json = details_payload.get("after_json") if isinstance(details_payload, dict) else None
+            ip_address = None
+            user_agent = None
+            if has_request_context():
+                ip_address = request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip()
+                user_agent = request.headers.get("User-Agent", "")
             conn.execute(
                 """
                 INSERT INTO audit_logs (
                     entity_type, entity_id, action,
                     actor_email, actor_user_id, client_id, branch_id,
-                    actor_role, summary, details_json, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    actor_role, summary, details_json,
+                    before_json, after_json, ip_address, user_agent, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     entity_type,
@@ -6147,6 +6365,10 @@ def _log_audit_event(
                     actor.role,
                     summary,
                     json.dumps(details_payload, ensure_ascii=True),
+                    json.dumps(before_json, ensure_ascii=True) if before_json is not None else None,
+                    json.dumps(after_json, ensure_ascii=True) if after_json is not None else None,
+                    ip_address,
+                    user_agent,
                     created_at,
                 ),
             )
@@ -6333,7 +6555,7 @@ def _user_row_to_user(row: sqlite3.Row, theme: str) -> User:
         email=row["email"],
         role=_normalize_role(row["role"]),
         name=row["name"] or "",
-        theme=_normalize_theme(row_theme),
+        theme=_normalize_enabled_theme(row_theme),
         tier=_normalize_user_tier(row["tier"] if "tier" in row.keys() and row["tier"] else "basic"),
         selfie_path=row["selfie_path"] if "selfie_path" in row.keys() else None,
         must_change_password=int(row["must_change_password"] or 0),
@@ -7446,7 +7668,8 @@ def _employee_by_email(email: str, only_active: bool = False) -> dict | None:
             f"""
             SELECT
                 id, nik, name, email, no_hp, address,
-                gender, status_nikah, notes, is_active, created_at
+                gender, status_nikah, notes, is_active, created_at,
+                client_id, site_id, branch_id
             FROM employees
             WHERE lower(email) = ? {clause}
             LIMIT 1
@@ -9566,6 +9789,299 @@ def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {definition}")
 
 
+def _ensure_soft_delete_columns(conn: sqlite3.Connection, table: str) -> None:
+    if not _table_exists(conn, table):
+        return
+    _ensure_column(conn, table, "deleted_at", "deleted_at TEXT")
+    _ensure_column(conn, table, "deleted_by", "deleted_by INTEGER")
+    _ensure_column(conn, table, "delete_reason", "delete_reason TEXT")
+
+
+def _ensure_audit_actor_columns(conn: sqlite3.Connection, table: str) -> None:
+    if not _table_exists(conn, table):
+        return
+    _ensure_column(conn, table, "created_by_user_id", "created_by_user_id INTEGER")
+    _ensure_column(conn, table, "updated_by_user_id", "updated_by_user_id INTEGER")
+    _ensure_column(conn, table, "updated_at", "updated_at TEXT")
+
+
+def _ensure_phase16_hardening(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS roles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            role_key TEXT UNIQUE NOT NULL,
+            role_name TEXT NOT NULL,
+            default_scope TEXT NOT NULL DEFAULT 'SELF',
+            created_at TEXT,
+            updated_at TEXT
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS permissions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            permission_key TEXT UNIQUE NOT NULL,
+            description TEXT,
+            created_at TEXT,
+            updated_at TEXT
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS role_permission_map (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            role_id INTEGER NOT NULL,
+            permission_id INTEGER NOT NULL,
+            created_at TEXT,
+            UNIQUE(role_id, permission_id),
+            FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE,
+            FOREIGN KEY (permission_id) REFERENCES permissions(id) ON DELETE CASCADE
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS user_scopes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            client_id INTEGER,
+            site_id INTEGER,
+            scope_type TEXT NOT NULL DEFAULT 'SELF',
+            created_at TEXT,
+            updated_at TEXT,
+            UNIQUE(user_id, client_id, site_id, scope_type)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS retention_policies (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            data_type TEXT NOT NULL UNIQUE,
+            retention_days INTEGER NOT NULL,
+            action TEXT NOT NULL DEFAULT 'ARCHIVE',
+            is_active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT,
+            updated_at TEXT
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS login_attempts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            identifier TEXT NOT NULL,
+            ip_address TEXT,
+            success INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS attendance_corrections (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            attendance_id INTEGER,
+            client_id INTEGER,
+            employee_email TEXT,
+            correction_type TEXT NOT NULL,
+            before_json TEXT,
+            after_json TEXT,
+            reason TEXT,
+            status TEXT NOT NULL DEFAULT 'pending',
+            created_by_user_id INTEGER,
+            reviewed_by_user_id INTEGER,
+            created_at TEXT NOT NULL,
+            updated_at TEXT,
+            deleted_at TEXT,
+            deleted_by INTEGER,
+            delete_reason TEXT
+        )
+        """
+    )
+
+    now = _now_ts()
+    role_rows = [
+        ("owner", "Owner", "GLOBAL"),
+        ("hr_superadmin", "Superadmin", "GLOBAL"),
+        ("admin_asistent", "HR Admin", "GLOBAL"),
+        ("manager_operational", "HR Admin", "GLOBAL"),
+        ("client_admin", "Client Admin", "CLIENT"),
+        ("client_assistant", "Client Assistant", "CLIENT"),
+        ("client_supervisor", "Client Supervisor", "SITE"),
+        ("supervisor", "Supervisor", "SITE"),
+        ("finance", "Finance", "CLIENT"),
+        ("auditor", "Auditor", "GLOBAL"),
+        ("employee", "Employee", "SELF"),
+    ]
+    for role_key, role_name, scope in role_rows:
+        conn.execute(
+            """
+            INSERT INTO roles (role_key, role_name, default_scope, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(role_key) DO UPDATE SET
+                role_name = excluded.role_name,
+                default_scope = excluded.default_scope,
+                updated_at = excluded.updated_at
+            """,
+            (role_key, role_name, scope, now, now),
+        )
+
+    permission_rows = [
+        ("attendance.view", "Melihat attendance"),
+        ("attendance.export", "Export attendance"),
+        ("attendance.approve", "Approve attendance manual"),
+        ("payroll.view", "Melihat payroll"),
+        ("payroll.process", "Memproses payroll"),
+        ("payroll.export", "Export payroll"),
+        ("billing.view", "Melihat billing"),
+        ("billing.config.update", "Mengubah konfigurasi billing"),
+        ("contract.view", "Melihat kontrak"),
+        ("contract.manage", "Mengelola kontrak"),
+        ("patrol.view", "Melihat patroli"),
+        ("patrol.create", "Membuat patroli"),
+        ("patrol.review", "Review patroli"),
+        ("employee.view", "Melihat pegawai"),
+        ("employee.manage", "Mengelola pegawai"),
+        ("site.view", "Melihat site"),
+        ("site.manage", "Mengelola site"),
+        ("audit.view", "Melihat audit log"),
+        ("settings.manage", "Mengelola settings"),
+    ]
+    for permission_key, description in permission_rows:
+        conn.execute(
+            """
+            INSERT INTO permissions (permission_key, description, created_at, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(permission_key) DO UPDATE SET
+                description = excluded.description,
+                updated_at = excluded.updated_at
+            """,
+            (permission_key, description, now, now),
+        )
+
+    role_permission_seed = {
+        "owner": [key for key, _ in permission_rows],
+        "hr_superadmin": [key for key, _ in permission_rows],
+        "admin_asistent": ["attendance.view", "employee.view", "site.view"],
+        "manager_operational": ["attendance.view", "attendance.approve", "employee.view", "site.view", "patrol.view", "patrol.review"],
+        "client_admin": ["attendance.view", "attendance.export", "payroll.view", "billing.view", "contract.view", "patrol.view", "employee.view", "site.view"],
+        "client_assistant": ["attendance.view", "employee.view", "site.view"],
+        "client_supervisor": ["attendance.view", "patrol.view", "patrol.create", "employee.view", "site.view"],
+        "supervisor": ["attendance.view", "patrol.view", "patrol.create", "employee.view", "site.view"],
+        "finance": ["payroll.view", "payroll.export", "billing.view", "contract.view"],
+        "auditor": ["attendance.view", "payroll.view", "billing.view", "contract.view", "patrol.view", "employee.view", "site.view", "audit.view"],
+        "employee": ["attendance.view"],
+    }
+    for role_key, permissions in role_permission_seed.items():
+        for permission_key in permissions:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO role_permission_map (role_id, permission_id, created_at)
+                SELECT r.id, p.id, ?
+                FROM roles r, permissions p
+                WHERE r.role_key = ? AND p.permission_key = ?
+                """,
+                (now, role_key, permission_key),
+            )
+
+    retention_rows = [
+        ("attendance", 1825, "ARCHIVE"),
+        ("payroll", 1825, "ARCHIVE"),
+        ("patrol_reports", 1095, "ARCHIVE"),
+        ("audit_logs", 1825, "ARCHIVE"),
+        ("temporary_uploads", 90, "DELETE"),
+        ("password_reset_tokens", 30, "DELETE"),
+    ]
+    for data_type, days, action in retention_rows:
+        conn.execute(
+            """
+            INSERT INTO retention_policies (data_type, retention_days, action, is_active, created_at, updated_at)
+            VALUES (?, ?, ?, 1, ?, ?)
+            ON CONFLICT(data_type) DO UPDATE SET
+                retention_days = excluded.retention_days,
+                action = excluded.action,
+                is_active = excluded.is_active,
+                updated_at = excluded.updated_at
+            """,
+            (data_type, days, action, now, now),
+        )
+
+    soft_delete_tables = [
+        "employees",
+        "clients",
+        "sites",
+        "client_contracts",
+        "billing_configs",
+        "attendance_corrections",
+        "patrol_tours",
+        "patrol_operational_events",
+        "leave_requests",
+    ]
+    audit_actor_tables = [
+        "employees",
+        "attendance",
+        "leave_requests",
+        "clients",
+        "sites",
+        "shifts",
+        "payroll",
+        "attendance_policies",
+        "client_contracts",
+        "billing_configs",
+        "client_packages",
+        "client_addons",
+        "patrol_tours",
+        "patrol_operational_events",
+    ]
+    for table in soft_delete_tables:
+        _ensure_soft_delete_columns(conn, table)
+    for table in audit_actor_tables:
+        _ensure_audit_actor_columns(conn, table)
+
+    if _table_exists(conn, "audit_logs"):
+        _ensure_column(conn, "audit_logs", "before_json", "before_json TEXT")
+        _ensure_column(conn, "audit_logs", "after_json", "after_json TEXT")
+        _ensure_column(conn, "audit_logs", "ip_address", "ip_address TEXT")
+        _ensure_column(conn, "audit_logs", "user_agent", "user_agent TEXT")
+
+    if _table_exists(conn, "users"):
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO user_scopes (user_id, client_id, site_id, scope_type, created_at, updated_at)
+            SELECT
+                id,
+                client_id,
+                COALESCE(site_id, branch_id),
+                CASE
+                    WHEN role IN ('hr_superadmin') THEN 'GLOBAL'
+                    WHEN role IN ('client_admin', 'client_assistant') THEN 'CLIENT'
+                    WHEN role IN ('client_supervisor', 'supervisor') THEN 'SITE'
+                    ELSE 'SELF'
+                END,
+                ?,
+                ?
+            FROM users
+            """,
+            (now, now),
+        )
+
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_user_scopes_user_scope ON user_scopes(user_id, scope_type)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_user_scopes_client_site ON user_scopes(client_id, site_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_login_attempts_identifier_created ON login_attempts(identifier, created_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_attendance_client_date ON attendance(client_id, date)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_attendance_employee_date ON attendance(employee_id, date)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_employees_client_site ON employees(client_id, site_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_leave_client_status ON leave_requests(client_id, status)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_client_created ON audit_logs(client_id, created_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_contract_client_active ON client_contracts(client_id, is_active)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_billing_client_active ON billing_configs(client_id, is_active)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_attendance_corrections_client_status ON attendance_corrections(client_id, status)")
+
+
 def _rename_column_if_exists(
     conn: sqlite3.Connection, table: str, old_column: str, new_column: str
 ) -> None:
@@ -10307,6 +10823,91 @@ def _init_db() -> None:
             )
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS client_packages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                client_id INTEGER NOT NULL,
+                package_type TEXT NOT NULL DEFAULT 'BASIC',
+                is_active INTEGER DEFAULT 1,
+                created_at TEXT,
+                updated_at TEXT,
+                FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS client_addons (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                client_id INTEGER NOT NULL,
+                addon_key TEXT NOT NULL,
+                is_enabled INTEGER DEFAULT 0,
+                created_at TEXT,
+                updated_at TEXT,
+                UNIQUE(client_id, addon_key),
+                FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS client_contracts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                client_id INTEGER NOT NULL,
+                contract_no TEXT NOT NULL,
+                start_date TEXT,
+                end_date TEXT,
+                notice_period_days INTEGER DEFAULT 30,
+                scope_summary TEXT,
+                sla_summary TEXT,
+                is_active INTEGER DEFAULT 1,
+                payroll_cycle_type TEXT,
+                payroll_cutoff_day INTEGER,
+                created_at TEXT,
+                updated_at TEXT,
+                FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS billing_configs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                client_id INTEGER NOT NULL,
+                billing_type TEXT NOT NULL DEFAULT 'PER_HEAD',
+                rate REAL DEFAULT 0,
+                tax_percent REAL DEFAULT 0,
+                payment_terms_days INTEGER DEFAULT 30,
+                invoice_email TEXT,
+                is_active INTEGER DEFAULT 1,
+                created_at TEXT,
+                updated_at TEXT,
+                FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+            )
+            """
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_client_packages_client ON client_packages(client_id, is_active)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_client_addons_client ON client_addons(client_id, addon_key, is_enabled)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_client_contracts_client ON client_contracts(client_id, is_active)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_billing_configs_client ON billing_configs(client_id, is_active)")
+        if _table_exists(conn, "clients") and _table_exists(conn, "client_contracts"):
+            conn.execute(
+                """
+                INSERT INTO client_contracts (
+                    client_id, contract_no, start_date, end_date, notice_period_days,
+                    scope_summary, sla_summary, is_active, created_at, updated_at
+                )
+                SELECT c.id, c.contract_no, c.contract_start, c.contract_end, 30,
+                       c.notes, NULL, 1, COALESCE(c.created_at, ?), COALESCE(c.updated_at, ?)
+                FROM clients c
+                WHERE COALESCE(c.contract_no, '') <> ''
+                  AND NOT EXISTS (
+                    SELECT 1 FROM client_contracts cc WHERE cc.client_id = c.id
+                  )
+                """,
+                (_now_ts(), _now_ts()),
+            )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS client_contacts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 client_id INTEGER NOT NULL,
@@ -10844,6 +11445,7 @@ def _init_db() -> None:
                 period_start TEXT,
                 period_end TEXT,
                 pay_date TEXT,
+                policy_id INTEGER,
                 payroll_schedule TEXT,
                 payroll_scheme TEXT,
                 calculation_version TEXT,
@@ -10872,6 +11474,7 @@ def _init_db() -> None:
             _ensure_column(conn, "payroll", "period_start", "period_start TEXT")
             _ensure_column(conn, "payroll", "period_end", "period_end TEXT")
             _ensure_column(conn, "payroll", "pay_date", "pay_date TEXT")
+            _ensure_column(conn, "payroll", "policy_id", "policy_id INTEGER")
             _ensure_column(conn, "payroll", "payroll_schedule", "payroll_schedule TEXT")
             _ensure_column(conn, "payroll", "payroll_scheme", "payroll_scheme TEXT")
             _ensure_column(conn, "payroll", "working_days", "working_days INTEGER DEFAULT 0")
@@ -11433,6 +12036,8 @@ def _init_db() -> None:
                             ),
                         )
 
+        _ensure_phase16_hardening(conn)
+
         if ENABLE_SEED_DATA:
             _seed_users(conn)
             _seed_employees(conn)
@@ -11591,6 +12196,347 @@ def _set_global_addons(addons: object) -> list[str]:
     normalized = _addons_from_value(addons)
     _set_app_setting("global_addons", normalized)
     return normalized
+
+
+def _normalize_client_package(value: object) -> str:
+    package = str(value or "").strip().upper()
+    return package if package in CLIENT_PACKAGE_OPTIONS else CLIENT_PACKAGE_BASIC
+
+
+def _normalize_billing_type(value: object) -> str:
+    billing_type = str(value or "").strip().upper()
+    return billing_type if billing_type in BILLING_TYPE_OPTIONS else BILLING_TYPE_PER_HEAD
+
+
+def _phase15_addons_from_value(value: object) -> list[str]:
+    return [key for key in _addons_from_value(value) if key in CLIENT_ADDON_OPTIONS]
+
+
+def _get_client_package(client_id: int | None) -> str:
+    if not client_id:
+        return CLIENT_PACKAGE_BASIC
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "client_packages"):
+            return CLIENT_PACKAGE_BASIC
+        row = conn.execute(
+            """
+            SELECT package_type FROM client_packages
+            WHERE client_id = ? AND is_active = 1
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (client_id,),
+        ).fetchone()
+        return _normalize_client_package(row["package_type"] if row else None)
+    finally:
+        conn.close()
+
+
+def _set_client_package(client_id: int, package_type: object) -> str:
+    package = _normalize_client_package(package_type)
+    now = _now_ts()
+    conn = _db_connect()
+    try:
+        conn.execute(
+            "UPDATE client_packages SET is_active = 0, updated_at = ? WHERE client_id = ? AND is_active = 1",
+            (now, client_id),
+        )
+        conn.execute(
+            """
+            INSERT INTO client_packages (client_id, package_type, is_active, created_at, updated_at)
+            VALUES (?, ?, 1, ?, ?)
+            """,
+            (client_id, package, now, now),
+        )
+    finally:
+        conn.commit()
+        conn.close()
+    return package
+
+
+def _list_client_addons(client_id: int | None) -> list[str]:
+    if not client_id:
+        return []
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "client_addons"):
+            return []
+        rows = conn.execute(
+            """
+            SELECT addon_key FROM client_addons
+            WHERE client_id = ? AND is_enabled = 1
+            ORDER BY addon_key
+            """,
+            (client_id,),
+        ).fetchall()
+        return _phase15_addons_from_value([row["addon_key"] for row in rows])
+    finally:
+        conn.close()
+
+
+def _set_client_addons(client_id: int, addons: object) -> list[str]:
+    active = set(_phase15_addons_from_value(addons))
+    now = _now_ts()
+    conn = _db_connect()
+    try:
+        for addon_key in CLIENT_ADDON_OPTIONS:
+            conn.execute(
+                """
+                INSERT INTO client_addons (client_id, addon_key, is_enabled, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(client_id, addon_key) DO UPDATE SET
+                    is_enabled = excluded.is_enabled,
+                    updated_at = excluded.updated_at
+                """,
+                (client_id, addon_key, 1 if addon_key in active else 0, now, now),
+            )
+    finally:
+        conn.commit()
+        conn.close()
+    return sorted(active)
+
+
+def _phase15_subscription(client_id: int | None) -> dict:
+    package = _get_client_package(client_id)
+    addons = _list_client_addons(client_id)
+    return {
+        "package": package,
+        "addons": addons,
+        "billing_enabled": package == CLIENT_PACKAGE_ENTERPRISE and ADDON_BILLING_ENGINE in addons,
+        "contract_enabled": package == CLIENT_PACKAGE_ENTERPRISE and ADDON_CONTRACT_MANAGEMENT in addons,
+        "sla_enabled": package == CLIENT_PACKAGE_ENTERPRISE and ADDON_SLA_TRACKING in addons,
+    }
+
+
+def _get_active_client_contract(client_id: int | None) -> dict | None:
+    if not client_id:
+        return None
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "client_contracts"):
+            return None
+        row = conn.execute(
+            """
+            SELECT * FROM client_contracts
+            WHERE client_id = ? AND is_active = 1
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (client_id,),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def _save_client_contract(
+    client_id: int,
+    contract_no: str,
+    start_date: str | None,
+    end_date: str | None,
+    notice_period_days: int,
+    scope_summary: str | None,
+    sla_summary: str | None,
+) -> None:
+    now = _now_ts()
+    conn = _db_connect()
+    try:
+        conn.execute(
+            "UPDATE client_contracts SET is_active = 0, updated_at = ? WHERE client_id = ? AND is_active = 1",
+            (now, client_id),
+        )
+        conn.execute(
+            """
+            INSERT INTO client_contracts (
+                client_id, contract_no, start_date, end_date, notice_period_days,
+                scope_summary, sla_summary, is_active, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+            """,
+            (
+                client_id,
+                contract_no,
+                start_date,
+                end_date,
+                notice_period_days,
+                scope_summary,
+                sla_summary,
+                now,
+                now,
+            ),
+        )
+    finally:
+        conn.commit()
+        conn.close()
+
+
+def _get_active_billing_config(client_id: int | None) -> dict | None:
+    if not client_id:
+        return None
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "billing_configs"):
+            return None
+        row = conn.execute(
+            """
+            SELECT * FROM billing_configs
+            WHERE client_id = ? AND is_active = 1
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (client_id,),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def _save_billing_config(
+    client_id: int,
+    billing_type: str,
+    rate: float,
+    tax_percent: float,
+    payment_terms_days: int,
+    invoice_email: str | None,
+) -> None:
+    now = _now_ts()
+    conn = _db_connect()
+    try:
+        conn.execute(
+            "UPDATE billing_configs SET is_active = 0, updated_at = ? WHERE client_id = ? AND is_active = 1",
+            (now, client_id),
+        )
+        conn.execute(
+            """
+            INSERT INTO billing_configs (
+                client_id, billing_type, rate, tax_percent, payment_terms_days,
+                invoice_email, is_active, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+            """,
+            (
+                client_id,
+                _normalize_billing_type(billing_type),
+                max(0.0, float(rate or 0)),
+                max(0.0, float(tax_percent or 0)),
+                max(0, int(payment_terms_days or 0)),
+                invoice_email,
+                now,
+                now,
+            ),
+        )
+    finally:
+        conn.commit()
+        conn.close()
+
+
+def _billing_period_bounds(period: str | None) -> tuple[str, str, str]:
+    raw = (period or "").strip()
+    if not re.fullmatch(r"\d{4}-\d{2}", raw):
+        raw = _today_key()[:7]
+    year, month = [int(part) for part in raw.split("-")]
+    last_day = calendar.monthrange(year, month)[1]
+    return raw, f"{raw}-01", f"{raw}-{last_day:02d}"
+
+
+def _client_billing_summary(client_id: int | None, period: str | None = None) -> dict:
+    period_key, start_date, end_date = _billing_period_bounds(period)
+    subscription = _phase15_subscription(client_id)
+    config = _get_active_billing_config(client_id)
+    warnings: list[str] = []
+    counts = {
+        "total_employees": 0,
+        "total_sites": 0,
+        "total_attendance": 0,
+        "total_shifts": 0,
+    }
+    if not client_id:
+        warnings.append("Client tidak valid.")
+    if not subscription["billing_enabled"]:
+        warnings.append("Billing belum aktif. Paket harus Enterprise dan add-on Billing Engine aktif.")
+    if not _get_active_client_contract(client_id):
+        warnings.append("Kontrak aktif belum tersedia.")
+    if subscription["billing_enabled"] and not config:
+        warnings.append("Konfigurasi billing belum tersedia.")
+
+    if client_id:
+        conn = _db_connect()
+        try:
+            if _table_exists(conn, "sites"):
+                row = conn.execute(
+                    "SELECT COUNT(*) AS total FROM sites WHERE client_id = ? AND COALESCE(is_active, 1) = 1",
+                    (client_id,),
+                ).fetchone()
+                counts["total_sites"] = int(row["total"] or 0) if row else 0
+            if _table_exists(conn, "assignments"):
+                row = conn.execute(
+                    """
+                    SELECT COUNT(DISTINCT a.employee_user_id) AS total
+                    FROM assignments a
+                    LEFT JOIN sites s ON s.id = a.site_id
+                    WHERE (a.client_id = ? OR s.client_id = ?)
+                      AND COALESCE(a.status, 'ACTIVE') = 'ACTIVE'
+                      AND COALESCE(a.start_date, ?) <= ?
+                      AND (a.end_date IS NULL OR a.end_date = '' OR a.end_date >= ?)
+                    """,
+                    (client_id, client_id, start_date, end_date, start_date),
+                ).fetchone()
+                counts["total_employees"] = int(row["total"] or 0) if row else 0
+            if _table_exists(conn, "attendance"):
+                row = conn.execute(
+                    """
+                    SELECT COUNT(*) AS total
+                    FROM attendance a
+                    LEFT JOIN sites s ON s.id = a.branch_id
+                    WHERE (a.client_id = ? OR s.client_id = ?)
+                      AND a.date >= ? AND a.date <= ?
+                      AND lower(COALESCE(a.action, 'checkin')) IN ('checkin', 'in')
+                    """,
+                    (client_id, client_id, start_date, end_date),
+                ).fetchone()
+                counts["total_attendance"] = int(row["total"] or 0) if row else 0
+            if _table_exists(conn, "employee_schedules"):
+                row = conn.execute(
+                    """
+                    SELECT COUNT(*) AS total
+                    FROM employee_schedules
+                    WHERE client_id = ? AND schedule_date >= ? AND schedule_date <= ?
+                    """,
+                    (client_id, start_date, end_date),
+                ).fetchone()
+                counts["total_shifts"] = int(row["total"] or 0) if row else 0
+        finally:
+            conn.close()
+    if counts["total_shifts"] <= 0:
+        counts["total_shifts"] = counts["total_attendance"]
+
+    billing_type = _normalize_billing_type(config.get("billing_type") if config else None)
+    rate = float(config.get("rate") or 0) if config else 0.0
+    tax_percent = float(config.get("tax_percent") or 0) if config else 0.0
+    unit_count = {
+        BILLING_TYPE_PER_HEAD: counts["total_employees"],
+        BILLING_TYPE_PER_SITE: counts["total_sites"],
+        BILLING_TYPE_PER_SHIFT: counts["total_attendance"],
+    }.get(billing_type, 0)
+    subtotal = unit_count * rate if subscription["billing_enabled"] and config else 0.0
+    tax_amount = subtotal * tax_percent / 100
+    total = subtotal + tax_amount
+    return {
+        "period": period_key,
+        "start_date": start_date,
+        "end_date": end_date,
+        "billing_enabled": subscription["billing_enabled"],
+        "billing_type": billing_type,
+        "rate": rate,
+        "tax_percent": tax_percent,
+        "unit_count": unit_count,
+        "subtotal": subtotal,
+        "tax_amount": tax_amount,
+        "calculated_amount": total,
+        **counts,
+        "warnings": warnings,
+    }
 
 
 def has_addon(client: sqlite3.Row | dict | None, feature: str) -> bool:
@@ -12411,6 +13357,7 @@ def _calculate_payroll(employee_email: str, period: str, salary_base: float,
         "absent_deduction_rate": potongan_absen_rate,
         "payroll_scheme": payroll_scheme,
         "payroll_schedule": pay_cycle["payroll_schedule"],
+        "policy_id": pay_cycle.get("policy_id"),
         "period_start": pay_cycle["period_start"],
         "period_end": pay_cycle["period_end"],
         "pay_date": pay_cycle["pay_date"],
@@ -12523,20 +13470,22 @@ def _employee_email_in_payroll_scope(
     site_id: int | None,
 ) -> bool:
     normalized = (employee_email or "").strip().lower()
-    if not normalized or not client_id or not site_id:
+    if not normalized or not client_id:
         return False
     employee = _employee_by_email(normalized, only_active=False)
     if employee:
         employee_client_id = int(employee.get("client_id") or 0)
         employee_site_id = int(employee.get("branch_id") or employee.get("site_id") or 0)
-        if employee_client_id == int(client_id) and employee_site_id == int(site_id):
+        if employee_client_id == int(client_id) and (site_id is None or employee_site_id == int(site_id)):
             return True
-        if employee_site_id == int(site_id):
+        if site_id is not None and employee_site_id == int(site_id):
             site = _get_site_by_id(employee_site_id)
             if site and int(_row_get(site, "client_id") or 0) == int(client_id):
                 return True
     scoped_client_id, scoped_site_id = _enterprise_scope_for_employee_email(normalized)
-    return scoped_client_id == int(client_id) and scoped_site_id == int(site_id)
+    if scoped_client_id != int(client_id):
+        return False
+    return site_id is None or scoped_site_id == int(site_id)
 
 
 def _payroll_record_in_scope(
@@ -12545,11 +13494,11 @@ def _payroll_record_in_scope(
     client_id: int | None,
     site_id: int | None,
 ) -> bool:
-    if not record or not client_id or not site_id:
+    if not record or not client_id:
         return False
     record_client_id = int(record.get("client_id") or 0)
     record_site_id = int(record.get("site_id") or record.get("branch_id") or 0)
-    if record_client_id == int(client_id) and record_site_id == int(site_id):
+    if record_client_id == int(client_id) and (site_id is None or record_site_id == int(site_id)):
         return True
     return _employee_email_in_payroll_scope(
         record.get("employee_email") or "",
@@ -12615,6 +13564,7 @@ def _create_payroll_record(
                     period_start = ?,
                     period_end = ?,
                     pay_date = ?,
+                    policy_id = ?,
                     payroll_schedule = ?,
                     payroll_scheme = ?,
                     calculation_version = ?,
@@ -12646,6 +13596,7 @@ def _create_payroll_record(
                     payroll_data["period_start"],
                     payroll_data["period_end"],
                     payroll_data["pay_date"],
+                    payroll_data["policy_id"],
                     payroll_data["payroll_schedule"],
                     payroll_data["payroll_scheme"],
                     payroll_data["calculation_version"],
@@ -12662,8 +13613,8 @@ def _create_payroll_record(
                 working_days, late_days, absent_days, leave_days, daily_rate, gross_salary,
                 potongan_telat, potongan_absen, late_deduction_rate, absent_deduction_rate,
                 potongan_lain, tunjangan, total_gaji, period_start, period_end, pay_date,
-                payroll_schedule, payroll_scheme, calculation_version, status, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                policy_id, payroll_schedule, payroll_scheme, calculation_version, status, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 employee.get("id"),
@@ -12690,6 +13641,7 @@ def _create_payroll_record(
                 payroll_data["period_start"],
                 payroll_data["period_end"],
                 payroll_data["pay_date"],
+                payroll_data["policy_id"],
                 payroll_data["payroll_schedule"],
                 payroll_data["payroll_scheme"],
                 payroll_data["calculation_version"],
@@ -12894,7 +13846,12 @@ def _leave_active_for_email_date_with_conn(
     return row is not None
 
 
-def _generate_attendance_report(start_date: str, end_date: str, client_id: int | None = None) -> list[dict]:
+def _generate_attendance_report(
+    start_date: str,
+    end_date: str,
+    client_id: int | None = None,
+    site_id: int | None = None,
+) -> list[dict]:
     """Generate daily attendance report."""
     start = time.perf_counter()
     conn = _db_connect()
@@ -12905,6 +13862,8 @@ def _generate_attendance_report(start_date: str, end_date: str, client_id: int |
                 a.date,
                 lower(a.employee_email) AS employee_email,
                 COALESCE(e.name, u.name, a.employee_name, a.employee_email) AS employee_name,
+                a.client_id AS attendance_client_id,
+                a.branch_id AS attendance_site_id,
                 a.time AS checkin_time,
                 a.method,
                 a.action,
@@ -12928,7 +13887,11 @@ def _generate_attendance_report(start_date: str, end_date: str, client_id: int |
             if dedupe_key in seen:
                 continue
             assignment = _assignment_for_employee_date_with_conn(conn, email, date_key)
-            if client_id and int((assignment or {}).get("client_id") or 0) != int(client_id):
+            row_client_id = int((assignment or {}).get("client_id") or row["attendance_client_id"] or 0)
+            row_site_id = int((assignment or {}).get("site_id") or row["attendance_site_id"] or 0)
+            if client_id and row_client_id != int(client_id):
+                continue
+            if site_id and row_site_id != int(site_id):
                 continue
             seen.add(dedupe_key)
             minutes = _extract_minutes(row["checkin_time"], row["created_at"])
@@ -12937,6 +13900,8 @@ def _generate_attendance_report(start_date: str, end_date: str, client_id: int |
                     "date": date_key,
                     "employee_email": email,
                     "employee_name": row["employee_name"],
+                    "client_id": row_client_id or None,
+                    "site_id": row_site_id or None,
                     "checkin_time": row["checkin_time"],
                     "status": "LATE" if _is_late_checkin(minutes, assignment or {}) else "ON_TIME",
                     "method": row["method"],
@@ -17690,6 +18655,11 @@ def admin_bp() -> Blueprint:
         policies = _list_policies_by_client(client_id)
         contacts = _list_client_contacts(client_id)
         today = _today_key()
+        billing_period = (request.args.get("billing_period") or today[:7]).strip()
+        subscription = _phase15_subscription(client_id)
+        active_contract = _get_active_client_contract(client_id)
+        billing_config = _get_active_billing_config(client_id)
+        billing_summary = _client_billing_summary(client_id, billing_period)
 
         site_policy_ids = {
             int(p["site_id"])
@@ -17727,7 +18697,73 @@ def admin_bp() -> Blueprint:
             policies=policies,
             contacts=contacts,
             summary=summary,
+            subscription=subscription,
+            active_contract=active_contract,
+            billing_config=billing_config,
+            billing_summary=billing_summary,
+            billing_type_options=[BILLING_TYPE_PER_HEAD, BILLING_TYPE_PER_SITE, BILLING_TYPE_PER_SHIFT],
         )
+
+    @bp.route("/clients/<int:client_id>/contract/save", methods=["POST"])
+    def client_contract_save(client_id: int):
+        user = _current_user()
+        _require_hr_superadmin(user)
+        if not _get_client_by_id(client_id):
+            flash("Client tidak ditemukan.")
+            return redirect(url_for("admin.clients"))
+        contract_no = (request.form.get("contract_no") or "").strip()
+        if not contract_no:
+            flash("Nomor kontrak wajib diisi.")
+            return redirect(url_for("admin.client_profile", client_id=client_id))
+        try:
+            notice_period_days = int((request.form.get("notice_period_days") or "30").strip())
+        except ValueError:
+            notice_period_days = 30
+        _save_client_contract(
+            client_id=client_id,
+            contract_no=contract_no,
+            start_date=(request.form.get("start_date") or "").strip() or None,
+            end_date=(request.form.get("end_date") or "").strip() or None,
+            notice_period_days=max(0, notice_period_days),
+            scope_summary=(request.form.get("scope_summary") or "").strip() or None,
+            sla_summary=(request.form.get("sla_summary") or "").strip() or None,
+        )
+        flash("Kontrak client tersimpan.")
+        return redirect(url_for("admin.client_profile", client_id=client_id))
+
+    @bp.route("/clients/<int:client_id>/billing/save", methods=["POST"])
+    def client_billing_save(client_id: int):
+        user = _current_user()
+        _require_hr_superadmin(user)
+        if not _get_client_by_id(client_id):
+            flash("Client tidak ditemukan.")
+            return redirect(url_for("admin.clients"))
+        try:
+            rate = float((request.form.get("rate") or "0").strip())
+        except ValueError:
+            rate = 0
+        try:
+            tax_percent = float((request.form.get("tax_percent") or "0").strip())
+        except ValueError:
+            tax_percent = 0
+        try:
+            payment_terms_days = int((request.form.get("payment_terms_days") or "30").strip())
+        except ValueError:
+            payment_terms_days = 30
+        invoice_email = (request.form.get("invoice_email") or "").strip().lower()
+        if invoice_email and not _looks_like_email(invoice_email):
+            flash("Email invoice tidak valid.")
+            return redirect(url_for("admin.client_profile", client_id=client_id))
+        _save_billing_config(
+            client_id=client_id,
+            billing_type=request.form.get("billing_type") or BILLING_TYPE_PER_HEAD,
+            rate=rate,
+            tax_percent=tax_percent,
+            payment_terms_days=payment_terms_days,
+            invoice_email=invoice_email or None,
+        )
+        flash("Konfigurasi billing tersimpan.")
+        return redirect(url_for("admin.client_profile", client_id=client_id))
 
     @bp.route("/clients/<int:client_id>/contacts/create", methods=["POST"])
     def client_contacts_create(client_id: int):
@@ -18955,21 +19991,31 @@ def admin_bp() -> Blueprint:
             return abort(403)
         _require_admin(user)
         permissions = _get_role_permissions(user.role)
-        default_tab = "users" if user.role == "hr_superadmin" else "theme"
+        theme_tab_enabled = _extra_themes_enabled()
+        default_tab = "users" if user.role == "hr_superadmin" else ("theme" if theme_tab_enabled else "password")
         tab = (request.args.get("tab") or default_tab).lower()
-        if tab not in {"users", "roles", "hr", "password", "theme", "addons"}:
+        if tab not in {"users", "roles", "hr", "password", "theme", "addons", "subscription"}:
+            tab = default_tab
+        if tab == "theme" and not theme_tab_enabled:
             tab = default_tab
         if user.role != "hr_superadmin":
-            allowed_tabs = ["theme"]
+            allowed_tabs = ["theme"] if theme_tab_enabled else []
             if permissions.get("manage_settings_codes"):
                 allowed_tabs.append("hr")
             if permissions.get("manage_settings_password"):
                 allowed_tabs.append("password")
+            if not allowed_tabs:
+                return abort(403)
             if tab not in allowed_tabs:
                 tab = allowed_tabs[0]
         users = [u for u in _list_users() if u.get("role") in ADMIN_ROLES]
         sites = _list_sites()
         clients = _clients()
+        client_subscriptions = {
+            int(client["id"]): _phase15_subscription(int(client["id"]))
+            for client in clients
+            if client.get("id")
+        }
         supervisor_sites = _get_supervisor_sites_map()
         registration_codes = _list_employee_registration_codes()
         role_permissions = {
@@ -18989,15 +20035,42 @@ def admin_bp() -> Blueprint:
             role_permissions=role_permissions,
             permission_labels=ROLE_PERMISSION_LABELS,
             permission_keys=ROLE_PERMISSION_KEYS,
+            theme_tab_enabled=theme_tab_enabled,
+            client_package_options=[CLIENT_PACKAGE_BASIC, CLIENT_PACKAGE_PRO, CLIENT_PACKAGE_ENTERPRISE],
+            client_addon_options=CLIENT_ADDON_OPTIONS,
+            client_subscriptions=client_subscriptions,
         )
+
+    @bp.route("/settings/subscription/update", methods=["POST"])
+    def settings_subscription_update():
+        user = _current_user()
+        _require_hr_superadmin(user)
+        client_id_raw = (request.form.get("client_id") or "").strip()
+        if not client_id_raw.isdigit():
+            flash("Client tidak valid.")
+            return redirect(url_for("admin.settings", tab="subscription"))
+        client_id = int(client_id_raw)
+        if not _get_client_by_id(client_id):
+            flash("Client tidak ditemukan.")
+            return redirect(url_for("admin.settings", tab="subscription"))
+        package = _set_client_package(client_id, request.form.get("package_type"))
+        addons = request.form.getlist("addons")
+        if package != CLIENT_PACKAGE_ENTERPRISE:
+            addons = []
+        _set_client_addons(client_id, addons)
+        flash("Subscription client diperbarui.")
+        return redirect(url_for("admin.settings", tab="subscription"))
 
     @bp.route("/settings/theme/update", methods=["POST"])
     def settings_theme_update():
         user = _current_user()
         _require_admin(user)
+        if not _extra_themes_enabled():
+            flash("Tema tambahan sedang nonaktif.")
+            return redirect(url_for("admin.settings"))
         theme = (request.form.get("theme_preference") or "").strip().lower()
-        if theme not in THEME_SETTING_OPTIONS:
-            flash("Tema tidak valid.")
+        if theme not in _enabled_theme_setting_options():
+            flash("Tema tidak aktif. Aktifkan dulu dari pengaturan owner.")
             return redirect(url_for("admin.settings", tab="theme"))
         _update_user_theme_preference(user.id, theme)
         user.theme = theme
@@ -19491,6 +20564,7 @@ def _attendance_live(
                         "employee": name,
                         "email": row["employee_email"] or "-",
                         "client_id": row["client_id"] if "client_id" in row.keys() else None,
+                        "site_id": row["branch_id"] if "branch_id" in row.keys() else None,
                         "branch_id": row["branch_id"] if "branch_id" in row.keys() else None,
                         "date": date,
                         "time": time_value,
@@ -19523,6 +20597,7 @@ def _aggregate_attendance_records(rows: list[dict]) -> list[dict]:
                 "employee": row.get("employee") or "-",
                 "email": row.get("email") or "-",
                 "client_id": row.get("client_id"),
+                "site_id": row.get("site_id") or row.get("branch_id"),
                 "branch_id": row.get("branch_id"),
                 "date": row.get("date") or "-",
                 "check_in": "-",

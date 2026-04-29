@@ -159,6 +159,67 @@ def _seed_second_site_employee(db_path) -> None:
         conn.close()
 
 
+def _seed_other_client_employee(db_path) -> None:
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """
+            INSERT INTO clients (
+                id, name, address, office_email, office_phone,
+                pic_name, pic_title, pic_phone, created_at
+            ) VALUES (2, 'Client B', 'Surabaya', 'hr@clientb.test', '031',
+                'PIC B', 'HR', '0814', '2026-01-01 00:00:00')
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO sites (id, client_id, name, address, is_active, created_at)
+            VALUES (3, 2, 'Site C', 'Surabaya', 1, '2026-01-01 00:00:00')
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO users (
+                id, email, name, role, password_hash, is_active,
+                client_id, site_id, tier, created_at
+            ) VALUES (3, 'employee3@test.local', 'Employee Three', 'employee',
+                'hash', 1, 2, 3, 'pro', '2026-01-01 00:00:00')
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO employees (
+                id, nik, name, email, no_hp, address, gender,
+                status_nikah, is_active, client_id, site_id, created_at
+            ) VALUES (3, 'EMP003', 'Employee Three', 'employee3@test.local',
+                '0814', 'Surabaya', 'M', 'single', 1, 2, 3, '2026-01-01 00:00:00')
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO assignments (
+                id, employee_user_id, client_id, site_id, start_date,
+                end_date, status, created_at
+            ) VALUES (3, 3, 2, 3, '2026-01-01', NULL, 'ACTIVE',
+                '2026-01-01 00:00:00')
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO attendance_policies (
+                id, scope_type, client_id, site_id, effective_from,
+                payroll_scheme, payroll_schedule, cutoff_time, grace_minutes,
+                created_at
+            ) VALUES (3, 'SITE', 2, 3, '2026-01-01',
+                'PRORATED_ATTENDANCE', 'MID_MONTH', '09:00', 0,
+                '2026-01-01 00:00:00')
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def test_mid_month_pay_cycle_resolves_policy_period(payroll_db):
     _seed_employee_policy(
         payroll_db,
@@ -173,6 +234,67 @@ def test_mid_month_pay_cycle_resolves_policy_period(payroll_db):
     assert cycle["pay_date"] == "2026-02-16"
     assert cycle["payroll_schedule"] == presensi.PAYROLL_SCHEDULE_MID_MONTH
     assert cycle["payroll_scheme"] == presensi.PAYROLL_SCHEME_PRORATED
+
+
+def test_policy_resolution_uses_site_client_global_order(payroll_db):
+    _seed_employee_policy(
+        payroll_db,
+        schedule=presensi.PAYROLL_SCHEDULE_MID_MONTH,
+        scheme=presensi.PAYROLL_SCHEME_PRORATED,
+    )
+    conn = sqlite3.connect(payroll_db)
+    try:
+        conn.execute(
+            """
+            INSERT INTO attendance_policies (
+                id, scope_type, client_id, site_id, effective_from,
+                payroll_scheme, payroll_schedule, cutoff_time, grace_minutes,
+                created_at
+            ) VALUES (4, 'CLIENT', 1, NULL, '2026-01-01',
+                'FULL_MONTHLY_DEDUCTION', 'MONTH_END', '10:00', 0,
+                '2026-01-01 00:00:00')
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO attendance_policies (
+                id, scope_type, client_id, site_id, effective_from,
+                payroll_scheme, payroll_schedule, cutoff_time, grace_minutes,
+                created_at
+            ) VALUES (5, 'GLOBAL', NULL, NULL, '2026-01-01',
+                'FULL_MONTHLY_DEDUCTION', 'MONTH_END', '11:00', 0,
+                '2026-01-01 00:00:00')
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    site_policy = presensi._resolve_attendance_policy(1, 1, None, "2026-02-01")
+    assert site_policy["policy_id"] == 1
+    assert site_policy["payroll_schedule"] == presensi.PAYROLL_SCHEDULE_MID_MONTH
+
+    conn = sqlite3.connect(payroll_db)
+    try:
+        conn.execute("DELETE FROM attendance_policies WHERE id = 1")
+        conn.commit()
+    finally:
+        conn.close()
+
+    client_policy = presensi._resolve_attendance_policy(1, 1, None, "2026-02-01")
+    assert client_policy["policy_id"] == 4
+    assert client_policy["cutoff_time"] == "10:00"
+
+    conn = sqlite3.connect(payroll_db)
+    try:
+        conn.execute("DELETE FROM attendance_policies WHERE id = 4")
+        conn.commit()
+    finally:
+        conn.close()
+
+    global_policy = presensi._resolve_attendance_policy(1, 1, None, "2026-02-01")
+    assert global_policy["policy_id"] == 5
+    assert global_policy["cutoff_time"] == "11:00"
 
 
 def test_prorated_payroll_uses_only_attendance_inside_pay_cycle(payroll_db):
@@ -245,9 +367,43 @@ def test_created_payroll_persists_snapshot_and_matches_list(payroll_db):
     assert len(rows) == 1
     assert detail["period_start"] == "2026-01-16"
     assert detail["period_end"] == "2026-02-15"
+    assert detail["site_id"] == 1
+    assert detail["policy_id"] == 1
     assert detail["payroll_scheme"] == presensi.PAYROLL_SCHEME_PRORATED
     assert detail["calculation_version"] == presensi.PAYROLL_CALCULATION_VERSION
+    assert rows[0]["site_id"] == 1
     assert rows[0]["total_gaji"] == detail["total_gaji"]
+
+
+def test_legacy_payroll_null_snapshot_gets_safe_defaults(payroll_db):
+    _seed_employee_policy(
+        payroll_db,
+        schedule=presensi.PAYROLL_SCHEDULE_MONTH_END,
+        scheme=presensi.PAYROLL_SCHEME_PRORATED,
+    )
+    conn = sqlite3.connect(payroll_db)
+    try:
+        conn.execute(
+            """
+            INSERT INTO payroll (
+                employee_id, client_id, branch_id, employee_email, period,
+                salary_base, attendance_days, absent_days, leave_days,
+                total_gaji, created_at
+            ) VALUES (1, 1, 1, 'employee@test.local', '2026-02',
+                2800, 2, 26, 0, 200, '2026-02-28 00:00:00')
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    presensi._init_db()
+    detail = presensi._get_payroll_by_employee_period("employee@test.local", "2026-02")
+
+    assert detail is not None
+    assert detail["working_days"] == 28
+    assert detail["calculation_version"] == "legacy"
+    assert detail["site_id"] == 1
 
 
 def test_employee_summary_uses_pay_cycle_metadata(payroll_db):
@@ -307,3 +463,200 @@ def test_client_payroll_list_defaults_to_client_wide(payroll_db, monkeypatch):
         assert filtered.status_code == 200
         filtered_payload = filtered.get_json()
         assert [row["employee_email"] for row in filtered_payload["data"]] == ["employee2@test.local"]
+        assert filtered_payload["data"][0]["site_id"] == 2
+
+        schedule_filtered = client.get(
+            "/api/payroll/list?period=2026-02&payroll_schedule=MONTH_END"
+        )
+        assert schedule_filtered.status_code == 200
+        assert schedule_filtered.get_json()["data"] == []
+
+
+def test_attendance_report_accepts_site_id_and_exposes_site_id(payroll_db, monkeypatch):
+    monkeypatch.setenv("FLASK_SECRET", "test-secret-for-attendance-report-site")
+    _seed_employee_policy(
+        payroll_db,
+        schedule=presensi.PAYROLL_SCHEDULE_MID_MONTH,
+        scheme=presensi.PAYROLL_SCHEME_PRORATED,
+    )
+    _seed_second_site_employee(payroll_db)
+    _insert_checkins(payroll_db, ["2026-01-16"])
+
+    direct_rows = presensi._generate_attendance_report("2026-01-16", "2026-01-16", client_id=1, site_id=2)
+    assert [row["employee_email"] for row in direct_rows] == ["employee2@test.local"]
+    assert direct_rows[0]["site_id"] == 2
+
+    flask_app = presensi.create_app()
+    flask_app.config.update(TESTING=True)
+    with flask_app.test_client() as client:
+        with client.session_transaction() as sess:
+            sess["user"] = {
+                "id": 0,
+                "email": "admin@test.local",
+                "role": "hr_superadmin",
+                "name": "Admin",
+                "tier": "pro",
+            }
+
+        response = client.get(
+            "/api/reports/attendance?start_date=2026-01-16&end_date=2026-01-16&client_id=1&site_id=2"
+        )
+        assert response.status_code == 200
+        payload = response.get_json()
+        assert payload["ok"] is True
+        assert [row["employee_email"] for row in payload["data"]] == ["employee2@test.local"]
+        assert payload["data"][0]["site_id"] == 2
+
+
+def test_attendance_checkin_checkout_regression(payroll_db, monkeypatch):
+    monkeypatch.setenv("FLASK_SECRET", "test-secret-for-attendance-flow")
+    _seed_employee_policy(
+        payroll_db,
+        schedule=presensi.PAYROLL_SCHEDULE_MONTH_END,
+        scheme=presensi.PAYROLL_SCHEME_PRORATED,
+    )
+    conn = sqlite3.connect(payroll_db)
+    try:
+        conn.execute("UPDATE sites SET latitude = 0, longitude = 0, radius_meters = 100 WHERE id = 1")
+        conn.commit()
+    finally:
+        conn.close()
+
+    flask_app = presensi.create_app()
+    flask_app.config.update(TESTING=True)
+    with flask_app.test_client() as client:
+        with client.session_transaction() as sess:
+            sess["csrf_token"] = "csrf-test-token"
+            sess["user"] = {
+                "id": 1,
+                "email": "employee@test.local",
+                "role": "employee",
+                "name": "Employee One",
+                "tier": "pro",
+                "client_id": 1,
+                "site_id": 1,
+            }
+
+        form = {
+            "csrf_token": "csrf-test-token",
+            "method": "gps",
+            "lat": "0",
+            "lng": "0",
+        }
+        checkin = client.post("/api/attendance/checkin", data=form)
+        assert checkin.status_code == 200
+        assert checkin.get_json()["data"]["action"] == "checkin"
+
+        checkout = client.post("/api/attendance/checkout", data=form)
+        assert checkout.status_code == 200
+        assert checkout.get_json()["data"]["action"] == "checkout"
+
+
+def test_approved_payroll_is_immutable_for_regenerate_and_adjustment(payroll_db, monkeypatch):
+    monkeypatch.setenv("FLASK_SECRET", "test-secret-for-payroll-immutable")
+    _seed_employee_policy(
+        payroll_db,
+        schedule=presensi.PAYROLL_SCHEDULE_MID_MONTH,
+        scheme=presensi.PAYROLL_SCHEME_PRORATED,
+    )
+    conn = sqlite3.connect(payroll_db)
+    try:
+        conn.execute("UPDATE clients SET addons = ? WHERE id = 1", ('["payroll_plus"]',))
+        conn.commit()
+    finally:
+        conn.close()
+    _insert_checkins(payroll_db, ["2026-01-16"])
+    payroll_id = presensi._create_payroll_record("employee@test.local", "2026-02", 3100)
+    presensi._approve_payroll_record(
+        payroll_id,
+        presensi.User(id=99, email="admin@test.local", role="hr_superadmin", tier="pro"),
+    )
+
+    with pytest.raises(ValueError, match="approved"):
+        presensi._create_payroll_record("employee@test.local", "2026-02", 9999)
+
+    flask_app = presensi.create_app()
+    flask_app.config.update(TESTING=True)
+    with flask_app.test_client() as client:
+        with client.session_transaction() as sess:
+            sess["csrf_token"] = "csrf-test-token"
+            sess["user"] = {
+                "id": 0,
+                "email": "client@test.local",
+                "role": "client_admin",
+                "name": "Client Admin",
+                "tier": "pro",
+                "client_id": 1,
+                "site_id": 1,
+            }
+
+        response = client.post(
+            f"/api/payroll/{payroll_id}/update",
+            json={"potongan_lain": 10, "tunjangan": 0},
+            headers={"X-CSRF-Token": "csrf-test-token"},
+        )
+        assert response.status_code == 400
+        assert "approved" in response.get_json()["message"].lower()
+
+
+def test_client_admin_cannot_access_other_client_payroll(payroll_db, monkeypatch):
+    monkeypatch.setenv("FLASK_SECRET", "test-secret-for-payroll-scope")
+    _seed_employee_policy(
+        payroll_db,
+        schedule=presensi.PAYROLL_SCHEDULE_MID_MONTH,
+        scheme=presensi.PAYROLL_SCHEME_PRORATED,
+    )
+    _seed_other_client_employee(payroll_db)
+    payroll_id = presensi._create_payroll_record("employee3@test.local", "2026-02", 3100)
+
+    flask_app = presensi.create_app()
+    flask_app.config.update(TESTING=True)
+    with flask_app.test_client() as client:
+        with client.session_transaction() as sess:
+            sess["user"] = {
+                "id": 0,
+                "email": "client@test.local",
+                "role": "client_admin",
+                "name": "Client Admin",
+                "tier": "pro",
+                "client_id": 1,
+                "site_id": 1,
+            }
+
+        detail = client.get(f"/api/payroll/{payroll_id}")
+        assert detail.status_code == 403
+
+        listing = client.get("/api/payroll/list?period=2026-02")
+        assert listing.status_code == 200
+        payload = listing.get_json()
+        assert {row["employee_email"] for row in payload["data"]} == set()
+
+
+def test_admin_can_filter_payroll_by_client(payroll_db, monkeypatch):
+    monkeypatch.setenv("FLASK_SECRET", "test-secret-for-admin-client-filter")
+    _seed_employee_policy(
+        payroll_db,
+        schedule=presensi.PAYROLL_SCHEDULE_MID_MONTH,
+        scheme=presensi.PAYROLL_SCHEME_PRORATED,
+    )
+    _seed_other_client_employee(payroll_db)
+    presensi._create_payroll_record("employee@test.local", "2026-02", 3100)
+    presensi._create_payroll_record("employee3@test.local", "2026-02", 3100)
+
+    flask_app = presensi.create_app()
+    flask_app.config.update(TESTING=True)
+    with flask_app.test_client() as client:
+        with client.session_transaction() as sess:
+            sess["user"] = {
+                "id": 0,
+                "email": "admin@test.local",
+                "role": "hr_superadmin",
+                "name": "Admin",
+                "tier": "pro",
+            }
+
+        response = client.get("/api/payroll/list?period=2026-02&client_id=2")
+        assert response.status_code == 200
+        payload = response.get_json()
+        assert payload["ok"] is True
+        assert [row["employee_email"] for row in payload["data"]] == ["employee3@test.local"]

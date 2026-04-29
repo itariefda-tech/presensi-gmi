@@ -229,22 +229,23 @@ Goal:
 - Siap untuk client besar & komersialisasi bertahap
 
 Checklist:
-- [ ] Add client_contracts minimal fields:
+- [x] Add client_contracts minimal fields:
       - contract_no
       - start_date / end_date
       - notice_period_days
       - scope_summary
       - sla_summary
-- [ ] Billing schema (optional):
+- [x] Billing schema (optional):
       - billing_type (PER_HEAD / PER_SITE / PER_SHIFT)
       - rate
       - tax_percent
       - payment_terms_days
       - invoice_email
-- [ ] Read-only recap: attendance -> billing summary (optional)
+- [x] Read-only recap: attendance -> billing summary (optional)
 
 Outcome:
 - Produk siap naik kelas untuk enterprise
+- Status implementasi: selesai, dengan kontrol Settings -> Subscription dan recap di Client Profile.
 
 ------------------------------------------------------------
 
@@ -258,11 +259,12 @@ Checklist:
 - [x] Migrasi storage attendance + leave ke DB:
       - [x] hilangkan in-memory demo
       - [ ] (opsional) switch engine ke MySQL saat infra siap
-- [ ] Permission matrix more granular (RBAC + per-client scope)
-- [ ] Soft delete + retention policy
-- [ ] Indexing + performance tuning
-- [ ] Final docs: ERD + API spec + migration notes
+- [x] Permission matrix more granular (RBAC + per-client scope)
+- [x] Soft delete + retention policy
+- [x] Indexing + performance tuning
+- [x] Final docs: ERD + API spec + migration notes
 
 Outcome:
 - Stabil, scalable, audit-ready
+- Status implementasi: hardening foundation selesai; switch engine MySQL tetap opsional saat infra siap.
 ============================================================

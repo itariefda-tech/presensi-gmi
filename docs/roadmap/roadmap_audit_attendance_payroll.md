@@ -52,19 +52,20 @@ Target akhir:
   - `pay_date`
   - `payroll_scheme`
   - `payroll_schedule`
+  - `policy_id`
   - `client_id`
   - `site_id`
   - `employee_id`
-- Payroll approved sudah sebagian immutable: tidak bisa regenerate/update adjustment.
+- Payroll approved immutable: tidak bisa regenerate/update adjustment.
 
-### Masih Bermasalah
+### Diperbaiki di Roadmap Ini
 
-- Employee attendance summary masih berbasis calendar month.
-- Client attendance report/export masih berbasis calendar month.
-- Client Admin payroll scope masih terlalu site-level, belum tenant-wide.
-- Naming `branch_id` dan `site_id` masih bercampur.
-- Dashboard belum konsisten menampilkan `payroll_scheme`.
-- Beberapa UI default period masih current month, bukan current pay cycle.
+- Employee attendance summary sudah pay-cycle based.
+- Attendance report menerima filter `site_id` dan tetap menerima `branch_id` sebagai alias lama.
+- Client Admin payroll scope sudah tenant-wide dengan optional site filter.
+- Query/response baru memprioritaskan `site_id`, sementara `branch_id` dipertahankan untuk backward compatibility.
+- Dashboard payroll konsisten menampilkan `payroll_scheme`, `payroll_schedule`, dan snapshot periode.
+- Payroll menyimpan snapshot periode, policy, scheme, schedule, dan field kalkulasi.
 
 ## 4. Standard Terms
 
@@ -219,7 +220,7 @@ Target file:
 
 ### Phase 3: Data Contract & Integrity
 
-Status: Partially completed.
+Status: Completed.
 
 Bisa dikerjakan paralel dengan Phase 2 jika perubahan schema backward-compatible.
 
@@ -232,7 +233,7 @@ Tasks:
   - `late_deduction_rate`
   - `absent_deduction_rate`
   - `calculation_version`
-- [ ] Optional: tambahkan `policy_id` jika resolver sudah bisa mengembalikan policy source.
+- [x] Optional: tambahkan `policy_id` jika resolver sudah bisa mengembalikan policy source.
 - [x] Pastikan migration tidak merusak payroll lama.
 - [x] Untuk payroll lama, isi default aman:
   - `working_days = attendance_days + absent_days + leave_days` jika kosong.
@@ -245,7 +246,7 @@ Tasks:
 Acceptance Criteria:
 
 - [x] App start tanpa error di database lama.
-- [ ] Payroll lama tetap bisa dibuka.
+- [x] Payroll lama tetap bisa dibuka.
 - [x] Payroll approved tidak berubah setelah policy diedit.
 
 Target file:
@@ -255,7 +256,7 @@ Target file:
 
 ### Phase 4: Dashboard Sync
 
-Status: Partially completed.
+Status: Completed.
 
 Bisa dikerjakan paralel dengan Phase 1 untuk bagian tampilan field yang sudah tersedia.
 
@@ -266,7 +267,7 @@ Tasks Employee Dashboard:
   - `period_start`
   - `period_end`
   - `payroll_schedule`
-- [ ] Jangan ubah flow check-in / check-out kecuali perlu untuk data contract.
+- [x] Jangan ubah flow check-in / check-out kecuali perlu untuk data contract.
 
 Tasks Client Admin Dashboard:
 
@@ -289,7 +290,7 @@ Tasks Admin / Superadmin Dashboard:
   - period
   - status
 - [x] Tampilkan `payroll_scheme` di list/detail.
-- [ ] Pastikan admin bisa melihat multi-client, client admin tidak bocor ke client lain.
+- [x] Pastikan admin bisa melihat multi-client, client admin tidak bocor ke client lain.
 
 Acceptance Criteria:
 
@@ -307,23 +308,23 @@ Target file:
 
 ### Phase 5: Scope & Naming Cleanup
 
-Status: Medium.
+Status: Completed.
 
 Kerjakan setelah Phase 2 stabil.
 
 Tasks:
 
-- [ ] Standardkan penggunaan `site_id` untuk site.
-- [ ] Pertahankan `branch_id` hanya sebagai backward compatibility.
-- [ ] Query baru harus prefer `site_id`.
-- [ ] Response API payroll harus expose `site_id`, bukan hanya `branch_id`.
-- [ ] Jangan hapus kolom lama sebelum ada migration plan.
+- [x] Standardkan penggunaan `site_id` untuk site.
+- [x] Pertahankan `branch_id` hanya sebagai backward compatibility.
+- [x] Query baru harus prefer `site_id`.
+- [x] Response API payroll harus expose `site_id`, bukan hanya `branch_id`.
+- [x] Jangan hapus kolom lama sebelum ada migration plan.
 
 Acceptance Criteria:
 
-- [ ] Payroll list filter `site_id` konsisten.
-- [ ] Attendance report filter `site_id` konsisten.
-- [ ] Tidak ada data lama yang hilang.
+- [x] Payroll list filter `site_id` konsisten.
+- [x] Attendance report filter `site_id` konsisten.
+- [x] Tidak ada data lama yang hilang.
 
 Target file:
 
@@ -332,7 +333,7 @@ Target file:
 
 ### Phase 6: Test Coverage & Regression Guard
 
-Status: Partially completed.
+Status: Completed.
 
 Tasks:
 
@@ -340,15 +341,15 @@ Tasks:
 - [x] Tambah test MID_MONTH.
 - [x] Tambah test `PRORATED_ATTENDANCE`.
 - [x] Tambah test `FULL_MONTHLY_DEDUCTION`.
-- [ ] Tambah test approved payroll immutable.
-- [ ] Tambah test client admin tidak bisa akses payroll client lain.
+- [x] Tambah test approved payroll immutable.
+- [x] Tambah test client admin tidak bisa akses payroll client lain.
 - [x] Tambah test client admin bisa melihat semua site dalam client jika scope tenant-wide aktif.
 
 Acceptance Criteria:
 
-- [ ] Semua test existing tetap pass.
-- [ ] Test baru membuktikan period alignment dan scheme calculation.
-- [ ] Tidak ada regression attendance check-in / checkout.
+- [x] Semua test existing tetap pass.
+- [x] Test baru membuktikan period alignment dan scheme calculation.
+- [x] Tidak ada regression attendance check-in / checkout.
 
 Target file:
 
@@ -396,40 +397,40 @@ Rollback safety:
 
 ### Period Alignment
 
-- [ ] MONTH_END menghitung tanggal 1 sampai akhir bulan.
-- [ ] MID_MONTH menghitung tanggal 16 bulan sebelumnya sampai 15 bulan berjalan.
-- [ ] Attendance sebelum `period_start` tidak ikut.
-- [ ] Attendance setelah `period_end` tidak ikut.
+- [x] MONTH_END menghitung tanggal 1 sampai akhir bulan.
+- [x] MID_MONTH menghitung tanggal 16 bulan sebelumnya sampai 15 bulan berjalan.
+- [x] Attendance sebelum `period_start` tidak ikut.
+- [x] Attendance setelah `period_end` tidak ikut.
 
 ### Policy Resolution
 
-- [ ] SITE override menang dari CLIENT.
-- [ ] CLIENT menang dari GLOBAL.
-- [ ] GLOBAL menang dari default.
-- [ ] Resolver mengembalikan scheme dan schedule yang sama untuk payroll dan dashboard.
+- [x] SITE override menang dari CLIENT.
+- [x] CLIENT menang dari GLOBAL.
+- [x] GLOBAL menang dari default.
+- [x] Resolver mengembalikan scheme dan schedule yang sama untuk payroll dan dashboard.
 
 ### Payroll Scheme
 
-- [ ] PRORATED memakai `attendance_days`.
-- [ ] PRORATED tidak menghitung `potongan_absen`.
-- [ ] FULL_MONTHLY memakai `salary_base`.
-- [ ] FULL_MONTHLY menghitung `potongan_absen`.
-- [ ] Telat tidak terhitung ganda.
+- [x] PRORATED memakai `attendance_days`.
+- [x] PRORATED tidak menghitung `potongan_absen`.
+- [x] FULL_MONTHLY memakai `salary_base`.
+- [x] FULL_MONTHLY menghitung `potongan_absen`.
+- [x] Telat tidak terhitung ganda.
 
 ### Dashboard Consistency
 
-- [ ] Employee summary sama periodenya dengan payroll.
-- [ ] Client Admin melihat data client sendiri.
-- [ ] Admin / Superadmin bisa filter client.
-- [ ] Filter site konsisten.
-- [ ] Filter schedule konsisten.
+- [x] Employee summary sama periodenya dengan payroll.
+- [x] Client Admin melihat data client sendiri.
+- [x] Admin / Superadmin bisa filter client.
+- [x] Filter site konsisten.
+- [x] Filter schedule konsisten.
 
 ### Data Integrity
 
-- [ ] Payroll menyimpan period snapshot.
-- [ ] Payroll menyimpan policy snapshot.
-- [ ] Approved payroll immutable.
-- [ ] Payroll lama tetap terbaca.
+- [x] Payroll menyimpan period snapshot.
+- [x] Payroll menyimpan policy snapshot.
+- [x] Approved payroll immutable.
+- [x] Payroll lama tetap terbaca.
 
 ## 11. Definition of Done
 

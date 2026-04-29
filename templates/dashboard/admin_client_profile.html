@@ -20,6 +20,9 @@
     <button class="tab-btn" data-tab="sites" type="button">Sites</button>
     <button class="tab-btn" data-tab="assignments" type="button">Assignments</button>
     <button class="tab-btn" data-tab="policies" type="button">Policies</button>
+    {% if user.role == "hr_superadmin" %}
+    <button class="tab-btn" data-tab="billing" type="button">Contract & Billing</button>
+    {% endif %}
     <button class="tab-btn" data-tab="contacts" type="button">Contacts (PIC)</button>
   </div>
 
@@ -169,6 +172,130 @@
       </table>
     </div>
   </div>
+
+  {% if user.role == "hr_superadmin" %}
+  <div class="tab-panel" id="tab-billing">
+    <div class="form-grid" style="grid-template-columns: repeat(4, minmax(160px, 1fr));">
+      <div class="form-row">
+        <div class="label">Package</div>
+        <div><span class="badge">{{ subscription.package|title }}</span></div>
+      </div>
+      <div class="form-row">
+        <div class="label">Billing Engine</div>
+        <div>{% if subscription.billing_enabled %}Aktif{% else %}Nonaktif{% endif %}</div>
+      </div>
+      <div class="form-row">
+        <div class="label">Billing Type</div>
+        <div>{{ billing_summary.billing_type|replace('_', ' ')|title }}</div>
+      </div>
+      <div class="form-row">
+        <div class="label">Estimasi Bulan Ini</div>
+        <div>Rp {{ "{:,.0f}".format(billing_summary.calculated_amount or 0).replace(",", ".") }}</div>
+      </div>
+    </div>
+    {% if billing_summary.warnings %}
+    <div class="alert info" style="margin-top:12px;">
+      {% for warning in billing_summary.warnings %}
+      <div>{{ warning }}</div>
+      {% endfor %}
+    </div>
+    {% endif %}
+    <div class="form-grid" style="grid-template-columns: repeat(4, minmax(160px, 1fr)); margin-top:12px;">
+      <div class="form-row">
+        <div class="label">Pegawai</div>
+        <div>{{ billing_summary.total_employees }}</div>
+      </div>
+      <div class="form-row">
+        <div class="label">Sites</div>
+        <div>{{ billing_summary.total_sites }}</div>
+      </div>
+      <div class="form-row">
+        <div class="label">Attendance</div>
+        <div>{{ billing_summary.total_attendance }}</div>
+      </div>
+      <div class="form-row">
+        <div class="label">Shifts</div>
+        <div>{{ billing_summary.total_shifts }}</div>
+      </div>
+    </div>
+    <div class="form-grid" style="grid-template-columns: repeat(2, minmax(280px, 1fr)); margin-top:12px;">
+      <div class="card">
+        <div style="font-weight:700; margin-bottom:8px;">Kontrak Aktif</div>
+        <form class="stack" method="post" action="{{ url_for('admin.client_contract_save', client_id=client.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <div class="form-row">
+            <label class="label" for="contract-no">Nomor Kontrak</label>
+            <input class="input" id="contract-no" name="contract_no" value="{{ active_contract.contract_no if active_contract else client.contract_no or '' }}" required />
+          </div>
+          <div class="form-grid" style="grid-template-columns: repeat(2, minmax(120px, 1fr));">
+            <div class="form-row">
+              <label class="label" for="contract-start">Mulai</label>
+              <input class="input" id="contract-start" type="date" name="start_date" value="{{ active_contract.start_date if active_contract else client.contract_start or '' }}" />
+            </div>
+            <div class="form-row">
+              <label class="label" for="contract-end">Berakhir</label>
+              <input class="input" id="contract-end" type="date" name="end_date" value="{{ active_contract.end_date if active_contract else client.contract_end or '' }}" />
+            </div>
+          </div>
+          <div class="form-row">
+            <label class="label" for="contract-notice">Notice Period (hari)</label>
+            <input class="input" id="contract-notice" type="number" min="0" name="notice_period_days" value="{{ active_contract.notice_period_days if active_contract else 30 }}" />
+          </div>
+          <div class="form-row">
+            <label class="label" for="contract-scope">Scope</label>
+            <textarea class="input" id="contract-scope" name="scope_summary" rows="3">{{ active_contract.scope_summary if active_contract else '' }}</textarea>
+          </div>
+          <div class="form-row">
+            <label class="label" for="contract-sla">SLA</label>
+            <textarea class="input" id="contract-sla" name="sla_summary" rows="3">{{ active_contract.sla_summary if active_contract else '' }}</textarea>
+          </div>
+          <div class="btn-row">
+            <button class="btn primary btn-fixed-100" type="submit">Simpan</button>
+          </div>
+        </form>
+      </div>
+      <div class="card">
+        <div style="font-weight:700; margin-bottom:8px;">Konfigurasi Billing</div>
+        <form class="stack" method="post" action="{{ url_for('admin.client_billing_save', client_id=client.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <div class="form-row">
+            <label class="label" for="billing-type">Billing Type</label>
+            <select class="input" id="billing-type" name="billing_type">
+              {% for option in billing_type_options %}
+              <option value="{{ option }}" {% if billing_config and billing_config.billing_type == option %}selected{% endif %}>{{ option|replace('_', ' ')|title }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="form-grid" style="grid-template-columns: repeat(2, minmax(120px, 1fr));">
+            <div class="form-row">
+              <label class="label" for="billing-rate">Rate</label>
+              <input class="input" id="billing-rate" type="number" min="0" step="1000" name="rate" value="{{ billing_config.rate if billing_config else 0 }}" />
+            </div>
+            <div class="form-row">
+              <label class="label" for="billing-tax">Tax (%)</label>
+              <input class="input" id="billing-tax" type="number" min="0" step="0.01" name="tax_percent" value="{{ billing_config.tax_percent if billing_config else 0 }}" />
+            </div>
+          </div>
+          <div class="form-row">
+            <label class="label" for="billing-terms">Payment Terms (hari)</label>
+            <input class="input" id="billing-terms" type="number" min="0" name="payment_terms_days" value="{{ billing_config.payment_terms_days if billing_config else 30 }}" />
+          </div>
+          <div class="form-row">
+            <label class="label" for="billing-email">Invoice Email</label>
+            <input class="input" id="billing-email" type="email" name="invoice_email" value="{{ billing_config.invoice_email if billing_config else client.office_email or '' }}" />
+          </div>
+          <div class="form-row">
+            <div class="label">Formula</div>
+            <div class="muted">{{ billing_summary.unit_count }} x Rp {{ "{:,.0f}".format(billing_summary.rate or 0).replace(",", ".") }} + pajak Rp {{ "{:,.0f}".format(billing_summary.tax_amount or 0).replace(",", ".") }}</div>
+          </div>
+          <div class="btn-row">
+            <button class="btn primary btn-fixed-100" type="submit">Simpan</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+  {% endif %}
 
   <div class="tab-panel" id="tab-contacts">
     <div class="form-grid" style="grid-template-columns: repeat(2, minmax(240px, 1fr));">

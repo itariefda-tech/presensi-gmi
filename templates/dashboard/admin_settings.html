@@ -10,6 +10,7 @@
     <a class="tab-btn {% if tab == 'users' %}active{% endif %}" href="{{ url_for('admin.settings', tab='users') }}">Users</a>
     <a class="tab-btn {% if tab == 'roles' %}active{% endif %}" href="{{ url_for('admin.settings', tab='roles') }}">Roles</a>
     <a class="tab-btn {% if tab == 'addons' %}active{% endif %}" href="{{ url_for('admin.settings', tab='addons') }}">Add-on</a>
+    <a class="tab-btn {% if tab == 'subscription' %}active{% endif %}" href="{{ url_for('admin.settings', tab='subscription') }}">Subscription</a>
     {% endif %}
     {% if permissions.get('manage_settings_codes') %}
     <a class="tab-btn {% if tab == 'hr' %}active{% endif %}" href="{{ url_for('admin.settings', tab='hr') }}">Kode Reg</a>
@@ -17,7 +18,9 @@
     {% if permissions.get('manage_settings_password') %}
     <a class="tab-btn {% if tab == 'password' %}active{% endif %}" href="{{ url_for('admin.settings', tab='password') }}">Password</a>
     {% endif %}
+    {% if theme_tab_enabled %}
     <a class="tab-btn {% if tab == 'theme' %}active{% endif %}" href="{{ url_for('admin.settings', tab='theme') }}">Tema</a>
+    {% endif %}
   </div>
 
   {% for msg in get_flashed_messages() %}
@@ -192,6 +195,65 @@
   </div>
   {% endif %}
 
+  {% if tab == 'subscription' and user.role == "hr_superadmin" %}
+  <div class="card" style="margin-top:12px;">
+    <div style="font-weight:700; margin-bottom:8px;">Package & Enterprise Add-on Client</div>
+    <div class="muted" style="margin-bottom:12px;">Billing, contract, dan SLA hanya aktif ketika package client adalah Enterprise.</div>
+    <div class="table-wrap">
+      <table class="table" aria-label="Client subscription">
+        <thead>
+          <tr>
+            <th>Client</th>
+            <th>Package</th>
+            <th>Add-on Enterprise</th>
+            <th>Aksi</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if not clients %}
+          <tr><td colspan="4" class="muted">Belum ada client.</td></tr>
+          {% endif %}
+          {% for c in clients %}
+          {% set subscription = client_subscriptions.get(c.id) %}
+          <tr>
+            <td>
+              <div style="font-weight:700;">{{ c.name }}</div>
+              <div class="muted">{{ c.office_email or "-" }}</div>
+            </td>
+            <td colspan="3">
+              <form class="form-grid" style="grid-template-columns: minmax(180px, 240px) 1fr auto; align-items:end;" method="post" action="{{ url_for('admin.settings_subscription_update') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                <input type="hidden" name="client_id" value="{{ c.id }}" />
+                <div class="form-row">
+                  <label class="label" for="client-package-{{ c.id }}">Package</label>
+                  <select class="input" id="client-package-{{ c.id }}" name="package_type">
+                    {% for package in client_package_options %}
+                    <option value="{{ package }}" {% if subscription and subscription.package == package %}selected{% endif %}>{{ package|title }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+                <div class="form-row">
+                  <div class="label">Add-on</div>
+                  <div class="form-grid" style="grid-template-columns: repeat(3, minmax(150px, 1fr));">
+                    {% for addon_key, addon_label in client_addon_options.items() %}
+                    <label class="check">
+                      <input type="checkbox" name="addons" value="{{ addon_key }}" {% if subscription and addon_key in subscription.addons %}checked{% endif %} />
+                      <span>{{ addon_label }}</span>
+                    </label>
+                    {% endfor %}
+                  </div>
+                </div>
+                <button class="btn primary btn-fixed-100" type="submit">Simpan</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
   {% if tab == 'addons' and user.role == "hr_superadmin" %}
   <div class="card" style="margin-top:12px;">
     <div style="font-weight:700; margin-bottom:8px;">Enterprise Add-on</div>
@@ -233,6 +295,18 @@
         <label class="check">
           <input type="checkbox" data-owner-addon value="enterprise_tier" disabled />
           <span>Enterprise Tier (termasuk Calendar & Patroli Ops)</span>
+        </label>
+        <label class="check">
+          <input type="checkbox" data-owner-addon value="billing_engine" disabled />
+          <span>Billing Engine</span>
+        </label>
+        <label class="check">
+          <input type="checkbox" data-owner-addon value="contract_management" disabled />
+          <span>Contract Management</span>
+        </label>
+        <label class="check">
+          <input type="checkbox" data-owner-addon value="sla_tracking" disabled />
+          <span>SLA Tracking</span>
         </label>
       </div>
       <div class="btn-row">
@@ -293,14 +367,26 @@
 {% if tab == 'theme' %}
 <form class="stack" method="post" action="{{ url_for('admin.settings_theme_update') }}" style="margin-top:12px;">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-  {% set selected_theme = theme if theme in theme_setting_options else "silver_line" %}
-  <div class="form-row">
-    <label class="label" for="themePreference">Tema</label>
-    <select class="input" id="themePreference" name="theme_preference" data-theme-select>
+  {% set selected_theme = theme if theme in theme_setting_options else "" %}
+  <div class="form-row admin-theme-row">
+    <label class="label">Tema</label>
+    <div class="admin-theme-toggle" role="radiogroup" aria-label="Pilih tema admin">
+      {% if not theme_setting_options %}
+      <div class="muted">Tema tambahan sedang nonaktif. Aktifkan dari modal owner credential bagian Pengaturan Tampilan.</div>
+      {% endif %}
       {% for option in theme_setting_options %}
-      <option value="{{ option }}" {% if selected_theme == option %}selected{% endif %}>{{ theme_labels.get(option, option) }}</option>
+      <label class="admin-theme-pill">
+        <input
+          type="radio"
+          name="theme_preference"
+          value="{{ option }}"
+          {% if selected_theme == option %}checked{% endif %}
+        />
+        <span class="admin-theme-pill__label">{{ theme_labels.get(option, option) }}</span>
+      </label>
       {% endfor %}
-    </select>
+      <span class="admin-theme-toggle__glow" aria-hidden="true"></span>
+    </div>
   </div>
   <div class="btn-row">
     <button class="btn primary btn-fixed-100" type="submit">Simpan</button>
@@ -429,6 +515,45 @@
       } catch (error) {
         showMessage(error.message);
       }
+    });
+  })();
+</script>
+{% endif %}
+{% if tab == 'theme' %}
+<script>
+  (function () {
+    const form = document.querySelector('form[action="{{ url_for("admin.settings_theme_update") }}"]');
+    if (!form) return;
+
+    const radios = Array.from(form.querySelectorAll('input[name="theme_preference"]'));
+    if (!radios.length) return;
+
+    const defaultModeButton = document.querySelector("[data-theme-toggle]");
+    const isDefaultGlobalTheme = () => {
+      const current = document.documentElement.getAttribute("data-theme") || "";
+      return current === "dark" || current === "light";
+    };
+
+    const clearThemeSelection = () => {
+      radios.forEach((r) => {
+        r.checked = false;
+      });
+    };
+
+    if (isDefaultGlobalTheme()) {
+      clearThemeSelection();
+    }
+
+    window.addEventListener("storage", (e) => {
+      if (e.key === "theme" || e.key === "gmi_theme") {
+        if (isDefaultGlobalTheme()) clearThemeSelection();
+      }
+    });
+
+    defaultModeButton?.addEventListener("click", () => {
+      setTimeout(() => {
+        if (isDefaultGlobalTheme()) clearThemeSelection();
+      }, 0);
     });
   })();
 </script>

@@ -23,7 +23,9 @@ const Geolocation = (() => {
 })();
 
 const themeToggle = document.querySelector("[data-theme-toggle]");
-const THEME_OPTIONS = ["dark", "light", "sage_calm", "silver_line", "noir_warm"];
+const THEME_OPTIONS = Array.isArray(window.__GMI_ENABLED_THEMES)
+  ? window.__GMI_ENABLED_THEMES
+  : ["dark", "light", "sage_calm", "silver_line", "noir_warm"];
 const clockHH = document.getElementById("clockHH");
 const clockMM = document.getElementById("clockMM");
 const clockColon = document.getElementById("clockColon");
@@ -54,7 +56,7 @@ const btnCheckin = document.getElementById("btnCheckin");
 const btnCheckout = document.getElementById("btnCheckout");
 
 function normalizeTheme(theme){
-  return THEME_OPTIONS.includes(theme) ? theme : "silver_line";
+  return THEME_OPTIONS.includes(theme) ? theme : (THEME_OPTIONS.includes("dark") ? "dark" : THEME_OPTIONS[0] || "dark");
 }
 
 function getCsrfToken(){
@@ -419,7 +421,7 @@ function initTheme(){
 }
 
 function currentTheme(){
-  return normalizeTheme(document.documentElement.getAttribute("data-theme") || "silver_line");
+  return normalizeTheme(document.documentElement.getAttribute("data-theme") || "dark");
 }
 
 if (themeToggle) {
@@ -1333,10 +1335,10 @@ function go(index){
     closeLeaveDetail();
   }
   if (swipeIndex === 3) {
-    loadPatrolStatus({ silent: true });
+    loadPatrolOpsTimeline();
   }
   if (swipeIndex === 4) {
-    loadPatrolOpsTimeline();
+    loadPatrolStatus({ silent: true });
   }
 }
 

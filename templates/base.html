@@ -11,6 +11,8 @@
   {% block body %}{% endblock %}
   <script>
     window.__GMI_INITIAL_THEME = "{{ theme|default('silver_line') }}";
+    window.__GMI_ENABLED_THEMES = {{ enabled_theme_options|default(['dark','light','sage_calm','silver_line','noir_warm'])|tojson }};
+    window.__GMI_ENABLED_EXTRA_THEMES = {{ enabled_extra_themes|default(['sage_calm','silver_line','noir_warm'])|tojson }};
     window.__GMI_BOOT_ID = "{{ boot_id|default('') }}";
     window.__GMI_CSRF_TOKEN = "{{ csrf_token|default('') }}";
   </script>

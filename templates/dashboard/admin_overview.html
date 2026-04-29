@@ -36,6 +36,42 @@
   </div>
 </section>
 
+<section class="overview-graphics-section">
+  <div class="section-head">
+    <div>
+      <h3>Visual Insights</h3>
+      <p>Dua grafik ringkas untuk monitoring status dan issue per client.</p>
+    </div>
+  </div>
+  <div
+    class="overview-graphics-grid"
+    id="overviewGraphics"
+    data-client-summaries='{{ client_summaries|tojson|safe }}'
+  >
+    <article class="overview-graphic-card overview-graphic-card--donut">
+      <div class="overview-graphic-head">
+        <h4>Komposisi Isu Kehadiran</h4>
+        <span class="muted">Absen vs Telat vs Leave Pending</span>
+      </div>
+      <div class="overview-donut-wrap">
+        <canvas id="overviewDonutChart" width="280" height="280" aria-label="Grafik donut komposisi isu"></canvas>
+      </div>
+      <div class="overview-legend" id="overviewDonutLegend"></div>
+    </article>
+
+    <article class="overview-graphic-card overview-graphic-card--line">
+      <div class="overview-graphic-head">
+        <h4>Top 5 Client</h4>
+        <span class="muted">Line chart total issue operasional</span>
+      </div>
+      <div class="overview-line-wrap">
+        <canvas id="overviewTopClientsLine" width="520" height="260" aria-label="Line chart top client"></canvas>
+      </div>
+      <div class="overview-line-legend" id="overviewTopClientsLegend"></div>
+    </article>
+  </div>
+</section>
+
 {% if calendar_enabled %}
 <section class="calendar-widget-section">
   <div class="section-head">
