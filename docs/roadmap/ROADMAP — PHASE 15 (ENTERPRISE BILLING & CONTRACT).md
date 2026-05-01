@@ -12,6 +12,23 @@ Scope:
   package = ENTERPRISE
   AND addon_billing = ENABLED
 
+Status cek kecil (2026-05-01):
+- [x] Table `client_packages` tersedia
+- [x] Table `client_addons` tersedia
+- [x] Table `client_contracts` tersedia
+- [x] Table `billing_configs` tersedia
+- [x] Helper package/add-on client tersedia
+- [x] Helper active contract tersedia
+- [x] Helper active billing config tersedia
+- [x] Billing summary aggregator tersedia
+- [x] Settings -> Subscription bisa pilih package dan add-on per client
+- [x] Modal owner credential punya toggle Billing Engine, Contract Management, SLA Tracking
+- [x] Dashboard admin punya akses/tombol Billing dan Contract saat fitur aktif
+- [x] Halaman Billing read-only tersedia
+- [x] Halaman Contract tersedia
+- [x] Safety fallback warning tersedia untuk billing off / contract kosong / config kosong
+- [x] Test Phase 15 lulus (`tests/test_phase15_billing_contract.py`)
+
 --------------------------------------------------
 SECTION 1 - PACKAGE & ADD-ON CONTROL
 --------------------------------------------------

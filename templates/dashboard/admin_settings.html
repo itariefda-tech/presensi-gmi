@@ -270,11 +270,11 @@
         </label>
         <label class="check">
           <input type="checkbox" data-owner-addon value="patrol_ops" disabled />
-          <span>Patroli Notes & Report</span>
+          <span>Patroli Ops</span>
         </label>
         <label class="check">
           <input type="checkbox" data-owner-addon value="calendar" disabled />
-          <span>Calendar</span>
+          <span>Calender</span>
         </label>
         <label class="check">
           <input type="checkbox" data-owner-addon value="reporting_advanced" disabled />
@@ -290,11 +290,7 @@
         </label>
         <label class="check">
           <input type="checkbox" data-owner-addon value="ai" disabled />
-          <span>AI</span>
-        </label>
-        <label class="check">
-          <input type="checkbox" data-owner-addon value="enterprise_tier" disabled />
-          <span>Enterprise Tier (termasuk Calendar & Patroli Ops)</span>
+          <span>AI Analysis</span>
         </label>
         <label class="check">
           <input type="checkbox" data-owner-addon value="billing_engine" disabled />
@@ -307,6 +303,10 @@
         <label class="check">
           <input type="checkbox" data-owner-addon value="sla_tracking" disabled />
           <span>SLA Tracking</span>
+        </label>
+        <label class="check">
+          <input type="checkbox" data-owner-addon value="enterprise_tier" disabled />
+          <span>HRIS Enterprise</span>
         </label>
       </div>
       <div class="btn-row">
@@ -437,6 +437,8 @@
     const saveButton = document.getElementById("ownerAddonSave");
     const alertBox = document.getElementById("ownerAddonAlert");
     const toggles = Array.from(document.querySelectorAll("[data-owner-addon]"));
+    const enterpriseAddonKey = "enterprise_tier";
+    const enterpriseExcludedAddons = new Set(["api_access", "reporting_advanced"]);
 
     function showMessage(message) {
       if (!alertBox) return;
@@ -456,9 +458,20 @@
       toggles.forEach((toggle) => {
         toggle.checked = active.has(toggle.value);
       });
+      applyEnterpriseAddons();
+    }
+
+    function applyEnterpriseAddons() {
+      const enterpriseToggle = toggles.find((toggle) => toggle.value === enterpriseAddonKey);
+      if (!enterpriseToggle?.checked) return;
+      toggles.forEach((toggle) => {
+        if (!toggle.value || toggle.value === enterpriseAddonKey) return;
+        toggle.checked = !enterpriseExcludedAddons.has(toggle.value);
+      });
     }
 
     function selectedAddons() {
+      applyEnterpriseAddons();
       return toggles.filter((toggle) => toggle.checked).map((toggle) => toggle.value);
     }
 
@@ -515,6 +528,14 @@
       } catch (error) {
         showMessage(error.message);
       }
+    });
+
+    toggles.forEach((toggle) => {
+      toggle.addEventListener("change", () => {
+        if (toggle.value === enterpriseAddonKey && toggle.checked) {
+          applyEnterpriseAddons();
+        }
+      });
     });
   })();
 </script>

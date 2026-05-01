@@ -1,74 +1,54 @@
 {% extends "dashboard/base.html" %}
+{% set active = "contract" %}
+{% set heading = "Contract" %}
+{% set subtitle = "Kontrak aktif client enterprise" %}
 
-{% block title %}Contract | Admin{% endblock %}
+{% block body %}
+<div class="card">
+  <div style="font-weight:700; margin-bottom:8px;">Contract Management</div>
+  <div class="muted" style="margin-bottom:12px;">Kontrak aktif dipakai sebagai acuan SLA, payroll cycle, dan billing summary.</div>
+  <a class="btn secondary" href="{{ url_for('admin.settings', tab='subscription') }}">Subscription</a>
+</div>
 
-{% block content %}
-<div class="container-main">
-  <div class="header-section">
-    <h1>Contract Management</h1>
-    <p class="muted">Kelola kontrak enterprise client dan track informasi penting seperti periode, SLA, dan notice period.</p>
-  </div>
-
-  <div class="alert info" style="margin-bottom: 20px;">
-    <strong>Contract Management</strong> memungkinkan Anda menyimpan dan mengelola kontrak client enterprise sebagai referensi sistem untuk attendance dan payroll.
-  </div>
-
-  <div class="card">
-    <div style="font-weight: 700; margin-bottom: 12px;">Kontrak Aktif</div>
-    <div class="muted" style="margin-bottom: 16px;">Informasi kontrak terkini untuk client Anda.</div>
-    
-    <div class="stack">
-      <div class="form-row">
-        <label class="label">Nomor Kontrak</label>
-        <input type="text" class="input" placeholder="Contoh: CTR-2026-001" disabled />
-      </div>
-      <div class="form-row">
-        <label class="label">Periode Kontrak</label>
-        <div class="form-inline">
-          <input type="date" class="input" placeholder="Tanggal mulai" disabled />
-          <span>hingga</span>
-          <input type="date" class="input" placeholder="Tanggal berakhir" disabled />
-        </div>
-      </div>
-      <div class="form-row">
-        <label class="label">Notice Period (hari)</label>
-        <input type="number" class="input" placeholder="Misal: 30" disabled />
-      </div>
-      <div class="form-row">
-        <label class="label">Cakupan Layanan</label>
-        <textarea class="input" rows="3" placeholder="Deskripsi layanan yang tercakup..." disabled></textarea>
-      </div>
-      <div class="form-row">
-        <label class="label">Ringkasan SLA</label>
-        <textarea class="input" rows="3" placeholder="Service Level Agreement..." disabled></textarea>
-      </div>
-    </div>
-  </div>
-
-  <div class="card" style="margin-top: 16px;">
-    <div style="font-weight: 700; margin-bottom: 12px;">Riwayat Kontrak</div>
-    <div class="muted" style="margin-bottom: 12px;">Daftar kontrak sebelumnya untuk referensi.</div>
-    <div class="table-wrap">
-      <table class="table" aria-label="Contract history">
-        <thead>
-          <tr>
-            <th>Nomor Kontrak</th>
-            <th>Periode</th>
-            <th>Notice Period</th>
-            <th>Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td colspan="4" class="muted">Tidak ada kontrak tersimpan. Hubungi GMI Support untuk setup kontrak.</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  </div>
-
-  <div class="alert warning" style="margin-top: 16px;">
-    <strong>Catatan:</strong> Untuk menambah/edit kontrak, silakan hubungi tim GMI Support. Interface editing akan tersedia di fase pengembangan berikutnya.
-  </div>
+<div class="table-wrap" style="margin-top:12px;">
+  <table class="table" aria-label="Kontrak aktif client">
+    <thead>
+      <tr>
+        <th>Client</th>
+        <th>Package</th>
+        <th>Nomor Kontrak</th>
+        <th>Periode</th>
+        <th>Notice</th>
+        <th>SLA</th>
+        <th>Aksi</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% if not rows %}
+      <tr><td colspan="7" class="muted">Belum ada client.</td></tr>
+      {% endif %}
+      {% for row in rows %}
+      {% set contract = row.active_contract %}
+      <tr>
+        <td>
+          <div style="font-weight:700;">{{ row.client.name }}</div>
+          <div class="muted">{{ row.client.office_email or "-" }}</div>
+        </td>
+        <td><span class="badge">{{ row.subscription.package|title }}</span></td>
+        <td>{{ contract.contract_no if contract else "-" }}</td>
+        <td>
+          {% if contract %}
+          {{ contract.start_date or "-" }} s/d {{ contract.end_date or "-" }}
+          {% else %}
+          <span class="muted">Kontrak aktif belum tersedia.</span>
+          {% endif %}
+        </td>
+        <td>{{ (contract.notice_period_days ~ " hari") if contract else "-" }}</td>
+        <td>{{ contract.sla_summary if contract and contract.sla_summary else "-" }}</td>
+        <td><a class="btn secondary" href="{{ url_for('admin.client_profile', client_id=row.client.id) }}#tab-billing">Kelola</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
 </div>
 {% endblock %}

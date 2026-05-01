@@ -267,7 +267,7 @@ function loadDisplaySettings(){
   }
 }
 
-function saveDisplaySettings(){
+async function saveDisplaySettings(){
   const settings = {
     logo: Boolean(toggleLogo?.checked),
     label: Boolean(toggleLabel?.checked),
@@ -291,6 +291,33 @@ function saveDisplaySettings(){
     window.dispatchEvent(new CustomEvent("gmi_patroli_toggle_changed", { detail: { enabled } }));
   }
   syncHero();
+  if (ownerExtraThemesEnabled && !ownerExtraThemesEnabled.disabled){
+    try {
+      const response = await fetchApi("/api/owner/addons", {
+        method: "POST",
+        headers: csrfJsonHeaders(),
+        body: JSON.stringify({
+          extra_themes_enabled: ownerExtraThemesSelected(),
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok){
+        throw new Error(ownerAddonErrorMessage(response, payload, "Pengaturan tema tambahan gagal disimpan."));
+      }
+      const enabledThemes = payload.data?.enabled_extra_themes || [];
+      setOwnerThemeValues(Boolean(payload.data?.extra_themes_enabled));
+      window.__GMI_ENABLED_EXTRA_THEMES = enabledThemes;
+      window.__GMI_ENABLED_THEMES = [...THEME_DEFAULT_OPTIONS, ...enabledThemes];
+      THEME_OPTIONS = window.__GMI_ENABLED_THEMES;
+      if (!window.__GMI_ENABLED_THEMES.includes(currentTheme())){
+        setTheme("dark");
+      }
+    } catch (err){
+      const message = err instanceof Error ? err.message : "Pengaturan tema tambahan gagal disimpan.";
+      setDisplaySettingsStatus(message, "error");
+      return;
+    }
+  }
   setDisplaySettingsStatus("Pengaturan tampilan diterapkan.", "success");
 }
 
@@ -421,6 +448,8 @@ const ownerAddonModal = document.getElementById("ownerAddonModal");
 const ownerAddonTogglesModal = document.getElementById("ownerAddonTogglesModal");
 const ownerAddonCloseButtons = Array.from(document.querySelectorAll("[data-owner-addon-close]"));
 const ownerAddonTogglesCloseButtons = Array.from(document.querySelectorAll("[data-owner-addon-toggles-close]"));
+const OWNER_ADDON_ENTERPRISE_KEY = "enterprise_tier";
+const OWNER_ADDON_ENTERPRISE_EXCLUDED = new Set(["api_access", "reporting_advanced"]);
 
 if (heroGalleryData){
   try {
@@ -504,6 +533,17 @@ function setOwnerAddonValues(addons){
   ownerAddonToggles.forEach(toggle => {
     toggle.checked = active.has(toggle.dataset.ownerAddon);
   });
+  applyOwnerEnterpriseAddons();
+}
+
+function applyOwnerEnterpriseAddons(){
+  const enterpriseToggle = ownerAddonToggles.find(toggle => toggle.dataset.ownerAddon === OWNER_ADDON_ENTERPRISE_KEY);
+  if (!enterpriseToggle?.checked) return;
+  ownerAddonToggles.forEach(toggle => {
+    const key = toggle.dataset.ownerAddon;
+    if (!key || key === OWNER_ADDON_ENTERPRISE_KEY) return;
+    toggle.checked = !OWNER_ADDON_ENTERPRISE_EXCLUDED.has(key);
+  });
 }
 
 function setOwnerThemeValues(enabled){
@@ -511,6 +551,7 @@ function setOwnerThemeValues(enabled){
 }
 
 function selectedOwnerAddons(){
+  applyOwnerEnterpriseAddons();
   return ownerAddonToggles
     .filter(toggle => toggle.checked)
     .map(toggle => toggle.dataset.ownerAddon)
@@ -582,7 +623,6 @@ async function saveOwnerAddons(){
       headers: csrfJsonHeaders(),
       body: JSON.stringify({
         addons: selectedOwnerAddons(),
-        extra_themes_enabled: ownerExtraThemesSelected(),
       }),
     });
     const payload = await response.json().catch(() => ({}));
@@ -608,6 +648,14 @@ async function saveOwnerAddons(){
 if (ownerAddonUnlock){
   ownerAddonUnlock.addEventListener("click", unlockOwnerAddons);
 }
+
+ownerAddonToggles.forEach(toggle => {
+  toggle.addEventListener("change", () => {
+    if (toggle.dataset.ownerAddon === OWNER_ADDON_ENTERPRISE_KEY && toggle.checked){
+      applyOwnerEnterpriseAddons();
+    }
+  });
+});
 if (ownerAddonPassword){
   ownerAddonPassword.addEventListener("keydown", event => {
     if (event.key === "Enter"){

@@ -18,11 +18,21 @@ Scope:
 
 Dependency:
 - Phase 15 selesai minimal:
-  - client package
-  - client addon
-  - client contract
-  - billing config
-  - client_id mapping
+  - [x] client package
+  - [x] client addon
+  - [x] client contract
+  - [x] billing config
+  - [x] client_id mapping
+
+Status cek kecil (2026-05-01):
+- [x] Foundation schema Phase 16 tersedia (`roles`, `permissions`, `role_permission_map`, `user_scopes`, `retention_policies`, `login_attempts`)
+- [x] Permission seed enterprise tersedia (`billing.view`, `billing.config.update`, `contract.view`, `contract.manage`, `audit.view`)
+- [x] Audit log enterprise tersedia dan dipakai di beberapa action penting
+- [x] Retention policy seed tersedia
+- [x] Index wajib utama tersedia
+- [x] Login rate limit memakai table persistent `login_attempts`
+- [x] Dokumentasi enterprise utama tersedia di folder `docs/`
+- [x] Test Phase 16 lulus (`tests/test_phase16_hardening_scale.py`)
 
   1. Database Hardening
 Objective
@@ -34,8 +44,8 @@ Checklist :
 - [x] Leave sudah ke DB
 - [ ] Semua modul utama tidak pakai in-memory demo
 - [ ] Standardisasi created_at / updated_at
-- [ ] Tambah deleted_at untuk soft delete
-- [ ] Tambah created_by / updated_by jika perlu audit
+- [x] Tambah deleted_at untuk soft delete
+- [x] Tambah created_by / updated_by jika perlu audit
 
 Tabel yang perlu diperiksa
 employees
@@ -104,6 +114,13 @@ EMPLOYEE     → SELF
 
 3. RBAC Table Mapping
 
+Status:
+- [x] Table `roles` tersedia
+- [x] Table `permissions` tersedia
+- [x] Table `role_permission_map` tersedia
+- [x] Table `user_scopes` tersedia
+- [x] Seed role, permission, dan role-permission tersedia
+
 Tambahkan tabel:
 CREATE TABLE IF NOT EXISTS roles (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -164,6 +181,10 @@ Objective
 
 Mengatur umur data agar aman secara legal dan performa tetap sehat.
 
+Status:
+- [x] Table `retention_policies` tersedia
+- [x] Default policy tersedia untuk attendance, payroll, patrol_reports, audit_logs, temporary_uploads, password_reset_tokens
+
 Contoh policy
 
 attendance records     → simpan 5 tahun
@@ -189,6 +210,11 @@ Ini sangat penting untuk enterprise.
 Objective
 
 Mencatat siapa melakukan apa.
+
+Status:
+- [x] Table `audit_logs` tersedia
+- [x] Kolom enterprise audit (`before_json`, `after_json`, `ip_address`, `user_agent`) tersedia
+- [x] Helper `_log_audit_event` tersedia dan dipakai di beberapa flow penting
 
 CREATE TABLE IF NOT EXISTS audit_logs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -216,6 +242,15 @@ APPROVE_LEAVE
 Objective
 
 Dashboard tetap cepat walaupun data besar.
+
+Status:
+- [x] Index attendance client/date tersedia
+- [x] Index attendance employee/date tersedia
+- [x] Index employees client/site tersedia
+- [x] Index leave client/status tersedia
+- [x] Index audit client/created tersedia
+- [x] Index contract client/active tersedia
+- [x] Index billing client/active tersedia
 
 Index wajib
 CREATE INDEX IF NOT EXISTS idx_attendance_client_date
@@ -249,25 +284,34 @@ Checklist
 - [ ] Hindari SQL yang terlalu SQLite-specific
 - [ ] Buat database adapter/helper
 - [ ] Semua query lewat get_db()
-- [ ] Tipe tanggal konsisten ISO string
-- [ ] Hindari hardcoded file database
-- [ ] Buat migration notes SQLite → MySQL
+- [x] Tipe tanggal konsisten ISO string
+- [x] Hindari hardcoded file database
+- [x] Buat migration notes SQLite → MySQL
 
 9. Security Hardening
 Checklist
 
 - [ ] Semua route wajib login
-- [ ] Semua route admin wajib role check
+- [x] Semua route admin wajib role check
 - [ ] Semua data query wajib filter client_id
-- [ ] CSRF protection untuk form POST
-- [ ] Password hashing aman
+- [x] CSRF protection untuk form POST
+- [x] Password hashing aman
 - [ ] Session timeout
-- [ ] Rate limit login
+- [x] Rate limit login
 - [ ] Hide debug mode di production
-- [ ] Validasi input server-side
+- [x] Validasi input server-side
 
 10. Final Documentation
 File docs yang disarankan
+
+Status:
+- [x] ERD_ENTERPRISE.md
+- [x] API_SPEC_ENTERPRISE.md
+- [x] RBAC_MATRIX.md
+- [x] MIGRATION_SQLITE_TO_MYSQL.md
+- [x] AUDIT_LOG_POLICY.md
+- [x] RETENTION_POLICY.md
+- [x] DEPLOYMENT_CHECKLIST.md
 
 docs/
 ├─ ERD_ENTERPRISE.md

@@ -1,0 +1,217 @@
+# 📊 ADVANCED REPORTING ROADMAP
+
+---
+
+## PHASE 1 — DATA FOUNDATION (WAJIB, JANGAN LONCAT)
+Tujuan: Pastikan data bisa dianalisa, bukan cuma disimpan
+
+### Struktur Data
+- [ ] Tambahkan index pada tabel attendance (employee_email, created_at)
+- [ ] Tambahkan field:
+  - [ ] late_flag (bool)
+  - [ ] early_checkout_flag (bool)
+  - [ ] inside_radius_flag (bool)
+- [ ] Normalisasi format tanggal (YYYY-MM-DD)
+
+### Helper Backend (app.py)
+- [ ] Buat helper:
+  - [ ] get_attendance_by_range(start, end)
+  - [ ] group_by_employee(data)
+  - [ ] group_by_client(data)
+- [ ] Buat util:
+  - [ ] calculate_late()
+  - [ ] calculate_work_duration()
+
+### Endpoint Basic Analytics
+- [ ] GET /api/report/attendance/summary
+- [ ] GET /api/report/attendance/by-client
+- [ ] GET /api/report/attendance/by-employee
+
+---
+
+## PHASE 2 — BASIC ANALYTICS (FROM DATA → INFORMASI)
+Tujuan: Admin mulai “melihat pola”
+
+### Attendance Analytics
+- [ ] Total hadir per hari
+- [ ] Total hadir per client
+- [ ] Total hadir per pegawai
+
+### Leave Analytics
+- [ ] Total leave per periode
+- [ ] Leave by type (izin/sakit)
+- [ ] Leave per pegawai
+
+### UI (Admin Dashboard)
+- [ ] Tambah menu: "Reports"
+- [ ] Tambah halaman:
+  - [ ] attendance_report.html
+  - [ ] leave_report.html
+
+### Visual
+- [ ] Integrasi chart (Chart.js / ECharts)
+- [ ] Grafik:
+  - [ ] Line chart kehadiran
+  - [ ] Bar chart per client
+
+---
+
+## PHASE 3 — INTERMEDIATE ANALYTICS (INSIGHT MULAI MUNCUL)
+Tujuan: Data mulai “bicara”
+
+### Attendance Insight
+- [ ] Ranking pegawai paling disiplin
+- [ ] Ranking pegawai paling sering telat
+- [ ] Rata-rata jam check-in
+
+### Leave Insight
+- [ ] Pegawai paling sering izin
+- [ ] Pola izin per hari (Senin/Jumat)
+- [ ] Durasi rata-rata leave
+
+### Endpoint
+- [ ] GET /api/report/attendance/ranking
+- [ ] GET /api/report/leave/pattern
+
+### UI
+- [ ] Card insight:
+  - [ ] “Top Performer”
+  - [ ] “Most Late”
+  - [ ] “Frequent Leave”
+
+---
+
+## PHASE 4 — GEO ANALYTICS (KILLER FEATURE)
+Tujuan: Manfaatkan GPS (pembeda dari kompetitor)
+
+### Data Processing
+- [ ] Hitung jarak dari titik valid
+- [ ] Tandai:
+  - [ ] near_radius_flag
+  - [ ] suspicious_location_flag
+
+### Visual
+- [ ] Integrasi map (Leaflet / Google Maps)
+- [ ] Heatmap lokasi presensi
+
+### Insight
+- [ ] Deteksi lokasi berulang
+- [ ] Deteksi presensi borderline radius
+
+### Endpoint
+- [ ] GET /api/report/geo/heatmap
+- [ ] GET /api/report/geo/anomaly
+
+---
+
+## PHASE 5 — ANOMALY & FRAUD DETECTION (NAIK LEVEL)
+Tujuan: Dari monitoring → kontrol
+
+### Rules Engine
+- [ ] Define rule:
+  - [ ] Check-in & check-out < 5 menit
+  - [ ] Lokasi identik antar pegawai
+  - [ ] QR digunakan berulang
+- [ ] Flag anomaly
+
+### Output
+- [ ] List suspicious activity
+- [ ] Skor risiko per pegawai
+
+### Endpoint
+- [ ] GET /api/report/anomaly
+
+### UI
+- [ ] Halaman "Fraud Detection"
+- [ ] Badge merah untuk alert
+
+---
+
+## PHASE 6 — CLIENT PERFORMANCE DASHBOARD (JUALAN READY)
+Tujuan: Bisa dijual ke client
+
+### Metric
+- [ ] Attendance rate (%)
+- [ ] Leave rate
+- [ ] Manual attendance count
+- [ ] Compliance score
+
+### Ranking
+- [ ] Ranking client terbaik / terburuk
+
+### Endpoint
+- [ ] GET /api/report/client/performance
+
+### UI
+- [ ] Halaman:
+  - [ ] client_performance.html
+- [ ] Scorecard per client
+
+---
+
+## PHASE 7 — EXPORT & SCHEDULING
+Tujuan: Profesional & enterprise feel
+
+### Export
+- [ ] Export PDF
+- [ ] Export Excel
+
+### Scheduling
+- [ ] Generate report otomatis (mingguan/bulanan)
+- [ ] Kirim via email (opsional)
+
+### Endpoint
+- [ ] GET /api/report/export
+- [ ] POST /api/report/schedule
+
+---
+
+## PHASE 8 — ADVANCED UX (PREMIUM FEEL)
+Tujuan: Bukan cuma powerful, tapi enak dilihat
+
+### UI/UX
+- [ ] Filter global:
+  - [ ] tanggal
+  - [ ] client
+  - [ ] role
+- [ ] Dashboard drag & drop widget
+- [ ] Dark/light sync
+
+### Interaction
+- [ ] Drill-down:
+  - [ ] klik client → detail pegawai
+- [ ] Tooltip insight otomatis
+
+---
+
+## PHASE 9 — CUSTOM REPORT BUILDER (SAAS LEVEL)
+Tujuan: Fleksibel & scalable
+
+### Feature
+- [ ] User pilih:
+  - [ ] metric
+  - [ ] dimensi
+- [ ] Simpan template report
+
+### Endpoint
+- [ ] POST /api/report/custom
+- [ ] GET /api/report/templates
+
+---
+
+## PHASE 10 — FINAL HARDENING
+Tujuan: Siap jual
+
+### Quality
+- [ ] Validasi semua endpoint
+- [ ] Optimasi query (index, caching)
+- [ ] Pagination
+
+### Security
+- [ ] Role-based access report
+- [ ] Limit export
+
+### Final Check
+- [ ] Semua report real data (bukan dummy)
+- [ ] Tidak ada data mismatch
+- [ ] UI konsisten dengan theme system

@@ -72,6 +72,21 @@
   </div>
 </section>
 
+{% if permissions.get("view_billing") or permissions.get("view_contract") %}
+<div class="card" style="margin-top:16px;">
+  <div style="font-weight:700; margin-bottom:8px;">Enterprise Billing & Contract</div>
+  <div class="muted" style="margin-bottom:12px;">Akses cepat Phase 15 untuk owner/finance.</div>
+  <div class="inline">
+    {% if permissions.get("view_billing") %}
+    <a class="btn primary" href="{{ url_for('admin.billing') }}">Billing</a>
+    {% endif %}
+    {% if permissions.get("view_contract") %}
+    <a class="btn secondary" href="{{ url_for('admin.contract') }}">Contract</a>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
 {% if calendar_enabled %}
 <section class="calendar-widget-section">
   <div class="section-head">
