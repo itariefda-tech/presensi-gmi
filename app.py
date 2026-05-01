@@ -178,6 +178,8 @@ def create_app() -> Flask:
         permissions["view_calendar"] = bool(permissions.get("view_calendar")) and _calendar_feature_enabled(user)
         permissions["view_ai_analysis"] = bool(permissions.get("view_ai_analysis")) and _ai_analysis_feature_enabled(user)
         permissions["view_patrol_ops"] = bool(permissions.get("view_patrol")) and _patrol_ops_admin_enabled(user)
+        permissions["view_billing"] = bool(permissions.get("view_billing")) and _billing_feature_enabled(user)
+        permissions["view_contract"] = bool(permissions.get("view_contract")) and _contract_feature_enabled(user)
         return {"permissions": permissions}
 
     @app.context_processor
@@ -665,7 +667,11 @@ def create_app() -> Flask:
         if not session.get("owner_addons_unlocked"):
             return jsonify(ok=False, message="Akses owner wajib dibuka dengan password."), 403
         data = _get_json()
-        addons = _set_global_addons(data.get("addons", []))
+        addons = (
+            _set_global_addons(data.get("addons", []))
+            if "addons" in data
+            else _global_addons()
+        )
         extra_themes_enabled = (
             _set_extra_themes_enabled(data.get("extra_themes_enabled"))
             if "extra_themes_enabled" in data
@@ -1182,10 +1188,13 @@ def create_app() -> Flask:
         checklist = _parse_patrol_ops_checklist(data.get("checklist"))
         lat = _parse_optional_float(data.get("lat") or data.get("latitude"))
         lng = _parse_optional_float(data.get("lng") or data.get("longitude"))
+        report_time = _now_ts()
         photo_path = ""
         if "photo" in request.files and request.files["photo"].filename:
             photo_path = _save_upload(request.files["photo"], "uploads/patrol_ops", 10 * 1024 * 1024)
 
+        if not _assignment_working_period_contains(assignment, report_time):
+            return jsonify(ok=False, message="Waktu report tidak sesuai periode kerja assignment."), 400
         if category == "activity" and not (event_type or note or photo_path):
             return jsonify(ok=False, message="Catatan wajib berisi jenis aktivitas, catatan, atau foto."), 400
         if category == "gate":
@@ -1198,26 +1207,40 @@ def create_app() -> Flask:
         if category == "handover" and not (checklist or note or photo_path):
             return jsonify(ok=False, message="Handover wajib berisi checklist, catatan, atau foto."), 400
 
-        event_id = _insert_patrol_ops_event(
-            category=category,
-            event_type=event_type or category,
-            severity=severity,
-            direction=direction,
-            vehicle_plate=vehicle_plate,
-            vehicle_type=vehicle_type,
-            note=note,
-            checklist=checklist,
-            photo_path=photo_path,
-            lat=lat,
-            lng=lng,
+        try:
+            event_id = _insert_patrol_ops_event(
+                category=category,
+                event_type=event_type or category,
+                severity=severity,
+                direction=direction,
+                vehicle_plate=vehicle_plate,
+                vehicle_type=vehicle_type,
+                note=note,
+                checklist=checklist,
+                photo_path=photo_path,
+                lat=lat,
+                lng=lng,
+                user=user,
+                employee=employee,
+                assignment=assignment,
+                site=site,
+            )
+        except DuplicateSubmissionError as err:
+            return jsonify(ok=False, message=str(err)), 409
+        report_id = _create_patrol_report_from_event(
+            event_id=event_id,
             user=user,
             employee=employee,
             assignment=assignment,
             site=site,
+            category=category,
+            severity=severity,
+            note=note,
+            photo_path=photo_path,
         )
         if category == "incident" and severity == "critical":
             _notify_patrol_ops_critical_incident(event_id, user, site, note)
-        return jsonify(ok=True, message="Aktivitas patroli tersimpan.", data={"id": event_id}), 200
+        return jsonify(ok=True, message="Aktivitas patroli tersimpan.", data={"id": event_id, "report_id": report_id}), 200
 
     @app.route("/api/patrol/ops/timeline", methods=["GET"])
     def patrol_ops_timeline():
@@ -1257,7 +1280,14 @@ def create_app() -> Flask:
         date_to = _normalize_date_input(request.args.get("date_end") or "") or None
         category = _normalize_patrol_ops_category(request.args.get("category"))
         output_format = (request.args.get("format") or "json").strip().lower()
-        rows = _patrol_ops_events(site_id=site_id, date_from=date_from, date_to=date_to, category=category, limit=1000)
+        rows = _patrol_ops_events(
+            client_id=get_current_client_scope(user),
+            site_id=site_id,
+            date_from=date_from,
+            date_to=date_to,
+            category=category,
+            limit=1000,
+        )
         payload_rows = [_patrol_ops_event_payload(row) for row in rows]
         if output_format == "csv":
             out = io.StringIO()
@@ -1289,9 +1319,13 @@ def create_app() -> Flask:
         supervisor_note = (data.get("supervisor_note") or "").strip()
         if not status:
             return jsonify(ok=False, message="Status validasi tidak valid."), 400
-        if not _patrol_ops_event_by_id(event_id):
+        row = _patrol_ops_event_by_id(event_id)
+        if not row:
             return jsonify(ok=False, message="Aktivitas tidak ditemukan."), 404
-        _update_patrol_ops_event_status(event_id, status, supervisor_note, user)
+        if not _patrol_ops_status_transition_allowed(_row_get(row, "status"), status):
+            return jsonify(ok=False, message="Status aktivitas sudah final atau transisi tidak valid."), 409
+        if not _update_patrol_ops_event_status(event_id, status, supervisor_note, user, _row_get(row, "status")):
+            return jsonify(ok=False, message="Aktivitas sudah diproses."), 409
         updated = _patrol_ops_event_by_id(event_id)
         return jsonify(ok=True, message="Status aktivitas diperbarui.", data=_patrol_ops_event_payload(updated)), 200
 
@@ -1308,6 +1342,7 @@ def create_app() -> Flask:
         category = _normalize_patrol_ops_category(request.args.get("category"))
         output_format = (request.args.get("format") or "json").strip().lower()
         rows = _patrol_ops_events(
+            client_id=client_id,
             site_id=site_id,
             date_from=date_from,
             date_to=date_to,
@@ -1347,7 +1382,10 @@ def create_app() -> Flask:
         row = _patrol_ops_event_by_id(event_id)
         if not row or int(_row_get(row, "site_id") or 0) != site_id:
             return jsonify(ok=False, message="Aktivitas tidak ditemukan untuk site ini."), 404
-        _update_patrol_ops_event_status(event_id, status, supervisor_note, user)
+        if not _patrol_ops_status_transition_allowed(_row_get(row, "status"), status):
+            return jsonify(ok=False, message="Status aktivitas sudah final atau transisi tidak valid."), 409
+        if not _update_patrol_ops_event_status(event_id, status, supervisor_note, user, _row_get(row, "status")):
+            return jsonify(ok=False, message="Aktivitas sudah diproses."), 409
         updated = _patrol_ops_event_by_id(event_id)
         return jsonify(ok=True, message="Status aktivitas diperbarui.", data=_patrol_ops_event_payload(updated)), 200
 
@@ -1505,18 +1543,24 @@ def create_app() -> Flask:
             cur = conn.execute(
                 """
                 INSERT INTO patrol_checkpoints (
-                    route_id, sequence_no, name, qr_code, nfc_tag,
-                    latitude, longitude, radius_meters, is_active, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+                    route_id, site_id, sequence_no, sequence_order, name, qr_code, nfc_tag,
+                    latitude, longitude, lat, lon, radius_meters, radius_meter,
+                    is_active, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
                 """,
                 (
                     route_id,
+                    site_id,
+                    sequence_no,
                     sequence_no,
                     name,
                     qr_code or None,
                     nfc_tag or None,
                     latitude,
                     longitude,
+                    latitude,
+                    longitude,
+                    radius_meters,
                     radius_meters,
                     now_ts,
                     now_ts,
@@ -1614,7 +1658,9 @@ def create_app() -> Flask:
             conn.execute(
                 """
                 UPDATE patrol_checkpoints
-                SET name = ?, qr_code = ?, nfc_tag = ?, latitude = ?, longitude = ?, radius_meters = ?, updated_at = ?
+                SET name = ?, qr_code = ?, nfc_tag = ?,
+                    latitude = ?, longitude = ?, lat = ?, lon = ?,
+                    radius_meters = ?, radius_meter = ?, updated_at = ?
                 WHERE id = ?
                 """,
                 (
@@ -1623,6 +1669,9 @@ def create_app() -> Flask:
                     nfc_tag or None,
                     latitude,
                     longitude,
+                    latitude,
+                    longitude,
+                    radius_meters,
                     radius_meters,
                     _now_ts(),
                     checkpoint_id,
@@ -2113,6 +2162,13 @@ def create_app() -> Flask:
         )
         
         today = _today_key()
+        approved_leave = _approved_leave_for_user_date(user.id, today)
+        if approved_leave:
+            return jsonify(
+                ok=False,
+                message="Check-in diblokir karena ada Leave approved pada tanggal ini.",
+                data={"leave_id": approved_leave.get("id"), "attendance_status": "excused"},
+            ), 400
         
         try:
             checkin_exists = _attendance_action_exists(user.email, today, "checkin")
@@ -2137,6 +2193,8 @@ def create_app() -> Flask:
         qr_data = (data.get("qr_data") or "").strip()
         
         selfie_file = request.files.get("selfie")
+        lat_f = None
+        lng_f = None
 
         if method not in {"gps_selfie", "gps", "qr"}:
             return jsonify(ok=False, message="Metode presensi tidak dikenal."), 400
@@ -2202,6 +2260,12 @@ def create_app() -> Flask:
                 device_time=device_time,
                 source="app",
                 selfie_path=selfie_path,
+                assignment=assignment,
+                site=site,
+                policy=policy,
+                accuracy=accuracy,
+                lat=lat_f,
+                lng=lng_f,
             )
         except sqlite3.IntegrityError as e:
             # Handle UNIQUE constraint violation (sudah checkin hari ini)
@@ -2256,6 +2320,8 @@ def create_app() -> Flask:
         device_time = (data.get("device_time") or "").strip()
         qr_data = (data.get("qr_data") or "").strip()
         selfie_file = request.files.get("selfie")
+        lat_f = None
+        lng_f = None
 
         if method not in {"gps_selfie", "gps", "qr"}:
             return jsonify(ok=False, message="Metode presensi tidak dikenal."), 400
@@ -2305,6 +2371,12 @@ def create_app() -> Flask:
             device_time=device_time,
             source="app",
             selfie_path=selfie_path,
+            assignment=assignment,
+            site=site,
+            policy=policy,
+            accuracy=accuracy,
+            lat=lat_f,
+            lng=lng_f,
         )
         closed_tours = _close_open_patrol_tours_on_checkout(user.email, today)
         _log_audit_event(
@@ -2940,7 +3012,8 @@ def create_app() -> Flask:
             return jsonify(ok=False, message="Attendance sudah diproses."), 400
         if not _approver_can_handle(user, _row_get(request_row, "employee_email") or ""):
             return _json_forbidden()
-        _reject_manual_request(request_id, user, note)
+        if not _reject_manual_request(request_id, user, note):
+            return jsonify(ok=False, message="Attendance sudah diproses."), 409
         return jsonify(ok=True, message="Manual attendance ditolak."), 200
 
     @app.route("/api/approval/pending", methods=["GET"])
@@ -3370,6 +3443,46 @@ def create_app() -> Flask:
             return jsonify(ok=True, data=summary_data), 200
         except Exception:
             return jsonify(ok=False, message="Failed to generate summary report"), 500
+
+    def _advanced_report_response(factory):
+        user = _current_user()
+        addon_block = _advanced_reporting_required_response(user)
+        if addon_block:
+            return addon_block
+        filters, error_response = _advanced_report_filters_from_request(user)
+        if error_response:
+            return error_response
+        if not _advanced_reporting_enabled(user, filters.get("client_id")):
+            return _addon_required_response("Advanced reporting")
+        return jsonify(ok=True, filters=filters, data=factory(filters)), 200
+
+    @app.route("/api/report/attendance/summary", methods=["GET"])
+    def advanced_report_attendance_summary():
+        return _advanced_report_response(_advanced_attendance_summary)
+
+    @app.route("/api/report/attendance/by-client", methods=["GET"])
+    def advanced_report_attendance_by_client():
+        return _advanced_report_response(_advanced_attendance_by_client)
+
+    @app.route("/api/report/attendance/by-employee", methods=["GET"])
+    def advanced_report_attendance_by_employee():
+        return _advanced_report_response(_advanced_attendance_by_employee)
+
+    @app.route("/api/report/attendance/ranking", methods=["GET"])
+    def advanced_report_attendance_ranking():
+        return _advanced_report_response(_advanced_attendance_ranking)
+
+    @app.route("/api/report/leave/pattern", methods=["GET"])
+    def advanced_report_leave_pattern():
+        return _advanced_report_response(_advanced_leave_pattern)
+
+    @app.route("/api/report/geo/heatmap", methods=["GET"])
+    def advanced_report_geo_heatmap():
+        return _advanced_report_response(_advanced_geo_heatmap)
+
+    @app.route("/api/report/geo/anomaly", methods=["GET"])
+    def advanced_report_geo_anomaly():
+        return _advanced_report_response(_advanced_geo_anomaly)
 
     @app.route("/admin/ai-analysis/summary", methods=["GET"])
     @app.route("/api/admin/ai-analysis/summary", methods=["GET"])
@@ -3905,6 +4018,8 @@ def create_app() -> Flask:
             return jsonify(ok=False, message="Data guard tour tidak ditemukan."), 404
         if (_row_get(tour, "employee_email", "") or "").lower() != user.email.lower():
             return _json_forbidden()
+        if int(_row_get(tour, "assignment_id") or 0) != int(_row_get(assignment, "id") or 0):
+            return jsonify(ok=False, message="Guard tour tidak sesuai Assignment aktif."), 403
         if _row_get(tour, "date") != today:
             return jsonify(ok=False, message="Guard tour ini bukan untuk shift hari ini."), 400
         if (_row_get(tour, "status", "") or "").lower() != PATROL_STATUS_ONGOING:
@@ -3913,6 +4028,19 @@ def create_app() -> Flask:
         route = _patrol_route_by_id(_row_get(tour, "route_id"))
         if not route:
             return jsonify(ok=False, message="Rute guard tour tidak ditemukan."), 404
+        if int(_row_get(route, "id") or 0) != int(_row_get(tour, "route_id") or 0):
+            return jsonify(ok=False, message="Rute guard tour tidak sesuai sesi."), 400
+        if int(_row_get(route, "site_id") or 0) != int(_row_get(tour, "site_id") or 0):
+            return jsonify(ok=False, message="Rute guard tour tidak sesuai site sesi."), 400
+        if int(_row_get(tour, "site_id") or 0) != int(_row_get(assignment, "site_id") or 0):
+            return jsonify(ok=False, message="Guard tour tidak sesuai Site aktif."), 403
+        route_client_id = int(_row_get(route, "client_id") or 0)
+        tour_client_id = int(_row_get(tour, "client_id") or 0)
+        assignment_client_id = int(_row_get(assignment, "client_id") or 0)
+        if route_client_id and tour_client_id and route_client_id != tour_client_id:
+            return jsonify(ok=False, message="Rute guard tour tidak sesuai client sesi."), 400
+        if assignment_client_id and tour_client_id and assignment_client_id != tour_client_id:
+            return jsonify(ok=False, message="Guard tour tidak sesuai Client aktif."), 403
         checkpoints_full = _patrol_checkpoints(_row_get(route, "id"))
         if not checkpoints_full:
             return jsonify(ok=False, message="Checkpoint route tidak tersedia."), 400
@@ -4011,12 +4139,21 @@ def create_app() -> Flask:
         last_valid_scan = _patrol_last_valid_scan(tour_id)
         interval_seconds = None
         too_fast = False
+        impossible_jump = False
         if last_valid_scan:
             previous_ts = _parse_db_timestamp(_row_get(last_valid_scan, "timestamp"))
             current_ts = _parse_db_timestamp(scan_ts)
             if previous_ts and current_ts:
                 interval_seconds = int((current_ts - previous_ts).total_seconds())
                 too_fast = interval_seconds < flags["min_scan_interval_seconds"]
+                prev_lat = _row_get(last_valid_scan, "lat")
+                prev_lng = _row_get(last_valid_scan, "lng")
+                if interval_seconds > 0 and prev_lat is not None and prev_lng is not None and lat_value is not None and lng_value is not None:
+                    try:
+                        jump_meters = _distance_meters(float(prev_lat), float(prev_lng), lat_value, lng_value)
+                        impossible_jump = (jump_meters / max(interval_seconds, 1)) > PATROL_IMPOSSIBLE_JUMP_MPS
+                    except (TypeError, ValueError):
+                        impossible_jump = False
 
         validation_status = PATROL_SCAN_VALID
         validation_note = "Checkpoint tervalidasi."
@@ -4033,7 +4170,7 @@ def create_app() -> Flask:
             validation_status = "checkpoint_not_found"
             validation_note = "Marker checkpoint tidak dikenal."
             failure_reason = "checkpoint_not_found"
-        elif strict_mode and not is_expected_sequence:
+        elif not is_expected_sequence:
             validation_status = "wrong_sequence"
             validation_note = (
                 f"Urutan checkpoint salah. Lanjutkan ke checkpoint #{expected_sequence}."
@@ -4041,7 +4178,7 @@ def create_app() -> Flask:
                 else "Urutan checkpoint salah."
             )
             failure_reason = "wrong_sequence"
-        elif not strict_mode and already_scanned:
+        elif already_scanned:
             validation_status = "checkpoint_already_scanned"
             validation_note = "Checkpoint ini sudah tervalidasi sebelumnya."
             failure_reason = "checkpoint_already_scanned"
@@ -4049,6 +4186,10 @@ def create_app() -> Flask:
             validation_status = "scan_too_fast"
             validation_note = "Scan terlalu cepat dari checkpoint sebelumnya."
             failure_reason = "scan_too_fast"
+        elif impossible_jump:
+            validation_status = "impossible_jump"
+            validation_note = "Perpindahan antar checkpoint tidak wajar."
+            failure_reason = "impossible_jump"
         elif not gps_valid:
             validation_status = "gps_invalid"
             validation_note = gps_reason or "GPS tidak valid."
@@ -4058,28 +4199,31 @@ def create_app() -> Flask:
             validation_note = "Selfie wajib pada mode keamanan saat ini."
             failure_reason = "selfie_missing"
 
-        _insert_patrol_scan(
-            tour_id=tour_id,
-            route_id=int(_row_get(route, "id", 0) or 0),
-            employee_email=user.email,
-            checkpoint_id=checkpoint_id,
-            checkpoint_sequence=checkpoint_sequence,
-            expected_sequence=expected_sequence,
-            is_expected_sequence=is_expected_sequence,
-            method=method,
-            scan_payload=scan_payload,
-            timestamp_value=scan_ts,
-            lat=lat_value,
-            lng=lng_value,
-            gps_distance_m=gps_distance_m,
-            gps_valid=gps_valid,
-            selfie_path=selfie_path,
-            selfie_required=selfie_required,
-            selfie_valid=selfie_valid,
-            interval_seconds=interval_seconds,
-            validation_status=validation_status,
-            validation_note=validation_note,
-        )
+        try:
+            _insert_patrol_scan(
+                tour_id=tour_id,
+                route_id=int(_row_get(route, "id", 0) or 0),
+                employee_email=user.email,
+                checkpoint_id=checkpoint_id,
+                checkpoint_sequence=checkpoint_sequence,
+                expected_sequence=expected_sequence,
+                is_expected_sequence=is_expected_sequence,
+                method=method,
+                scan_payload=scan_payload,
+                timestamp_value=scan_ts,
+                lat=lat_value,
+                lng=lng_value,
+                gps_distance_m=gps_distance_m,
+                gps_valid=gps_valid,
+                selfie_path=selfie_path,
+                selfie_required=selfie_required,
+                selfie_valid=selfie_valid,
+                interval_seconds=interval_seconds,
+                validation_status=validation_status,
+                validation_note=validation_note,
+            )
+        except sqlite3.IntegrityError:
+            return jsonify(ok=False, message="Checkpoint sudah diproses."), 409
 
         if failure_reason:
             _update_patrol_tour_state(
@@ -4171,7 +4315,20 @@ def create_app() -> Flask:
             return jsonify(ok=False, message="Format tanggal izin tidak valid."), 400
         if normalized_to < normalized_from:
             return jsonify(ok=False, message="Tanggal selesai izin harus sama atau setelah tanggal mulai."), 400
-        if _leave_request_overlaps(user.email, normalized_from, normalized_to):
+        assignment, site, client, employee, policy = _active_assignment_context(user, normalized_from)
+        if not assignment or not site or not client or not employee:
+            return jsonify(ok=False, message="Pengajuan izin membutuhkan Assignment aktif ke Site dan Client valid."), 400
+        assignment_end = _date_from_input(_row_get(assignment, "end_date")) if _row_get(assignment, "end_date") else None
+        requested_to = _date_from_input(normalized_to)
+        if assignment_end and requested_to and requested_to > assignment_end:
+            return jsonify(ok=False, message="Rentang izin melewati akhir Assignment aktif."), 400
+        if _leave_request_overlaps(
+            user.email,
+            normalized_from,
+            normalized_to,
+            assignment_id=int(_row_get(assignment, "id") or 0),
+            employee_user_id=user.id,
+        ):
             return jsonify(ok=False, message="Rentang izin sudah memiliki pengajuan aktif."), 400
         if not reason:
             return jsonify(ok=False, message="Alasan wajib diisi."), 400
@@ -4197,15 +4354,23 @@ def create_app() -> Flask:
             except ValueError as err:
                 return jsonify(ok=False, message=str(err)), 400
 
-        request_id = _create_leave_request(
-            employee_email=user.email,
-            leave_type=leave_type,
-            date_from=normalized_from,
-            date_to=normalized_to,
-            reason=reason,
-            attachment=attachment,
-            attachment_path=attachment_path,
-        )
+        try:
+            request_id = _create_leave_request(
+                employee_email=user.email,
+                employee_id=int(_row_get(employee, "id") or 0),
+                employee_user_id=user.id,
+                assignment_id=int(_row_get(assignment, "id") or 0),
+                client_id=int(_row_get(client, "id") or _row_get(site, "client_id") or 0),
+                site_id=int(_row_get(site, "id") or 0),
+                leave_type=leave_type,
+                date_from=normalized_from,
+                date_to=normalized_to,
+                reason=reason,
+                attachment=attachment,
+                attachment_path=attachment_path,
+            )
+        except DuplicateSubmissionError as err:
+            return jsonify(ok=False, message=str(err)), 409
         record = _get_leave_request_by_id(request_id) or {}
         return jsonify(ok=True, message="Pengajuan izin dikirim.", data=record), 200
 
@@ -4251,18 +4416,20 @@ def create_app() -> Flask:
             return jsonify(ok=False, message="Pengajuan tidak ditemukan."), 404
         if (record.get("status") or "").lower() != "pending":
             return jsonify(ok=False, message="Pengajuan sudah diproses."), 400
-        if not _approver_can_handle(user, record.get("employee_email") or ""):
+        if not _approver_can_handle(user, record.get("employee_email") or "", record):
             return _json_forbidden()
         if action == "reject" and not note:
             return jsonify(ok=False, message="Alasan penolakan wajib diisi."), 400
 
         status = "rejected" if action == "reject" else "approved"
-        _update_leave_request_status(
+        updated = _update_leave_request_status(
             request_id=request_id,
             status=status,
-            approver_email=user.email,
+            approver=user,
             note=note or None,
         )
+        if not updated:
+            return jsonify(ok=False, message="Pengajuan sudah diproses."), 409
         _log_audit_event(
             entity_type="leave_request",
             entity_id=request_id,
@@ -4291,17 +4458,19 @@ def create_app() -> Flask:
             return jsonify(ok=False, message="Pengajuan tidak ditemukan."), 404
         if (record.get("status") or "").lower() != "pending":
             return jsonify(ok=False, message="Pengajuan sudah diproses."), 400
-        if not _approver_can_handle(user, record.get("employee_email") or ""):
+        if not _approver_can_handle(user, record.get("employee_email") or "", record):
             return _json_forbidden()
         if not note:
             return jsonify(ok=False, message="Alasan penolakan wajib diisi."), 400
 
-        _update_leave_request_status(
+        updated = _update_leave_request_status(
             request_id=request_id,
             status="rejected",
-            approver_email=user.email,
+            approver=user,
             note=note,
         )
+        if not updated:
+            return jsonify(ok=False, message="Pengajuan sudah diproses."), 409
         _log_audit_event(
             entity_type="leave_request",
             entity_id=request_id,
@@ -4495,6 +4664,8 @@ ROLE_PERMISSION_KEYS = [
     "view_reports",
     "view_patrol",
     "view_payroll",
+    "view_billing",
+    "view_contract",
     "approve_requests",
     "manage_settings_codes",
     "manage_settings_password",
@@ -4516,6 +4687,8 @@ ROLE_PERMISSION_LABELS = {
     "view_reports": "Reports",
     "view_patrol": "Guard Tour",
     "view_payroll": "Payroll",
+    "view_billing": "Billing",
+    "view_contract": "Contract",
     "approve_requests": "Approvals",
     "manage_settings_codes": "Setting: Kode Reg",
     "manage_settings_password": "Setting: Password",
@@ -4570,6 +4743,21 @@ ADDON_ALLOWED = {
     ADDON_CONTRACT_MANAGEMENT,
     ADDON_SLA_TRACKING,
 }
+ADDON_OWNER_ORDER = (
+    ADDON_PATROL,
+    ADDON_PATROL_OPS,
+    ADDON_CALENDAR,
+    ADDON_REPORTING_ADVANCED,
+    ADDON_API_ACCESS,
+    ADDON_PAYROLL_PLUS,
+    ADDON_AI,
+    ADDON_BILLING_ENGINE,
+    ADDON_CONTRACT_MANAGEMENT,
+    ADDON_SLA_TRACKING,
+    ADDON_ENTERPRISE_TIER,
+)
+ADDON_ENTERPRISE_EXCLUDED = {ADDON_REPORTING_ADVANCED, ADDON_API_ACCESS}
+ADDON_ENTERPRISE_AUTO_ENABLED = set(ADDON_OWNER_ORDER) - ADDON_ENTERPRISE_EXCLUDED
 ADDON_FEATURE_ALIASES = {
     "patrol": ADDON_PATROL,
     "guard_tour": ADDON_PATROL,
@@ -4655,6 +4843,7 @@ PATROL_SCAN_METHODS = {PATROL_SCAN_MODE_QR, PATROL_SCAN_MODE_NFC}
 PATROL_MAX_CHECKPOINTS = 30
 PATROL_MIN_SCAN_INTERVAL_SECONDS = 45
 PATROL_DEFAULT_CHECKPOINT_RADIUS_METERS = 35
+PATROL_IMPOSSIBLE_JUMP_MPS = 12.0
 PATROL_MARKER_CODE_LENGTH = 10
 PATROL_MARKER_SYMBOLS = "!@#$%&*+-="
 
@@ -4671,6 +4860,10 @@ class User:
     must_change_password: int = 0
     client_id: int | None = None
     site_id: int | None = None
+
+
+class DuplicateSubmissionError(ValueError):
+    pass
 
 
 def _persist_user(user: User) -> None:
@@ -4794,6 +4987,21 @@ def _client_user_client_id(user: User | None) -> int | None:
         return None
     if isinstance(user.client_id, int) and user.client_id > 0:
         return int(user.client_id)
+    return None
+
+
+def get_current_client_scope(user: User | None = None) -> int | None:
+    current = user or _current_user()
+    if not current:
+        return None
+    if current.role == "hr_superadmin":
+        return None
+    if current.role == "client_admin":
+        return _client_admin_client_id(current)
+    if current.role in CLIENT_ROLES:
+        return _client_user_client_id(current)
+    if isinstance(current.client_id, int) and current.client_id > 0:
+        return int(current.client_id)
     return None
 
 
@@ -5086,6 +5294,8 @@ def _permission_for_admin_endpoint(endpoint: str | None) -> str | None:
         "admin.reports": "view_reports",
         "admin.patroli_ops": "view_patrol",
         "admin.payroll": "view_payroll",
+        "admin.billing": "view_billing",
+        "admin.contract": "view_contract",
         "admin.approvals": "approve_requests",
         "admin.settings_registration_codes_create": "manage_settings_codes",
     }
@@ -5758,6 +5968,32 @@ def _is_late_checkin(checkin_minutes: int | None, assignment: dict) -> bool:
     if checkin_minutes is None:
         return False
     return checkin_minutes > _late_cutoff_minutes_for_assignment(assignment)
+
+
+def calculate_late(checkin_minutes: int | None, assignment: dict | None) -> int:
+    if checkin_minutes is None:
+        return 0
+    return max(0, checkin_minutes - _late_cutoff_minutes_for_assignment(assignment or {}))
+
+
+def calculate_work_duration(checkin_minutes: int | None, checkout_minutes: int | None) -> int | None:
+    if checkin_minutes is None or checkout_minutes is None:
+        return None
+    if checkout_minutes < checkin_minutes:
+        checkout_minutes += 24 * 60
+    return max(0, checkout_minutes - checkin_minutes)
+
+
+def _early_checkout_flag(checkout_minutes: int | None, assignment: dict | None) -> bool:
+    if checkout_minutes is None:
+        return False
+    assignment = assignment or {}
+    end_minutes = _parse_hhmm(assignment.get("shift_end_time"))
+    if end_minutes is None and assignment.get("shift_id"):
+        shift = _get_shift_by_id(int(assignment["shift_id"]))
+        if shift and "end_time" in shift.keys():
+            end_minutes = _parse_hhmm(shift["end_time"])
+    return bool(end_minutes is not None and checkout_minutes < end_minutes)
 
 
 def _attendance_month_summary_for_employee(
@@ -6812,6 +7048,80 @@ def _get_assignment_by_id(assignment_id: int) -> dict | None:
         conn.close()
 
 
+def _active_assignment_context(user: User | None, date_key: str | None = None) -> tuple[dict | None, dict | None, dict | None, dict | None, dict]:
+    if not user:
+        return None, None, None, None, _policy_with_defaults(None)
+    assignment = _get_active_assignment(user.id)
+    if not assignment:
+        return None, None, None, None, _policy_with_defaults(None)
+    if date_key:
+        start_dt = _date_from_input(_row_get(assignment, "start_date"))
+        end_dt = _date_from_input(_row_get(assignment, "end_date")) if _row_get(assignment, "end_date") else None
+        target_dt = _date_from_input(date_key)
+        if start_dt and target_dt and (target_dt < start_dt or (end_dt and target_dt > end_dt)):
+            return None, None, None, None, _policy_with_defaults(None)
+    site_row = _get_site_by_id(_row_get(assignment, "site_id"))
+    if not site_row:
+        return assignment, None, None, None, _policy_with_defaults(None)
+    site = dict(site_row)
+    client_row = _get_client_by_id(_row_get(site, "client_id"))
+    client = dict(client_row) if client_row else None
+    employee = _employee_by_email(user.email, only_active=False)
+    policy = _resolve_attendance_policy(
+        _row_get(site, "id"),
+        _row_get(site, "client_id"),
+        _row_get(assignment, "shift_id"),
+        as_of_date=date_key,
+    )
+    return assignment, site, client, employee, policy
+
+
+def _assignment_working_period_contains(assignment: dict | None, timestamp_value: str | None) -> bool:
+    if not assignment or not timestamp_value:
+        return True
+    try:
+        report_dt = datetime.fromisoformat(str(timestamp_value).replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    shift_id = _row_get(assignment, "shift_id")
+    if not shift_id:
+        return True
+    shift = _get_shift_by_id(int(shift_id))
+    if not shift:
+        return True
+    start_minutes = _parse_hhmm(shift["start_time"] if "start_time" in shift.keys() else None)
+    end_minutes = _parse_hhmm(shift["end_time"] if "end_time" in shift.keys() else None)
+    if start_minutes is None or end_minutes is None:
+        return True
+    value_minutes = report_dt.hour * 60 + report_dt.minute
+    if start_minutes <= end_minutes:
+        return start_minutes <= value_minutes <= end_minutes
+    return value_minutes >= start_minutes or value_minutes <= end_minutes
+
+
+def _approved_leave_for_user_date(user_id: int, date_key: str) -> dict | None:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "leave_requests"):
+            return None
+        row = conn.execute(
+            """
+            SELECT *
+            FROM leave_requests
+            WHERE employee_user_id = ?
+              AND date_from <= ?
+              AND date_to >= ?
+              AND status = 'approved'
+            ORDER BY approved_at DESC, id DESC
+            LIMIT 1
+            """,
+            (user_id, date_key, date_key),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
 def _policy_with_defaults(row: sqlite3.Row | None) -> dict:
     policy = DEFAULT_ATTENDANCE_POLICY.copy()
     if not row:
@@ -7508,7 +7818,14 @@ def _update_employee(
 def _delete_employee(employee_id: int) -> None:
     conn = _db_connect()
     try:
-        conn.execute("DELETE FROM employees WHERE id = ?", (employee_id,))
+        conn.execute(
+            """
+            UPDATE employees
+            SET is_active = 0
+            WHERE id = ?
+            """,
+            (employee_id,),
+        )
     finally:
         conn.commit()
         conn.close()
@@ -7955,7 +8272,16 @@ def _client_has_sites(client_id: int) -> bool:
 def _delete_client(client_id: int) -> None:
     conn = _db_connect()
     try:
-        conn.execute("DELETE FROM clients WHERE id = ?", (client_id,))
+        conn.execute(
+            """
+            UPDATE clients
+            SET is_active = 0,
+                status = 'INACTIVE',
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (_now_ts(), client_id),
+        )
     finally:
         conn.commit()
         conn.close()
@@ -7964,7 +8290,15 @@ def _delete_client(client_id: int) -> None:
 def _delete_site(site_id: int) -> None:
     conn = _db_connect()
     try:
-        conn.execute("DELETE FROM sites WHERE id = ?", (site_id,))
+        conn.execute(
+            """
+            UPDATE sites
+            SET is_active = 0,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (_now_ts(), site_id),
+        )
     finally:
         conn.commit()
         conn.close()
@@ -11101,8 +11435,14 @@ def _init_db() -> None:
             """
             CREATE TABLE IF NOT EXISTS leave_requests (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                employee_id INTEGER,
+                employee_user_id INTEGER,
+                assignment_id INTEGER,
                 employee_email TEXT NOT NULL,
                 client_id INTEGER,
+                site_id INTEGER,
+                client_id_snapshot INTEGER,
+                site_id_snapshot INTEGER,
                 branch_id INTEGER,
                 leave_type TEXT NOT NULL,
                 date_from TEXT NOT NULL,
@@ -11112,10 +11452,17 @@ def _init_db() -> None:
                 attachment_path TEXT,
                 status TEXT NOT NULL DEFAULT 'pending',
                 approver_email TEXT,
+                approved_by_id INTEGER,
+                approved_by_role TEXT,
                 approved_at TEXT,
                 note TEXT,
                 created_at TEXT NOT NULL,
-                updated_at TEXT
+                updated_at TEXT,
+                FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE RESTRICT,
+                FOREIGN KEY (employee_user_id) REFERENCES users(id) ON DELETE RESTRICT,
+                FOREIGN KEY (assignment_id) REFERENCES assignments(id) ON DELETE RESTRICT,
+                FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE RESTRICT,
+                FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE RESTRICT
             )
             """
         )
@@ -11238,13 +11585,18 @@ def _init_db() -> None:
             CREATE TABLE IF NOT EXISTS patrol_checkpoints (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 route_id INTEGER NOT NULL,
+                site_id INTEGER,
                 sequence_no INTEGER NOT NULL,
+                sequence_order INTEGER,
                 name TEXT NOT NULL,
                 qr_code TEXT,
                 nfc_tag TEXT,
                 latitude REAL,
                 longitude REAL,
+                lat REAL,
+                lon REAL,
                 radius_meters INTEGER DEFAULT 35,
+                radius_meter INTEGER DEFAULT 35,
                 is_active INTEGER DEFAULT 1,
                 created_at TEXT,
                 updated_at TEXT,
@@ -11355,6 +11707,78 @@ def _init_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS patrol_reports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_event_id INTEGER,
+                employee_id INTEGER NOT NULL,
+                employee_user_id INTEGER,
+                assignment_id INTEGER NOT NULL,
+                site_id INTEGER NOT NULL,
+                client_id INTEGER NOT NULL,
+                report_time TEXT NOT NULL,
+                type TEXT NOT NULL DEFAULT 'note',
+                priority TEXT NOT NULL DEFAULT 'low',
+                description TEXT NOT NULL,
+                attachment_path TEXT,
+                status TEXT NOT NULL DEFAULT 'submitted',
+                reviewed_by_user_id INTEGER,
+                reviewed_by_role TEXT,
+                reviewed_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT,
+                FOREIGN KEY (source_event_id) REFERENCES patrol_operational_events(id) ON DELETE SET NULL,
+                FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE RESTRICT,
+                FOREIGN KEY (employee_user_id) REFERENCES users(id) ON DELETE SET NULL,
+                FOREIGN KEY (assignment_id) REFERENCES assignments(id) ON DELETE RESTRICT,
+                FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE RESTRICT,
+                FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE RESTRICT
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS patrol_sessions (
+                id INTEGER PRIMARY KEY,
+                employee_id INTEGER NOT NULL,
+                employee_user_id INTEGER,
+                assignment_id INTEGER NOT NULL,
+                site_id INTEGER NOT NULL,
+                client_id INTEGER,
+                start_time TEXT NOT NULL,
+                end_time TEXT,
+                status TEXT NOT NULL,
+                completion_percent REAL NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT,
+                FOREIGN KEY (id) REFERENCES patrol_tours(id) ON DELETE CASCADE,
+                FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE RESTRICT,
+                FOREIGN KEY (employee_user_id) REFERENCES users(id) ON DELETE SET NULL,
+                FOREIGN KEY (assignment_id) REFERENCES assignments(id) ON DELETE RESTRICT,
+                FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE RESTRICT,
+                FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE SET NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS patrol_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_scan_id INTEGER,
+                session_id INTEGER NOT NULL,
+                checkpoint_id INTEGER,
+                scanned_at TEXT NOT NULL,
+                lat REAL,
+                lon REAL,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (source_scan_id) REFERENCES patrol_scans(id) ON DELETE SET NULL,
+                FOREIGN KEY (session_id) REFERENCES patrol_sessions(id) ON DELETE CASCADE,
+                FOREIGN KEY (checkpoint_id) REFERENCES patrol_checkpoints(id) ON DELETE SET NULL
+            )
+            """
+        )
         try:
             conn.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_patrol_checkpoint_sequence ON patrol_checkpoints(route_id, sequence_no)"
@@ -11382,6 +11806,10 @@ def _init_db() -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_patrol_ops_employee_created ON patrol_operational_events(employee_email, created_at)"
         )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_patrol_reports_assignment_time ON patrol_reports(assignment_id, report_time)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_patrol_reports_client_status ON patrol_reports(client_id, status)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_patrol_sessions_assignment_status ON patrol_sessions(assignment_id, status)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_patrol_logs_session_time ON patrol_logs(session_id, scanned_at)")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS role_permissions (
@@ -11522,6 +11950,19 @@ def _init_db() -> None:
                     selfie_path TEXT,
                     source TEXT,
                     manual_request_id INTEGER,
+                    assignment_id INTEGER,
+                    site_id INTEGER,
+                    policy_snapshot TEXT,
+                    lat REAL,
+                    lng REAL,
+                    gps_distance_m REAL,
+                    late_flag INTEGER DEFAULT 0,
+                    early_checkout_flag INTEGER DEFAULT 0,
+                    inside_radius_flag INTEGER DEFAULT 0,
+                    near_radius_flag INTEGER DEFAULT 0,
+                    suspicious_location_flag INTEGER DEFAULT 0,
+                    device_time TEXT,
+                    accuracy TEXT,
                     created_at TEXT NOT NULL,
                     FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE SET NULL,
                     FOREIGN KEY (manual_request_id) REFERENCES manual_attendance_requests(id) ON DELETE SET NULL
@@ -11562,14 +12003,102 @@ def _init_db() -> None:
             _ensure_column(conn, "assignments", "client_id", "client_id INTEGER")
             _ensure_column(conn, "assignments", "branch_id", "branch_id INTEGER")
         if _table_exists(conn, "leave_requests"):
+            _ensure_column(conn, "leave_requests", "employee_id", "employee_id INTEGER")
+            _ensure_column(conn, "leave_requests", "employee_user_id", "employee_user_id INTEGER")
+            _ensure_column(conn, "leave_requests", "assignment_id", "assignment_id INTEGER")
             _ensure_column(conn, "leave_requests", "client_id", "client_id INTEGER")
+            _ensure_column(conn, "leave_requests", "site_id", "site_id INTEGER")
+            _ensure_column(conn, "leave_requests", "client_id_snapshot", "client_id_snapshot INTEGER")
+            _ensure_column(conn, "leave_requests", "site_id_snapshot", "site_id_snapshot INTEGER")
             _ensure_column(conn, "leave_requests", "branch_id", "branch_id INTEGER")
+            _ensure_column(conn, "leave_requests", "approved_by_id", "approved_by_id INTEGER")
+            _ensure_column(conn, "leave_requests", "approved_by_role", "approved_by_role TEXT")
+            if _table_exists(conn, "users"):
+                conn.execute(
+                    """
+                    UPDATE leave_requests
+                    SET employee_user_id = (
+                        SELECT u.id FROM users u
+                        WHERE lower(u.email) = lower(leave_requests.employee_email)
+                        LIMIT 1
+                    )
+                    WHERE employee_user_id IS NULL
+                    """
+                )
+            if _table_exists(conn, "employees"):
+                conn.execute(
+                    """
+                    UPDATE leave_requests
+                    SET employee_id = (
+                        SELECT e.id FROM employees e
+                        WHERE lower(e.email) = lower(leave_requests.employee_email)
+                        LIMIT 1
+                    )
+                    WHERE employee_id IS NULL
+                    """
+                )
+            if _table_exists(conn, "assignments"):
+                conn.execute(
+                    """
+                    UPDATE leave_requests
+                    SET assignment_id = (
+                        SELECT a.id FROM assignments a
+                        WHERE a.employee_user_id = leave_requests.employee_user_id
+                          AND a.status = 'ACTIVE'
+                          AND a.start_date <= leave_requests.date_from
+                          AND (a.end_date IS NULL OR a.end_date = '' OR a.end_date >= leave_requests.date_from)
+                        ORDER BY a.start_date DESC, a.id DESC
+                        LIMIT 1
+                    )
+                    WHERE assignment_id IS NULL AND employee_user_id IS NOT NULL
+                    """
+                )
+                conn.execute(
+                    """
+                    UPDATE leave_requests
+                    SET site_id = COALESCE(site_id, branch_id, (
+                        SELECT a.site_id FROM assignments a WHERE a.id = leave_requests.assignment_id
+                    )),
+                        branch_id = COALESCE(branch_id, site_id, (
+                        SELECT a.site_id FROM assignments a WHERE a.id = leave_requests.assignment_id
+                    )),
+                        client_id = COALESCE(client_id, (
+                        SELECT COALESCE(a.client_id, s.client_id)
+                        FROM assignments a
+                        LEFT JOIN sites s ON s.id = a.site_id
+                        WHERE a.id = leave_requests.assignment_id
+                    )),
+                        client_id_snapshot = COALESCE(client_id_snapshot, client_id, (
+                        SELECT COALESCE(a.client_id, s.client_id)
+                        FROM assignments a
+                        LEFT JOIN sites s ON s.id = a.site_id
+                        WHERE a.id = leave_requests.assignment_id
+                    )),
+                        site_id_snapshot = COALESCE(site_id_snapshot, site_id, branch_id, (
+                        SELECT a.site_id FROM assignments a WHERE a.id = leave_requests.assignment_id
+                    ))
+                    WHERE assignment_id IS NOT NULL
+                    """
+                )
         if _table_exists(conn, "manual_attendance_requests"):
             _ensure_column(conn, "manual_attendance_requests", "client_id", "client_id INTEGER")
             _ensure_column(conn, "manual_attendance_requests", "branch_id", "branch_id INTEGER")
         if _table_exists(conn, "attendance"):
             _ensure_column(conn, "attendance", "client_id", "client_id INTEGER")
             _ensure_column(conn, "attendance", "branch_id", "branch_id INTEGER")
+            _ensure_column(conn, "attendance", "assignment_id", "assignment_id INTEGER")
+            _ensure_column(conn, "attendance", "site_id", "site_id INTEGER")
+            _ensure_column(conn, "attendance", "policy_snapshot", "policy_snapshot TEXT")
+            _ensure_column(conn, "attendance", "lat", "lat REAL")
+            _ensure_column(conn, "attendance", "lng", "lng REAL")
+            _ensure_column(conn, "attendance", "gps_distance_m", "gps_distance_m REAL")
+            _ensure_column(conn, "attendance", "late_flag", "late_flag INTEGER DEFAULT 0")
+            _ensure_column(conn, "attendance", "early_checkout_flag", "early_checkout_flag INTEGER DEFAULT 0")
+            _ensure_column(conn, "attendance", "inside_radius_flag", "inside_radius_flag INTEGER DEFAULT 0")
+            _ensure_column(conn, "attendance", "near_radius_flag", "near_radius_flag INTEGER DEFAULT 0")
+            _ensure_column(conn, "attendance", "suspicious_location_flag", "suspicious_location_flag INTEGER DEFAULT 0")
+            _ensure_column(conn, "attendance", "device_time", "device_time TEXT")
+            _ensure_column(conn, "attendance", "accuracy", "accuracy TEXT")
         if _table_exists(conn, "audit_logs"):
             _ensure_column(conn, "audit_logs", "actor_user_id", "actor_user_id INTEGER")
             _ensure_column(conn, "audit_logs", "client_id", "client_id INTEGER")
@@ -11604,21 +12133,37 @@ def _init_db() -> None:
             _ensure_column(conn, "patrol_routes", "updated_at", "updated_at TEXT")
         if _table_exists(conn, "patrol_checkpoints"):
             _ensure_column(conn, "patrol_checkpoints", "route_id", "route_id INTEGER")
+            _ensure_column(conn, "patrol_checkpoints", "site_id", "site_id INTEGER")
             _ensure_column(conn, "patrol_checkpoints", "sequence_no", "sequence_no INTEGER")
+            _ensure_column(conn, "patrol_checkpoints", "sequence_order", "sequence_order INTEGER")
             _ensure_column(conn, "patrol_checkpoints", "name", "name TEXT")
             _ensure_column(conn, "patrol_checkpoints", "qr_code", "qr_code TEXT")
             _ensure_column(conn, "patrol_checkpoints", "nfc_tag", "nfc_tag TEXT")
             _ensure_column(conn, "patrol_checkpoints", "latitude", "latitude REAL")
             _ensure_column(conn, "patrol_checkpoints", "longitude", "longitude REAL")
+            _ensure_column(conn, "patrol_checkpoints", "lat", "lat REAL")
+            _ensure_column(conn, "patrol_checkpoints", "lon", "lon REAL")
             _ensure_column(
                 conn,
                 "patrol_checkpoints",
                 "radius_meters",
                 "radius_meters INTEGER DEFAULT 35",
             )
+            _ensure_column(conn, "patrol_checkpoints", "radius_meter", "radius_meter INTEGER DEFAULT 35")
             _ensure_column(conn, "patrol_checkpoints", "is_active", "is_active INTEGER DEFAULT 1")
             _ensure_column(conn, "patrol_checkpoints", "created_at", "created_at TEXT")
             _ensure_column(conn, "patrol_checkpoints", "updated_at", "updated_at TEXT")
+            conn.execute(
+                """
+                UPDATE patrol_checkpoints
+                SET
+                    site_id = COALESCE(site_id, (SELECT site_id FROM patrol_routes WHERE patrol_routes.id = patrol_checkpoints.route_id)),
+                    sequence_order = COALESCE(sequence_order, sequence_no),
+                    lat = COALESCE(lat, latitude),
+                    lon = COALESCE(lon, longitude),
+                    radius_meter = COALESCE(radius_meter, radius_meters)
+                """
+            )
             try:
                 conn.execute(
                     "CREATE UNIQUE INDEX IF NOT EXISTS idx_patrol_checkpoint_sequence ON patrol_checkpoints(route_id, sequence_no)"
@@ -11712,6 +12257,17 @@ def _init_db() -> None:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_patrol_scans_validation ON patrol_scans(validation_status)"
             )
+            try:
+                conn.execute(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_patrol_valid_sequence_unique
+                    ON patrol_scans(tour_id, checkpoint_sequence)
+                    WHERE validation_status = 'valid'
+                      AND checkpoint_sequence IS NOT NULL
+                    """
+                )
+            except sqlite3.IntegrityError:
+                pass
         if _table_exists(conn, "patrol_operational_events"):
             _ensure_column(conn, "patrol_operational_events", "client_id", "client_id INTEGER")
             _ensure_column(conn, "patrol_operational_events", "site_id", "site_id INTEGER")
@@ -11744,6 +12300,33 @@ def _init_db() -> None:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_patrol_ops_employee_created ON patrol_operational_events(employee_email, created_at)"
             )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_patrol_ops_client_created ON patrol_operational_events(client_id, created_at)"
+            )
+        if _table_exists(conn, "patrol_reports"):
+            _ensure_column(conn, "patrol_reports", "source_event_id", "source_event_id INTEGER")
+            _ensure_column(conn, "patrol_reports", "employee_id", "employee_id INTEGER")
+            _ensure_column(conn, "patrol_reports", "employee_user_id", "employee_user_id INTEGER")
+            _ensure_column(conn, "patrol_reports", "assignment_id", "assignment_id INTEGER")
+            _ensure_column(conn, "patrol_reports", "site_id", "site_id INTEGER")
+            _ensure_column(conn, "patrol_reports", "client_id", "client_id INTEGER")
+            _ensure_column(conn, "patrol_reports", "report_time", "report_time TEXT")
+            _ensure_column(conn, "patrol_reports", "type", "type TEXT DEFAULT 'note'")
+            _ensure_column(conn, "patrol_reports", "priority", "priority TEXT DEFAULT 'low'")
+            _ensure_column(conn, "patrol_reports", "description", "description TEXT")
+            _ensure_column(conn, "patrol_reports", "attachment_path", "attachment_path TEXT")
+            _ensure_column(conn, "patrol_reports", "status", "status TEXT DEFAULT 'submitted'")
+            _ensure_column(conn, "patrol_reports", "reviewed_by_user_id", "reviewed_by_user_id INTEGER")
+            _ensure_column(conn, "patrol_reports", "reviewed_by_role", "reviewed_by_role TEXT")
+            _ensure_column(conn, "patrol_reports", "reviewed_at", "reviewed_at TEXT")
+            _ensure_column(conn, "patrol_reports", "created_at", "created_at TEXT")
+            _ensure_column(conn, "patrol_reports", "updated_at", "updated_at TEXT")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_patrol_reports_assignment_time ON patrol_reports(assignment_id, report_time)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_patrol_reports_client_status ON patrol_reports(client_id, status)")
+        if _table_exists(conn, "patrol_sessions"):
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_patrol_sessions_assignment_status ON patrol_sessions(assignment_id, status)")
+        if _table_exists(conn, "patrol_logs"):
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_patrol_logs_session_time ON patrol_logs(session_id, scanned_at)")
         if _table_exists(conn, "clients"):
             _ensure_column(conn, "clients", "is_active", "is_active INTEGER DEFAULT 1")
             _ensure_column(conn, "clients", "legal_name", "legal_name TEXT")
@@ -11884,6 +12467,15 @@ def _init_db() -> None:
                 )
             except sqlite3.IntegrityError:
                 pass
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_attendance_client_date ON attendance(client_id, date)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_attendance_employee_created ON attendance(employee_email, created_at)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_attendance_flags ON attendance(late_flag, early_checkout_flag, inside_radius_flag)"
+            )
         if _table_exists(conn, "employee_registration_codes"):
             _ensure_column(conn, "employee_registration_codes", "year_month", "year_month TEXT")
             _ensure_column(conn, "employee_registration_codes", "seq", "seq INTEGER")
@@ -11911,6 +12503,21 @@ def _init_db() -> None:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_leave_requests_employee ON leave_requests(employee_email)"
             )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_leave_client_status ON leave_requests(client_id, status, date_from, date_to)"
+            )
+            try:
+                conn.execute(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_leave_exact_pending_unique
+                    ON leave_requests(employee_user_id, assignment_id, date_from, date_to, leave_type)
+                    WHERE status IN ('pending', 'approved')
+                      AND employee_user_id IS NOT NULL
+                      AND assignment_id IS NOT NULL
+                    """
+                )
+            except sqlite3.IntegrityError:
+                pass
         if _table_exists(conn, "client_contacts"):
             _ensure_column(conn, "client_contacts", "client_id", "client_id INTEGER")
             _ensure_column(conn, "client_contacts", "contact_type", "contact_type TEXT")
@@ -12194,6 +12801,9 @@ def _global_addons() -> list[str]:
 
 def _set_global_addons(addons: object) -> list[str]:
     normalized = _addons_from_value(addons)
+    if ADDON_ENTERPRISE_TIER in normalized:
+        active = (set(normalized) - ADDON_ENTERPRISE_EXCLUDED) | ADDON_ENTERPRISE_AUTO_ENABLED
+        normalized = [addon for addon in ADDON_OWNER_ORDER if addon in active]
     _set_app_setting("global_addons", normalized)
     return normalized
 
@@ -12307,6 +12917,46 @@ def _phase15_subscription(client_id: int | None) -> dict:
         "contract_enabled": package == CLIENT_PACKAGE_ENTERPRISE and ADDON_CONTRACT_MANAGEMENT in addons,
         "sla_enabled": package == CLIENT_PACKAGE_ENTERPRISE and ADDON_SLA_TRACKING in addons,
     }
+
+
+def _phase15_global_enabled(addon_key: str) -> bool:
+    return addon_key in _global_addons()
+
+
+def _phase15_user_client_id(user: User | None) -> int | None:
+    if not user:
+        return None
+    if user.role == "client_admin":
+        return _client_admin_client_id(user)
+    if isinstance(user.client_id, int) and user.client_id > 0:
+        return int(user.client_id)
+    return None
+
+
+def _billing_feature_enabled(user: User | None) -> bool:
+    if not user or user.role not in ADMIN_ROLES:
+        return False
+    if not _phase15_global_enabled(ADDON_BILLING_ENGINE):
+        return False
+    if user.role == "hr_superadmin":
+        return True
+    client_id = _phase15_user_client_id(user)
+    if client_id:
+        return bool(_phase15_subscription(client_id).get("billing_enabled"))
+    return _is_enterprise(user)
+
+
+def _contract_feature_enabled(user: User | None) -> bool:
+    if not user or user.role not in ADMIN_ROLES:
+        return False
+    if not _phase15_global_enabled(ADDON_CONTRACT_MANAGEMENT):
+        return False
+    if user.role == "hr_superadmin":
+        return True
+    client_id = _phase15_user_client_id(user)
+    if client_id:
+        return bool(_phase15_subscription(client_id).get("contract_enabled"))
+    return _is_enterprise(user)
 
 
 def _get_active_client_contract(client_id: int | None) -> dict | None:
@@ -12716,6 +13366,8 @@ def _payroll_plus_enabled(user: User | None, client_id: int | None = None) -> bo
 
 
 def _advanced_reporting_enabled(user: User | None, client_id: int | None = None) -> bool:
+    if user and user.role in ADMIN_ROLES and ADDON_REPORTING_ADVANCED in _global_addons():
+        return True
     return _client_feature_enabled(user, ADDON_REPORTING_ADVANCED, client_id)
 
 
@@ -12775,14 +13427,48 @@ def _is_enterprise(user: User) -> bool:
     return _normalize_user_tier(user.tier) == "enterprise"
 
 
-def _leave_request_overlaps(employee_email: str, date_from: str, date_to: str) -> bool:
+def _leave_request_overlaps(
+    employee_email: str,
+    date_from: str,
+    date_to: str,
+    assignment_id: int | None = None,
+    employee_user_id: int | None = None,
+) -> bool:
     email_key = (employee_email or "").strip().lower()
-    if not email_key:
+    if not email_key and not employee_user_id:
         return False
     conn = _db_connect()
     try:
         if not _table_exists(conn, "leave_requests"):
             return False
+        if assignment_id:
+            row = conn.execute(
+                """
+                SELECT 1
+                FROM leave_requests
+                WHERE assignment_id = ?
+                  AND status IN ('pending', 'approved')
+                  AND date_from <= ?
+                  AND date_to >= ?
+                LIMIT 1
+                """,
+                (assignment_id, date_to, date_from),
+            ).fetchone()
+            return row is not None
+        if employee_user_id:
+            row = conn.execute(
+                """
+                SELECT 1
+                FROM leave_requests
+                WHERE employee_user_id = ?
+                  AND status IN ('pending', 'approved')
+                  AND date_from <= ?
+                  AND date_to >= ?
+                LIMIT 1
+                """,
+                (employee_user_id, date_to, date_from),
+            ).fetchone()
+            return row is not None
         row = conn.execute(
             """
             SELECT 1
@@ -12842,7 +13528,18 @@ def _approver_scope_emails(user: User | None) -> set[str] | None:
     return emails
 
 
-def _approver_can_handle(user: User | None, employee_email: str) -> bool:
+def _approver_can_handle(user: User | None, employee_email: str = "", record: dict | None = None) -> bool:
+    if not user:
+        return False
+    if user.role == "hr_superadmin":
+        return True
+    if record:
+        client_scope = _approver_client_scope_id(user)
+        if client_scope:
+            return int(_row_get(record, "client_id") or 0) == int(client_scope)
+        site_ids = _get_supervisor_site_ids(user.id)
+        if site_ids:
+            return int(_row_get(record, "site_id") or _row_get(record, "branch_id") or 0) in site_ids
     scope = _approver_scope_emails(user)
     if scope is None:
         return True
@@ -12851,6 +13548,11 @@ def _approver_can_handle(user: User | None, employee_email: str) -> bool:
 
 def _create_leave_request(
     employee_email: str,
+    employee_id: int,
+    employee_user_id: int,
+    assignment_id: int,
+    client_id: int,
+    site_id: int,
     leave_type: str,
     date_from: str,
     date_to: str,
@@ -12858,20 +13560,56 @@ def _create_leave_request(
     attachment: str | None,
     attachment_path: str | None,
 ) -> int:
-    client_id, branch_id = _enterprise_scope_for_employee_email(employee_email)
+    now_ts = _now_ts()
     conn = _db_connect()
     try:
+        conn.execute("BEGIN IMMEDIATE")
+        overlap = conn.execute(
+            """
+            SELECT 1
+            FROM leave_requests
+            WHERE (
+                    (assignment_id = ? AND ? IS NOT NULL)
+                 OR (employee_user_id = ? AND ? IS NOT NULL)
+                 OR lower(employee_email) = ?
+            )
+              AND status IN ('pending', 'approved')
+              AND date_from <= ?
+              AND date_to >= ?
+            LIMIT 1
+            """,
+            (
+                assignment_id,
+                assignment_id,
+                employee_user_id,
+                employee_user_id,
+                (employee_email or "").strip().lower(),
+                date_to,
+                date_from,
+            ),
+        ).fetchone()
+        if overlap:
+            conn.rollback()
+            raise DuplicateSubmissionError("Rentang izin sudah memiliki pengajuan aktif.")
         cur = conn.execute(
             """
             INSERT INTO leave_requests (
-                employee_email, client_id, branch_id, leave_type, date_from, date_to, reason,
+                employee_id, employee_user_id, assignment_id, employee_email,
+                client_id, site_id, client_id_snapshot, site_id_snapshot,
+                branch_id, leave_type, date_from, date_to, reason,
                 attachment, attachment_path, status, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
+                employee_id,
+                employee_user_id,
+                assignment_id,
                 employee_email,
                 client_id,
-                branch_id,
+                site_id,
+                client_id,
+                site_id,
+                site_id,
                 leave_type,
                 date_from,
                 date_to,
@@ -12879,13 +13617,20 @@ def _create_leave_request(
                 attachment,
                 attachment_path,
                 "pending",
-                _now_ts(),
-                _now_ts(),
+                now_ts,
+                now_ts,
             ),
         )
-        return int(cur.lastrowid)
-    finally:
+        request_id = int(cur.lastrowid)
         conn.commit()
+        return request_id
+    except sqlite3.IntegrityError as exc:
+        conn.rollback()
+        raise DuplicateSubmissionError("Rentang izin sudah memiliki pengajuan aktif.") from exc
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
         conn.close()
 
 
@@ -12898,7 +13643,15 @@ def _list_leave_requests_by_email(employee_email: str) -> list[dict]:
             """
             SELECT
                 id,
+                employee_id,
+                employee_user_id,
+                assignment_id,
                 employee_email,
+                client_id,
+                site_id,
+                client_id_snapshot,
+                site_id_snapshot,
+                branch_id,
                 leave_type AS type,
                 date_from,
                 date_to,
@@ -12907,6 +13660,8 @@ def _list_leave_requests_by_email(employee_email: str) -> list[dict]:
                 attachment_path,
                 status,
                 approver_email AS approver,
+                approved_by_id,
+                approved_by_role,
                 approved_at,
                 note,
                 created_at,
@@ -12939,7 +13694,15 @@ def _list_leave_pending(user: User | None = None, limit: int | None = None) -> l
             query = f"""
                 SELECT
                     id,
+                    employee_id,
+                    employee_user_id,
+                    assignment_id,
                     employee_email,
+                    client_id,
+                    site_id,
+                    client_id_snapshot,
+                    site_id_snapshot,
+                    branch_id,
                     leave_type AS type,
                     date_from,
                     date_to,
@@ -12948,6 +13711,8 @@ def _list_leave_pending(user: User | None = None, limit: int | None = None) -> l
                     attachment_path,
                     status,
                     approver_email AS approver,
+                    approved_by_id,
+                    approved_by_role,
                     approved_at,
                     note,
                     created_at,
@@ -12965,7 +13730,15 @@ def _list_leave_pending(user: User | None = None, limit: int | None = None) -> l
             query = """
                 SELECT
                     id,
+                    employee_id,
+                    employee_user_id,
+                    assignment_id,
                     employee_email,
+                    client_id,
+                    site_id,
+                    client_id_snapshot,
+                    site_id_snapshot,
+                    branch_id,
                     leave_type AS type,
                     date_from,
                     date_to,
@@ -12974,6 +13747,8 @@ def _list_leave_pending(user: User | None = None, limit: int | None = None) -> l
                     attachment_path,
                     status,
                     approver_email AS approver,
+                    approved_by_id,
+                    approved_by_role,
                     approved_at,
                     note,
                     created_at,
@@ -13003,7 +13778,15 @@ def _get_leave_request_by_id(request_id: int) -> dict | None:
             """
             SELECT
                 id,
+                employee_id,
+                employee_user_id,
+                assignment_id,
                 employee_email,
+                client_id,
+                site_id,
+                client_id_snapshot,
+                site_id_snapshot,
+                branch_id,
                 leave_type AS type,
                 date_from,
                 date_to,
@@ -13012,6 +13795,8 @@ def _get_leave_request_by_id(request_id: int) -> dict | None:
                 attachment_path,
                 status,
                 approver_email AS approver,
+                approved_by_id,
+                approved_by_role,
                 approved_at,
                 note,
                 created_at,
@@ -13030,19 +13815,21 @@ def _get_leave_request_by_id(request_id: int) -> dict | None:
 def _update_leave_request_status(
     request_id: int,
     status: str,
-    approver_email: str,
+    approver: User,
     note: str | None,
-) -> None:
+) -> bool:
     conn = _db_connect()
     try:
-        conn.execute(
+        cur = conn.execute(
             """
             UPDATE leave_requests
-            SET status = ?, approver_email = ?, approved_at = ?, note = ?, updated_at = ?
-            WHERE id = ?
+            SET status = ?, approver_email = ?, approved_by_id = ?, approved_by_role = ?,
+                approved_at = ?, note = ?, updated_at = ?
+            WHERE id = ? AND status = 'pending'
             """,
-            (status, approver_email, _now_ts(), note, _now_ts(), request_id),
+            (status, approver.email, approver.id, approver.role, _now_ts(), note, _now_ts(), request_id),
         )
+        return cur.rowcount == 1
     finally:
         conn.commit()
         conn.close()
@@ -13092,6 +13879,7 @@ def _assignment_for_employee_date_with_conn(
                 s.client_id,
                 s.name AS site_name,
                 sh.start_time AS shift_start_time,
+                sh.end_time AS shift_end_time,
                 sh.grace_minutes AS shift_grace_minutes
             FROM assignments a
             JOIN users u ON u.id = a.employee_user_id
@@ -13134,6 +13922,7 @@ def _assignment_for_employee_date_with_conn(
                     "start_date": date_key,
                     "end_date": None,
                     "shift_start_time": None,
+                    "shift_end_time": None,
                     "shift_grace_minutes": None,
                 }
             )
@@ -14032,6 +14821,372 @@ def _generate_summary_report(start_date: str, end_date: str, client_id: int | No
         "attendance_rate": (total_checkins / expected_attendance * 100) if expected_attendance > 0 else 0,
         "late_rate": (total_late / total_checkins * 100) if total_checkins > 0 else 0,
     }
+
+
+def _advanced_report_filters_from_request(user: User) -> tuple[dict | None, tuple]:
+    filters, error_response = _report_filters_from_request()
+    if error_response:
+        return None, error_response
+    client_scope = get_current_client_scope(user)
+    if client_scope:
+        filters["client_id"] = client_scope
+    if filters.get("site_id"):
+        site = _get_site_by_id(filters["site_id"])
+        if not site:
+            return None, (jsonify(ok=False, message="site_id tidak terdaftar."), 400)
+        if client_scope and int(_row_get(site, "client_id") or 0) != int(client_scope):
+            return None, (_json_forbidden(), 403)
+        filters["client_id"] = int(_row_get(site, "client_id") or 0) or filters.get("client_id")
+    return filters, ()
+
+
+def _advanced_reporting_required_response(user: User, client_id: int | None = None):
+    if not user or user.role not in ADMIN_ROLES or not _is_pro(user):
+        return _json_forbidden()
+    if not _advanced_reporting_enabled(user, client_id):
+        return _addon_required_response("Advanced reporting")
+    return None
+
+
+def get_attendance_by_range(
+    start: str,
+    end: str,
+    client_id: int | None = None,
+    site_id: int | None = None,
+    employee_id: int | None = None,
+) -> list[dict]:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "attendance"):
+            return []
+        rows = conn.execute(
+            """
+            SELECT
+                a.*,
+                lower(a.employee_email) AS employee_email_norm,
+                COALESCE(e.name, u.name, a.employee_name, a.employee_email) AS employee_name,
+                COALESCE(a.site_id, a.branch_id, e.site_id, e.branch_id) AS resolved_site_id,
+                COALESCE(a.client_id, e.client_id, s.client_id) AS resolved_client_id,
+                COALESCE(s.name, assign_site.name) AS site_name,
+                COALESCE(c.name, assign_client.name) AS client_name,
+                u.id AS user_id
+            FROM attendance a
+            LEFT JOIN employees e ON lower(e.email) = lower(a.employee_email)
+            LEFT JOIN users u ON lower(u.email) = lower(a.employee_email)
+            LEFT JOIN sites s ON s.id = COALESCE(a.site_id, a.branch_id, e.site_id, e.branch_id)
+            LEFT JOIN clients c ON c.id = COALESCE(a.client_id, e.client_id, s.client_id)
+            LEFT JOIN assignments assign ON assign.id = a.assignment_id
+            LEFT JOIN sites assign_site ON assign_site.id = assign.site_id
+            LEFT JOIN clients assign_client ON assign_client.id = assign.client_id
+            WHERE a.date >= ? AND a.date <= ?
+            ORDER BY a.date ASC, a.employee_email ASC, a.created_at ASC, a.time ASC
+            """,
+            (start, end),
+        ).fetchall()
+        result: list[dict] = []
+        for row in rows:
+            item = dict(row)
+            email = item.get("employee_email_norm") or (item.get("employee_email") or "").strip().lower()
+            date_key = item.get("date")
+            assignment = _assignment_for_employee_date_with_conn(conn, email, date_key)
+            resolved_client_id = int(item.get("resolved_client_id") or (assignment or {}).get("client_id") or 0)
+            resolved_site_id = int(item.get("resolved_site_id") or (assignment or {}).get("site_id") or 0)
+            if client_id and resolved_client_id != int(client_id):
+                continue
+            if site_id and resolved_site_id != int(site_id):
+                continue
+            if employee_id and int(item.get("user_id") or 0) != int(employee_id):
+                continue
+            action = _normalize_attendance_action(item.get("action"))
+            minutes = _extract_minutes(item.get("time"), item.get("created_at"))
+            late_minutes = calculate_late(minutes, assignment) if action == ATTENDANCE_ACTION_CHECKIN else 0
+            item.update(
+                {
+                    "employee_email": email,
+                    "employee_name": item.get("employee_name") or email,
+                    "client_id": resolved_client_id or None,
+                    "site_id": resolved_site_id or None,
+                    "client_name": item.get("client_name") or item.get("assign_client.name") or "-",
+                    "site_name": item.get("site_name") or (assignment or {}).get("site_name") or "-",
+                    "action": action,
+                    "minutes": minutes,
+                    "late_minutes": late_minutes,
+                    "late_flag": bool(item.get("late_flag")) or late_minutes > 0,
+                    "early_checkout_flag": bool(item.get("early_checkout_flag")),
+                    "inside_radius_flag": bool(item.get("inside_radius_flag")),
+                    "near_radius_flag": bool(item.get("near_radius_flag")),
+                    "suspicious_location_flag": bool(item.get("suspicious_location_flag")),
+                }
+            )
+            result.append(item)
+        return result
+    finally:
+        conn.close()
+
+
+def group_by_employee(data: list[dict]) -> dict[str, dict]:
+    grouped: dict[str, dict] = {}
+    for row in data:
+        email = (row.get("employee_email") or "").strip().lower()
+        if not email:
+            continue
+        item = grouped.setdefault(
+            email,
+            {
+                "employee_email": email,
+                "employee_name": row.get("employee_name") or email,
+                "client_name": row.get("client_name") or "-",
+                "site_name": row.get("site_name") or "-",
+                "checkins": 0,
+                "late_count": 0,
+                "early_checkout_count": 0,
+                "inside_radius_count": 0,
+                "suspicious_location_count": 0,
+                "checkin_minutes_total": 0,
+                "checkin_minutes_count": 0,
+            },
+        )
+        if row.get("action") == ATTENDANCE_ACTION_CHECKIN:
+            item["checkins"] += 1
+            item["late_count"] += 1 if row.get("late_flag") else 0
+            item["inside_radius_count"] += 1 if row.get("inside_radius_flag") else 0
+            item["suspicious_location_count"] += 1 if row.get("suspicious_location_flag") else 0
+            if row.get("minutes") is not None:
+                item["checkin_minutes_total"] += int(row.get("minutes") or 0)
+                item["checkin_minutes_count"] += 1
+        if row.get("action") == ATTENDANCE_ACTION_CHECKOUT and row.get("early_checkout_flag"):
+            item["early_checkout_count"] += 1
+    return grouped
+
+
+def group_by_client(data: list[dict]) -> dict[int, dict]:
+    grouped: dict[int, dict] = {}
+    for row in data:
+        client_id = int(row.get("client_id") or 0)
+        if not client_id:
+            continue
+        item = grouped.setdefault(
+            client_id,
+            {
+                "client_id": client_id,
+                "client_name": row.get("client_name") or "-",
+                "checkins": 0,
+                "employees": set(),
+                "late_count": 0,
+                "suspicious_location_count": 0,
+            },
+        )
+        if row.get("action") == ATTENDANCE_ACTION_CHECKIN:
+            item["checkins"] += 1
+            item["employees"].add(row.get("employee_email"))
+            item["late_count"] += 1 if row.get("late_flag") else 0
+            item["suspicious_location_count"] += 1 if row.get("suspicious_location_flag") else 0
+    return grouped
+
+
+def _minutes_label(minutes: int | None) -> str:
+    if minutes is None:
+        return "-"
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
+
+
+def _advanced_attendance_summary(filters: dict) -> dict:
+    rows = get_attendance_by_range(**_advanced_filter_args(filters))
+    checkins = [row for row in rows if row.get("action") == ATTENDANCE_ACTION_CHECKIN]
+    checkouts = [row for row in rows if row.get("action") == ATTENDANCE_ACTION_CHECKOUT]
+    by_day: dict[str, dict] = {}
+    for row in checkins:
+        item = by_day.setdefault(row["date"], {"date": row["date"], "present": 0, "late": 0})
+        item["present"] += 1
+        item["late"] += 1 if row.get("late_flag") else 0
+    return {
+        "period": f"{filters['start_date']} to {filters['end_date']}",
+        "total_checkins": len(checkins),
+        "total_checkouts": len(checkouts),
+        "late_count": sum(1 for row in checkins if row.get("late_flag")),
+        "early_checkout_count": sum(1 for row in checkouts if row.get("early_checkout_flag")),
+        "inside_radius_count": sum(1 for row in checkins if row.get("inside_radius_flag")),
+        "suspicious_location_count": sum(1 for row in checkins if row.get("suspicious_location_flag")),
+        "daily": sorted(by_day.values(), key=lambda row: row["date"]),
+    }
+
+
+def _advanced_filter_args(filters: dict) -> dict:
+    return {
+        "start": filters["start_date"],
+        "end": filters["end_date"],
+        "client_id": filters.get("client_id"),
+        "site_id": filters.get("site_id"),
+        "employee_id": filters.get("employee_id"),
+    }
+
+
+def _advanced_attendance_by_client(filters: dict) -> list[dict]:
+    grouped = group_by_client(get_attendance_by_range(**_advanced_filter_args(filters)))
+    rows = []
+    for item in grouped.values():
+        checkins = int(item["checkins"] or 0)
+        rows.append(
+            {
+                "client_id": item["client_id"],
+                "client_name": item["client_name"],
+                "present": checkins,
+                "unique_employees": len([email for email in item["employees"] if email]),
+                "late_count": item["late_count"],
+                "late_rate": _ai_rate(item["late_count"], checkins),
+                "suspicious_location_count": item["suspicious_location_count"],
+            }
+        )
+    return sorted(rows, key=lambda row: (-row["present"], row["client_name"]))
+
+
+def _advanced_attendance_by_employee(filters: dict) -> list[dict]:
+    grouped = group_by_employee(get_attendance_by_range(**_advanced_filter_args(filters)))
+    rows = []
+    for item in grouped.values():
+        avg_minutes = None
+        if item["checkin_minutes_count"]:
+            avg_minutes = round(item["checkin_minutes_total"] / item["checkin_minutes_count"])
+        rows.append(
+            {
+                "employee_email": item["employee_email"],
+                "employee_name": item["employee_name"],
+                "client_name": item["client_name"],
+                "site_name": item["site_name"],
+                "present": item["checkins"],
+                "late_count": item["late_count"],
+                "late_rate": _ai_rate(item["late_count"], item["checkins"]),
+                "early_checkout_count": item["early_checkout_count"],
+                "avg_checkin_time": _minutes_label(avg_minutes),
+                "suspicious_location_count": item["suspicious_location_count"],
+            }
+        )
+    return sorted(rows, key=lambda row: (-row["present"], row["employee_name"]))
+
+
+def _advanced_attendance_ranking(filters: dict) -> dict:
+    employees = _advanced_attendance_by_employee(filters)
+    top_performer = sorted(employees, key=lambda row: (row["late_count"], -row["present"], row["employee_name"]))[:10]
+    most_late = sorted(employees, key=lambda row: (-row["late_count"], row["employee_name"]))[:10]
+    return {"top_performer": top_performer, "most_late": most_late}
+
+
+def _advanced_leave_rows(filters: dict) -> list[dict]:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "leave_requests"):
+            return []
+        clauses = ["lr.date_from <= ?", "lr.date_to >= ?", "lr.status != 'rejected'"]
+        params: list = [filters["end_date"], filters["start_date"]]
+        if filters.get("client_id"):
+            clauses.append("COALESCE(lr.client_id_snapshot, lr.client_id) = ?")
+            params.append(filters["client_id"])
+        if filters.get("site_id"):
+            clauses.append("COALESCE(lr.site_id_snapshot, lr.site_id, lr.branch_id) = ?")
+            params.append(filters["site_id"])
+        if filters.get("employee_id"):
+            clauses.append("lr.employee_user_id = ?")
+            params.append(filters["employee_id"])
+        return [
+            dict(row)
+            for row in conn.execute(
+                f"""
+                SELECT lr.*, COALESCE(e.name, u.name, lr.employee_email) AS employee_name,
+                       c.name AS client_name, s.name AS site_name
+                FROM leave_requests lr
+                LEFT JOIN employees e ON e.id = lr.employee_id
+                LEFT JOIN users u ON u.id = lr.employee_user_id
+                LEFT JOIN clients c ON c.id = COALESCE(lr.client_id_snapshot, lr.client_id)
+                LEFT JOIN sites s ON s.id = COALESCE(lr.site_id_snapshot, lr.site_id, lr.branch_id)
+                WHERE {' AND '.join(clauses)}
+                ORDER BY lr.date_from ASC, employee_name ASC
+                """,
+                params,
+            ).fetchall()
+        ]
+    finally:
+        conn.close()
+
+
+def _advanced_leave_pattern(filters: dict) -> dict:
+    rows = _advanced_leave_rows(filters)
+    by_type: dict[str, int] = {}
+    by_employee: dict[str, dict] = {}
+    by_weekday = {name: 0 for name in ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]}
+    total_days = 0
+    for row in rows:
+        leave_type = row.get("leave_type") or row.get("type") or "-"
+        by_type[leave_type] = by_type.get(leave_type, 0) + 1
+        start_dt = _date_from_input(row.get("date_from"))
+        end_dt = _date_from_input(row.get("date_to")) or start_dt
+        duration = 1
+        if start_dt and end_dt:
+            duration = max(1, (end_dt - start_dt).days + 1)
+            for date_key in _date_keys_between(start_dt, end_dt):
+                weekday = datetime.strptime(date_key, "%Y-%m-%d").strftime("%A")
+                by_weekday[weekday] = by_weekday.get(weekday, 0) + 1
+        total_days += duration
+        email = (row.get("employee_email") or "").strip().lower()
+        employee = by_employee.setdefault(email, {"employee_email": email, "employee_name": row.get("employee_name") or email, "leave_count": 0, "leave_days": 0})
+        employee["leave_count"] += 1
+        employee["leave_days"] += duration
+    return {
+        "total_leave": len(rows),
+        "average_duration": round(total_days / len(rows), 2) if rows else 0,
+        "by_type": [{"type": key, "total": value} for key, value in sorted(by_type.items())],
+        "by_weekday": [{"weekday": key, "total": value} for key, value in by_weekday.items()],
+        "frequent_leave": sorted(by_employee.values(), key=lambda row: (-row["leave_count"], row["employee_name"]))[:10],
+    }
+
+
+def _advanced_geo_heatmap(filters: dict) -> list[dict]:
+    rows = get_attendance_by_range(**_advanced_filter_args(filters))
+    points: dict[tuple[float, float], dict] = {}
+    for row in rows:
+        if row.get("lat") is None or row.get("lng") is None:
+            continue
+        lat_key = round(float(row["lat"]), 5)
+        lng_key = round(float(row["lng"]), 5)
+        item = points.setdefault(
+            (lat_key, lng_key),
+            {
+                "lat": lat_key,
+                "lng": lng_key,
+                "count": 0,
+                "client_name": row.get("client_name") or "-",
+                "site_name": row.get("site_name") or "-",
+                "inside_radius_count": 0,
+                "near_radius_count": 0,
+                "suspicious_count": 0,
+            },
+        )
+        item["count"] += 1
+        item["inside_radius_count"] += 1 if row.get("inside_radius_flag") else 0
+        item["near_radius_count"] += 1 if row.get("near_radius_flag") else 0
+        item["suspicious_count"] += 1 if row.get("suspicious_location_flag") else 0
+    return sorted(points.values(), key=lambda row: (-row["count"], -row["suspicious_count"]))[:300]
+
+
+def _advanced_geo_anomaly(filters: dict) -> list[dict]:
+    rows = get_attendance_by_range(**_advanced_filter_args(filters))
+    anomalies = []
+    for row in rows:
+        if row.get("suspicious_location_flag") or row.get("near_radius_flag"):
+            anomalies.append(
+                {
+                    "date": row.get("date"),
+                    "employee_email": row.get("employee_email"),
+                    "employee_name": row.get("employee_name"),
+                    "client_name": row.get("client_name"),
+                    "site_name": row.get("site_name"),
+                    "action": row.get("action"),
+                    "lat": row.get("lat"),
+                    "lng": row.get("lng"),
+                    "gps_distance_m": row.get("gps_distance_m"),
+                    "reason": "borderline_radius" if row.get("near_radius_flag") and not row.get("suspicious_location_flag") else "outside_radius",
+                }
+            )
+    return anomalies[:300]
 
 
 def _report_filters_from_request() -> tuple[dict | None, tuple]:
@@ -15925,17 +17080,18 @@ def _employee_conflict(
         conn.close()
 
 
-def _reject_manual_request(request_id: int, reviewer: User, note: str) -> None:
+def _reject_manual_request(request_id: int, reviewer: User, note: str) -> bool:
     conn = _db_connect()
     try:
-        conn.execute(
+        cur = conn.execute(
             """
             UPDATE manual_attendance_requests
             SET status = ?, reviewed_by_user_id = ?, reviewed_at = ?, review_note = ?
-            WHERE id = ?
+            WHERE id = ? AND status = 'PENDING'
             """,
             ("REJECTED", reviewer.email, _now_ts(), note, request_id),
         )
+        return cur.rowcount == 1
     finally:
         conn.commit()
         conn.close()
@@ -16044,6 +17200,12 @@ def _create_attendance_record(
     device_time: str | None,
     source: str,
     selfie_path: str | None = None,
+    assignment: dict | None = None,
+    site: dict | None = None,
+    policy: dict | None = None,
+    accuracy: str | None = None,
+    lat: float | None = None,
+    lng: float | None = None,
 ) -> dict:
     # Gunakan tanggal hari ini untuk field 'date', namun gunakan SERVER time sebagai authoritative 'time'.
     # Simpan device_time dan accuracy sebagai raw metadata untuk audit.
@@ -16056,8 +17218,19 @@ def _create_attendance_record(
     date_value = _today_key()
     employee_id = employee.get("id") if employee else None
     employee_name = employee.get("name") if employee else None
-    client_id, branch_id = _enterprise_scope_for_employee_email(employee_email)
+    assignment_id = int(_row_get(assignment, "id") or 0) if assignment else None
+    site_id = int(_row_get(site, "id") or _row_get(assignment, "site_id") or 0) if (site or assignment) else None
+    client_id = int(_row_get(site, "client_id") or _row_get(assignment, "client_id") or 0) if (site or assignment) else None
+    if not client_id:
+        client_id, branch_id = _enterprise_scope_for_employee_email(employee_email)
+    else:
+        branch_id = site_id
+    policy_snapshot = json.dumps(policy or {}, ensure_ascii=True, sort_keys=True)
     created_at = _now_ts()
+    action_minutes = _extract_minutes(time_value, created_at)
+    late_flag = action == ATTENDANCE_ACTION_CHECKIN and calculate_late(action_minutes, assignment) > 0
+    early_checkout_flag = action == ATTENDANCE_ACTION_CHECKOUT and _early_checkout_flag(action_minutes, assignment)
+    location_metrics = _site_location_metrics(lat, lng, site)
     print(f"[API] INSERT attendance: email={employee_email}, date={date_value}, time={time_value}, action={action}, method={method}, device_time={device_time}, source={source}, selfie_path={selfie_path}, created_at={created_at}")
     conn = _db_connect()
     try:
@@ -16066,7 +17239,9 @@ def _create_attendance_record(
             INSERT INTO attendance (
                 employee_id, client_id, branch_id, employee_name, employee_email,
                 date, time, action, method, selfie_path, source, device_time, accuracy, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                , assignment_id, site_id, policy_snapshot, lat, lng, gps_distance_m,
+                late_flag, early_checkout_flag, inside_radius_flag, near_radius_flag, suspicious_location_flag
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 employee_id,
@@ -16081,8 +17256,19 @@ def _create_attendance_record(
                 selfie_path,
                 source,
                 device_time_raw,
-                "",
+                accuracy or "",
                 created_at,
+                assignment_id,
+                site_id,
+                policy_snapshot,
+                lat,
+                lng,
+                location_metrics["distance_m"],
+                1 if late_flag else 0,
+                1 if early_checkout_flag else 0,
+                1 if location_metrics["inside_radius"] else 0,
+                1 if location_metrics["near_radius"] else 0,
+                1 if location_metrics["suspicious"] else 0,
             ),
         )
         record_id = int(cur.lastrowid)
@@ -16097,6 +17283,12 @@ def _create_attendance_record(
         "date": date_value,
         "time": time_value,
         "created_at": created_at,
+        "assignment_id": assignment_id,
+        "site_id": site_id,
+        "client_id": client_id,
+        "late_flag": late_flag,
+        "early_checkout_flag": early_checkout_flag,
+        "inside_radius_flag": location_metrics["inside_radius"],
     }
 
 
@@ -16226,6 +17418,33 @@ def _within_site_radius(lat: float, lng: float, site: sqlite3.Row | dict | None)
     a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
     return (r * c) <= radius_m
+
+
+def _site_location_metrics(lat: float | None, lng: float | None, site: sqlite3.Row | dict | None) -> dict:
+    if lat is None or lng is None:
+        return {"distance_m": None, "inside_radius": False, "near_radius": False, "suspicious": False}
+    if not site:
+        inside = _within_radius(lat, lng)
+        return {"distance_m": None, "inside_radius": inside, "near_radius": False, "suspicious": not inside}
+    center_lat = _row_get(site, "latitude")
+    center_lng = _row_get(site, "longitude")
+    radius_m = _row_get(site, "radius_meters")
+    if center_lat is None or center_lng is None or radius_m is None:
+        inside = _within_radius(lat, lng)
+        return {"distance_m": None, "inside_radius": inside, "near_radius": False, "suspicious": not inside}
+    try:
+        radius_value = float(radius_m)
+        distance = _distance_meters(float(lat), float(lng), float(center_lat), float(center_lng))
+    except (TypeError, ValueError):
+        return {"distance_m": None, "inside_radius": False, "near_radius": False, "suspicious": True}
+    inside = distance <= radius_value
+    near = radius_value * 0.8 <= distance <= radius_value * 1.1
+    return {
+        "distance_m": round(distance, 2),
+        "inside_radius": inside,
+        "near_radius": near,
+        "suspicious": not inside,
+    }
 
 
 def _parse_db_timestamp(value: str | None) -> datetime | None:
@@ -16500,6 +17719,27 @@ def _normalize_patrol_ops_status(value: object) -> str:
     return normalized if normalized in {"open", "reviewed", "resolved"} else ""
 
 
+def _patrol_report_status_from_event(status: str) -> str:
+    return {
+        "open": "submitted",
+        "reviewed": "reviewed",
+        "resolved": "closed",
+    }.get((status or "").strip().lower(), "submitted")
+
+
+def _patrol_ops_status_transition_allowed(current: str, target: str) -> bool:
+    current = (current or "open").strip().lower()
+    target = (target or "").strip().lower()
+    if current == target:
+        return True
+    allowed = {
+        "open": {"reviewed", "resolved"},
+        "reviewed": {"resolved"},
+        "resolved": set(),
+    }
+    return target in allowed.get(current, set())
+
+
 def _parse_patrol_ops_checklist(value: object) -> list[str]:
     if value is None:
         return []
@@ -16536,8 +17776,37 @@ def _insert_patrol_ops_event(
     site: dict,
 ) -> int:
     now_ts = _now_ts()
+    since_ts = (datetime.now() - timedelta(seconds=60)).strftime("%Y-%m-%d %H:%M:%S")
     conn = _db_connect()
     try:
+        conn.execute("BEGIN IMMEDIATE")
+        duplicate = conn.execute(
+            """
+            SELECT id
+            FROM patrol_operational_events
+            WHERE assignment_id = ?
+              AND employee_user_id = ?
+              AND site_id = ?
+              AND category = ?
+              AND COALESCE(event_type, '') = COALESCE(?, '')
+              AND COALESCE(note, '') = COALESCE(?, '')
+              AND created_at >= ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (
+                _row_get(assignment, "id"),
+                user.id,
+                _row_get(site, "id"),
+                category,
+                event_type,
+                note,
+                since_ts,
+            ),
+        ).fetchone()
+        if duplicate:
+            conn.rollback()
+            raise DuplicateSubmissionError("Aktivitas patroli duplikat terdeteksi.")
         cur = conn.execute(
             """
             INSERT INTO patrol_operational_events (
@@ -16573,12 +17842,92 @@ def _insert_patrol_ops_event(
         event_id = int(cur.lastrowid)
         conn.commit()
         return event_id
+    except sqlite3.IntegrityError as exc:
+        conn.rollback()
+        raise DuplicateSubmissionError("Aktivitas patroli duplikat terdeteksi.") from exc
+    except Exception:
+        conn.rollback()
+        raise
     finally:
+        conn.close()
+
+
+def _create_patrol_report_from_event(
+    *,
+    event_id: int,
+    user: User,
+    employee: dict,
+    assignment: dict,
+    site: dict,
+    category: str,
+    severity: str,
+    note: str,
+    photo_path: str,
+) -> int:
+    report_time = _now_ts()
+    report_type = "incident" if category == "incident" else "note"
+    priority = "critical" if severity == "critical" else ("medium" if severity in {"medium", "high"} else "low")
+    conn = _db_connect()
+    try:
+        cur = conn.execute(
+            """
+            INSERT INTO patrol_reports (
+                source_event_id, employee_id, employee_user_id, assignment_id,
+                site_id, client_id, report_time, type, priority, description,
+                attachment_path, status, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'submitted', ?, ?)
+            """,
+            (
+                event_id,
+                int(_row_get(employee, "id") or 0),
+                user.id,
+                int(_row_get(assignment, "id") or 0),
+                int(_row_get(site, "id") or 0),
+                int(_row_get(site, "client_id") or 0),
+                report_time,
+                report_type,
+                priority,
+                note or category,
+                photo_path or None,
+                report_time,
+                report_time,
+            ),
+        )
+        return int(cur.lastrowid or 0)
+    finally:
+        conn.commit()
+        conn.close()
+
+
+def _sync_patrol_report_status_from_event(event_id: int, event_status: str, reviewer: User) -> None:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "patrol_reports"):
+            return
+        conn.execute(
+            """
+            UPDATE patrol_reports
+            SET status = ?, reviewed_by_user_id = ?, reviewed_by_role = ?,
+                reviewed_at = ?, updated_at = ?
+            WHERE source_event_id = ?
+            """,
+            (
+                _patrol_report_status_from_event(event_status),
+                reviewer.id,
+                reviewer.role,
+                _now_ts(),
+                _now_ts(),
+                event_id,
+            ),
+        )
+    finally:
+        conn.commit()
         conn.close()
 
 
 def _patrol_ops_events(
     *,
+    client_id: int | None = None,
     site_id: int | None = None,
     employee_email: str | None = None,
     date_from: str | None = None,
@@ -16592,6 +17941,9 @@ def _patrol_ops_events(
             return []
         clauses: list[str] = []
         params: list = []
+        if client_id:
+            clauses.append("e.client_id = ?")
+            params.append(client_id)
         if site_id:
             clauses.append("e.site_id = ?")
             params.append(site_id)
@@ -16645,19 +17997,56 @@ def _patrol_ops_event_by_id(event_id: int) -> dict | None:
         conn.close()
 
 
-def _update_patrol_ops_event_status(event_id: int, status: str, supervisor_note: str, user: User) -> None:
+def _update_patrol_ops_event_status(
+    event_id: int,
+    status: str,
+    supervisor_note: str,
+    user: User,
+    expected_status: str | None = None,
+) -> bool:
     conn = _db_connect()
     try:
-        conn.execute(
+        conn.execute("BEGIN IMMEDIATE")
+        params: list = [status, supervisor_note, user.id, user.email, _now_ts(), _now_ts(), event_id]
+        status_guard = ""
+        if expected_status:
+            status_guard = " AND status = ?"
+            params.append(expected_status)
+        cur = conn.execute(
             """
             UPDATE patrol_operational_events
             SET status = ?, supervisor_note = ?, reviewed_by_user_id = ?,
                 reviewed_by_email = ?, reviewed_at = ?, updated_at = ?
             WHERE id = ?
-            """,
-            (status, supervisor_note, user.id, user.email, _now_ts(), _now_ts(), event_id),
+            """ + status_guard,
+            tuple(params),
         )
+        if cur.rowcount != 1:
+            conn.rollback()
+            return False
+        if _table_exists(conn, "patrol_reports"):
+            now_ts = _now_ts()
+            conn.execute(
+                """
+                UPDATE patrol_reports
+                SET status = ?, reviewed_by_user_id = ?, reviewed_by_role = ?,
+                    reviewed_at = ?, updated_at = ?
+                WHERE source_event_id = ?
+                """,
+                (
+                    _patrol_report_status_from_event(status),
+                    user.id,
+                    user.role,
+                    now_ts,
+                    now_ts,
+                    event_id,
+                ),
+            )
         conn.commit()
+        return True
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 
@@ -16989,7 +18378,69 @@ def _create_patrol_tour(
     finally:
         conn.commit()
         conn.close()
+    _sync_patrol_session_from_tour(tour_id)
     return _patrol_tour_by_id(tour_id) or {"id": tour_id}
+
+
+def _patrol_completion_percent(completed_checkpoints: int | None, total_checkpoints: int | None) -> float:
+    total = int(total_checkpoints or 0)
+    completed = int(completed_checkpoints or 0)
+    if total <= 0:
+        return 0.0
+    return round(max(0, min(completed, total)) * 100 / total, 2)
+
+
+def _sync_patrol_session_from_tour(tour_id: int) -> None:
+    tour = _patrol_tour_by_id(tour_id)
+    if not tour:
+        return
+    employee_id = int(_row_get(tour, "employee_id") or 0)
+    assignment_id = int(_row_get(tour, "assignment_id") or 0)
+    site_id = int(_row_get(tour, "site_id") or 0)
+    if not employee_id or not assignment_id or not site_id:
+        return
+    percent = _patrol_completion_percent(
+        int(_row_get(tour, "completed_checkpoints") or 0),
+        int(_row_get(tour, "total_checkpoints") or 0),
+    )
+    conn = _db_connect()
+    try:
+        conn.execute(
+            """
+            INSERT INTO patrol_sessions (
+                id, employee_id, employee_user_id, assignment_id, site_id, client_id,
+                start_time, end_time, status, completion_percent, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                employee_id = excluded.employee_id,
+                employee_user_id = excluded.employee_user_id,
+                assignment_id = excluded.assignment_id,
+                site_id = excluded.site_id,
+                client_id = excluded.client_id,
+                start_time = excluded.start_time,
+                end_time = excluded.end_time,
+                status = excluded.status,
+                completion_percent = excluded.completion_percent,
+                updated_at = excluded.updated_at
+            """,
+            (
+                int(_row_get(tour, "id") or tour_id),
+                employee_id,
+                int(_row_get(tour, "employee_user_id") or 0) or None,
+                assignment_id,
+                site_id,
+                int(_row_get(tour, "client_id") or 0) or None,
+                _row_get(tour, "started_at"),
+                _row_get(tour, "ended_at"),
+                _row_get(tour, "status") or PATROL_STATUS_ONGOING,
+                percent,
+                _row_get(tour, "created_at") or _now_ts(),
+                _now_ts(),
+            ),
+        )
+    finally:
+        conn.commit()
+        conn.close()
 
 
 def _append_patrol_invalid_reason(existing_json: str | None, reason: str) -> str:
@@ -17014,17 +18465,24 @@ def _update_patrol_tour_state(
     completed_checkpoints: int | None = None,
     ended_at: str | None = None,
     append_reason: str | None = None,
-) -> None:
+) -> bool:
+    updated = False
     conn = _db_connect()
     try:
         if not _table_exists(conn, "patrol_tours"):
-            return
+            return False
+        conn.execute("BEGIN IMMEDIATE")
         row = conn.execute(
-            "SELECT id, invalid_reasons_json FROM patrol_tours WHERE id = ?",
+            "SELECT id, status, invalid_reasons_json FROM patrol_tours WHERE id = ?",
             (tour_id,),
         ).fetchone()
         if not row:
-            return
+            conn.rollback()
+            return False
+        current_status = (_row_get(row, "status") or "").lower()
+        if current_status in {PATROL_STATUS_COMPLETED, PATROL_STATUS_INVALID, PATROL_STATUS_INCOMPLETE}:
+            conn.rollback()
+            return False
         updates: list[str] = []
         params: list = []
         if status:
@@ -17043,13 +18501,20 @@ def _update_patrol_tour_state(
         updates.append("updated_at = ?")
         params.append(_now_ts())
         params.append(tour_id)
-        conn.execute(
+        cur = conn.execute(
             f"UPDATE patrol_tours SET {', '.join(updates)} WHERE id = ?",
             tuple(params),
         )
-    finally:
+        updated = cur.rowcount == 1
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
         conn.close()
+    if updated:
+        _sync_patrol_session_from_tour(tour_id)
+    return updated
 
 
 def _insert_patrol_scan(
@@ -17076,6 +18541,7 @@ def _insert_patrol_scan(
     validation_note: str | None,
 ) -> int:
     conn = _db_connect()
+    scan_id = 0
     try:
         if not _table_exists(conn, "patrol_scans"):
             return 0
@@ -17115,7 +18581,51 @@ def _insert_patrol_scan(
                 _now_ts(),
             ),
         )
-        return int(cur.lastrowid)
+        scan_id = int(cur.lastrowid)
+    except sqlite3.IntegrityError:
+        conn.rollback()
+        raise
+    finally:
+        if scan_id:
+            conn.commit()
+        conn.close()
+    _insert_patrol_log_from_scan(
+        source_scan_id=scan_id,
+        session_id=tour_id,
+        checkpoint_id=checkpoint_id,
+        scanned_at=timestamp_value,
+        lat=lat,
+        lon=lng,
+        validation_status=validation_status,
+        is_expected_sequence=is_expected_sequence,
+    )
+    return scan_id
+
+
+def _insert_patrol_log_from_scan(
+    *,
+    source_scan_id: int,
+    session_id: int,
+    checkpoint_id: int | None,
+    scanned_at: str,
+    lat: float | None,
+    lon: float | None,
+    validation_status: str,
+    is_expected_sequence: bool,
+) -> None:
+    status = "valid" if validation_status == PATROL_SCAN_VALID and is_expected_sequence else "invalid"
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "patrol_logs"):
+            return
+        conn.execute(
+            """
+            INSERT INTO patrol_logs (
+                source_scan_id, session_id, checkpoint_id, scanned_at, lat, lon, status, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (source_scan_id, session_id, checkpoint_id, scanned_at, lat, lon, status, _now_ts()),
+        )
     finally:
         conn.commit()
         conn.close()
@@ -19607,9 +21117,6 @@ def admin_bp() -> Blueprint:
         employee_email = employee.get("email") or ""
         user_row = _get_user_by_email(employee_email)
         employee_user_id = int(_row_get(user_row, "id") or 0) if user_row else 0
-        deleted_assignments = 0
-        if employee_user_id:
-            deleted_assignments = _delete_assignments_for_employee(employee_user_id)
         _delete_employee(employee_id)
         _log_audit_event(
             entity_type="employee",
@@ -19619,10 +21126,10 @@ def admin_bp() -> Blueprint:
             summary=f"Pegawai {employee_email} dihapus dari admin.",
             details={
                 "email": employee_email,
-                "assignments_deleted": deleted_assignments,
+                "soft_deleted": True,
             },
         )
-        flash("Pegawai berhasil dihapus.")
+        flash("Pegawai dinonaktifkan.")
         return redirect(url_for("admin.employees"))
 
     @bp.route("/attendance", methods=["GET"])
@@ -19748,7 +21255,7 @@ def admin_bp() -> Blueprint:
         return render_template(
             "dashboard/admin_reports.html",
             user=user,
-            advanced_reporting_enabled=True,
+            advanced_reporting_enabled=_advanced_reporting_enabled(user),
             clients=_clients(),
             sites=_list_sites(),
             employees=_list_employee_users(),
@@ -19817,24 +21324,35 @@ def admin_bp() -> Blueprint:
         Requires Enterprise package with Billing Engine add-on.
         """
         user = _current_user()
-        if not _is_enterprise(user):
+        if not _billing_feature_enabled(user):
             return render_template(
                 "dashboard/upgrade_prompt.html",
                 user=user,
                 feature="Billing",
-                message="Billing hanya tersedia untuk paket Enterprise dengan add-on Billing Engine.",
+                message="Aktifkan Billing Engine di owner credential, lalu set client ke Enterprise di Settings -> Subscription.",
             )
-        subscription = _phase15_subscription(_client_admin_client_id(user))
-        if not subscription.get("billing_enabled"):
-            return render_template(
-                "dashboard/upgrade_prompt.html",
-                user=user,
-                feature="Billing",
-                message="Aktifkan add-on Billing Engine di Settings → Subscription.",
+        period = (request.args.get("period") or _today_key()[:7]).strip()
+        client_scope = _phase15_user_client_id(user)
+        clients = [_get_client_by_id(client_scope)] if client_scope else _clients()
+        rows = []
+        for client in clients:
+            if not client:
+                continue
+            client_id = int(client["id"])
+            rows.append(
+                {
+                    "client": client,
+                    "subscription": _phase15_subscription(client_id),
+                    "active_contract": _get_active_client_contract(client_id),
+                    "billing_config": _get_active_billing_config(client_id),
+                    "summary": _client_billing_summary(client_id, period),
+                }
             )
         return render_template(
             "dashboard/admin_billing.html",
             user=user,
+            period=period,
+            rows=rows,
         )
 
     @bp.route("/contract", methods=["GET"])
@@ -19843,24 +21361,31 @@ def admin_bp() -> Blueprint:
         Requires Enterprise package with Contract Management add-on.
         """
         user = _current_user()
-        if not _is_enterprise(user):
+        if not _contract_feature_enabled(user):
             return render_template(
                 "dashboard/upgrade_prompt.html",
                 user=user,
                 feature="Contract",
-                message="Contract Management hanya tersedia untuk paket Enterprise dengan add-on Contract Management.",
+                message="Aktifkan Contract Management di owner credential, lalu set client ke Enterprise di Settings -> Subscription.",
             )
-        subscription = _phase15_subscription(_client_admin_client_id(user))
-        if not subscription.get("contract_enabled"):
-            return render_template(
-                "dashboard/upgrade_prompt.html",
-                user=user,
-                feature="Contract",
-                message="Aktifkan add-on Contract Management di Settings → Subscription.",
+        client_scope = _phase15_user_client_id(user)
+        clients = [_get_client_by_id(client_scope)] if client_scope else _clients()
+        rows = []
+        for client in clients:
+            if not client:
+                continue
+            client_id = int(client["id"])
+            rows.append(
+                {
+                    "client": client,
+                    "subscription": _phase15_subscription(client_id),
+                    "active_contract": _get_active_client_contract(client_id),
+                }
             )
         return render_template(
             "dashboard/admin_contract.html",
             user=user,
+            rows=rows,
         )
 
     @bp.route("/attendance/csv", methods=["GET"])
@@ -20020,7 +21545,9 @@ def admin_bp() -> Blueprint:
             flash("Alasan penolakan wajib diisi.")
             return _manual_attendance_redirect("pending")
 
-        _reject_manual_request(request_id, user, note)
+        if not _reject_manual_request(request_id, user, note):
+            flash("Manual attendance sudah diproses.")
+            return _manual_attendance_redirect("pending")
         flash("Manual attendance ditolak.")
         return _manual_attendance_redirect("pending")
 

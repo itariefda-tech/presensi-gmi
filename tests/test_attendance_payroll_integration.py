@@ -552,6 +552,72 @@ def test_attendance_checkin_checkout_regression(payroll_db, monkeypatch):
         assert checkout.get_json()["data"]["action"] == "checkout"
 
 
+def test_advanced_reporting_endpoints_return_analytics(payroll_db, monkeypatch):
+    monkeypatch.setenv("FLASK_SECRET", "test-secret-for-advanced-reporting")
+    _seed_employee_policy(
+        payroll_db,
+        schedule=presensi.PAYROLL_SCHEDULE_MONTH_END,
+        scheme=presensi.PAYROLL_SCHEME_PRORATED,
+    )
+    _insert_checkins(payroll_db, ["2026-01-16", "2026-01-17"])
+    conn = sqlite3.connect(payroll_db)
+    try:
+        conn.execute("UPDATE sites SET latitude = 0, longitude = 0, radius_meters = 100 WHERE id = 1")
+        conn.execute(
+            """
+            UPDATE attendance
+            SET time = '10:00', late_flag = 1, lat = 0.01, lng = 0.01,
+                gps_distance_m = 1572, inside_radius_flag = 0,
+                near_radius_flag = 0, suspicious_location_flag = 1
+            WHERE date = '2026-01-17'
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO leave_requests (
+                employee_id, employee_user_id, assignment_id, employee_email,
+                client_id, site_id, client_id_snapshot, site_id_snapshot, branch_id,
+                leave_type, date_from, date_to, reason, status, created_at
+            ) VALUES (1, 1, 1, 'employee@test.local', 1, 1, 1, 1, 1,
+                'izin', '2026-01-18', '2026-01-18', 'Family', 'approved',
+                '2026-01-17 12:00:00')
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    presensi._set_global_addons([presensi.ADDON_REPORTING_ADVANCED])
+
+    flask_app = presensi.create_app()
+    flask_app.config.update(TESTING=True)
+    with flask_app.test_client() as client:
+        with client.session_transaction() as sess:
+            sess["user"] = {
+                "id": 0,
+                "email": "admin@test.local",
+                "role": "hr_superadmin",
+                "name": "Admin",
+                "tier": "pro",
+            }
+        query = "start_date=2026-01-16&end_date=2026-01-18&client_id=1"
+        summary = client.get(f"/api/report/attendance/summary?{query}")
+        assert summary.status_code == 200
+        assert summary.get_json()["data"]["late_count"] == 1
+
+        by_employee = client.get(f"/api/report/attendance/by-employee?{query}")
+        assert by_employee.status_code == 200
+        employee_rows = by_employee.get_json()["data"]
+        assert employee_rows[0]["late_count"] == 1
+
+        leave_pattern = client.get(f"/api/report/leave/pattern?{query}")
+        assert leave_pattern.status_code == 200
+        assert leave_pattern.get_json()["data"]["by_type"] == [{"total": 1, "type": "izin"}]
+
+        geo_anomaly = client.get(f"/api/report/geo/anomaly?{query}")
+        assert geo_anomaly.status_code == 200
+        assert geo_anomaly.get_json()["data"][0]["reason"] == "outside_radius"
+
+
 def test_approved_payroll_is_immutable_for_regenerate_and_adjustment(payroll_db, monkeypatch):
     monkeypatch.setenv("FLASK_SECRET", "test-secret-for-payroll-immutable")
     _seed_employee_policy(

@@ -34,6 +34,52 @@
   </div>
 </div>
 
+<div class="card advanced-report-card" style="margin-bottom:16px;">
+  <div class="card-header-actions">
+    <div>
+      <h3>Advanced Reporting</h3>
+      <p class="muted" style="margin:4px 0 0;">Attendance insight, leave pattern, and geo analytics.</p>
+    </div>
+    <span class="status-badge {{ 'status-on-time' if advanced_reporting_enabled else 'status-absent' }}">{{ 'Active' if advanced_reporting_enabled else 'Add-on required' }}</span>
+  </div>
+  <div class="advanced-grid" style="margin-top:12px;">
+    <section class="advanced-panel">
+      <h4>Insight</h4>
+      <div class="insight-list" id="advancedInsightCards">
+        <div class="muted">Generate report untuk melihat insight.</div>
+      </div>
+    </section>
+    <section class="advanced-panel">
+      <h4>Attendance Trend</h4>
+      <canvas id="advancedAttendanceChart" height="160" aria-label="Attendance trend chart"></canvas>
+    </section>
+    <section class="advanced-panel">
+      <h4>Client Attendance</h4>
+      <canvas id="advancedClientChart" height="160" aria-label="Attendance by client chart"></canvas>
+    </section>
+  </div>
+  <div class="advanced-grid advanced-grid--tables" style="margin-top:12px;">
+    <section class="advanced-panel">
+      <div class="table-header"><h4>Leave Pattern</h4></div>
+      <div class="table-wrap">
+        <table class="table" aria-label="Leave pattern">
+          <thead><tr><th>Type</th><th>Total</th></tr></thead>
+          <tbody id="advancedLeaveRows"><tr><td colspan="2" class="muted">Belum ada data.</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+    <section class="advanced-panel">
+      <div class="table-header"><h4>Geo Anomaly</h4></div>
+      <div class="table-wrap">
+        <table class="table" aria-label="Geo anomaly">
+          <thead><tr><th>Date</th><th>Employee</th><th>Site</th><th>Reason</th><th>Distance</th></tr></thead>
+          <tbody id="advancedGeoRows"><tr><td colspan="5" class="muted">Belum ada data.</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+</div>
+
 <div class="card">
   <div class="card-header">
     <div class="card-header-actions">
@@ -262,6 +308,42 @@
   justify-content: center;
 }
 
+.advanced-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.advanced-grid--tables {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.advanced-panel {
+  min-width: 0;
+}
+
+.advanced-panel h4 {
+  margin: 0 0 10px;
+}
+
+.insight-list {
+  display: grid;
+  gap: 8px;
+}
+
+.insight-item {
+  display: grid;
+  gap: 2px;
+  padding: 10px;
+  border: 1px solid var(--border, rgba(148,163,184,.24));
+  border-radius: 8px;
+}
+
+.insight-value {
+  font-weight: 700;
+  font-size: 1.1rem;
+}
+
 .summary-cards {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -442,6 +524,11 @@
   .summary-cards {
     grid-template-columns: 1fr;
   }
+
+  .advanced-grid,
+  .advanced-grid--tables {
+    grid-template-columns: 1fr;
+  }
   
   .report-tabs {
     flex-wrap: wrap;
@@ -466,7 +553,13 @@
   let currentReports = {
     attendance: [],
     late: [],
-    absent: []
+    absent: [],
+    advancedSummary: null,
+    advancedByClient: [],
+    advancedByEmployee: [],
+    advancedRanking: null,
+    leavePattern: null,
+    geoAnomaly: []
   };
   const advancedReportingEnabled = {{ advanced_reporting_enabled|default(false)|tojson }};
   let currentCalendarReport = [];
@@ -585,6 +678,7 @@
     if (advancedReportingEnabled) {
       reportTasks.push(generateLateReport(startDate, endDate, clientId));
       reportTasks.push(generateAbsentReport(startDate, endDate, clientId));
+      reportTasks.push(generateAdvancedReports(startDate, endDate, clientId));
     } else {
       renderAdvancedLocked();
     }
@@ -751,6 +845,130 @@
     currentReports.absent = [];
     document.getElementById('lateRows').innerHTML = '<tr><td colspan="7" class="muted">Advanced reporting add-on is required.</td></tr>';
     document.getElementById('absentRows').innerHTML = '<tr><td colspan="5" class="muted">Advanced reporting add-on is required.</td></tr>';
+    document.getElementById('advancedInsightCards').innerHTML = '<div class="muted">Advanced reporting add-on is required.</div>';
+    document.getElementById('advancedLeaveRows').innerHTML = '<tr><td colspan="2" class="muted">Advanced reporting add-on is required.</td></tr>';
+    document.getElementById('advancedGeoRows').innerHTML = '<tr><td colspan="5" class="muted">Advanced reporting add-on is required.</td></tr>';
+  }
+
+  function advancedParams(startDate, endDate, clientId) {
+    const params = new URLSearchParams({ start_date: startDate, end_date: endDate });
+    if (clientId) params.append('client_id', clientId);
+    return params;
+  }
+
+  function fetchAdvanced(path, startDate, endDate, clientId) {
+    return fetch(`${path}?${advancedParams(startDate, endDate, clientId)}`)
+      .then(r => r.json())
+      .then(response => {
+        if (!response.ok) throw new Error(response.message || 'Advanced report gagal dimuat');
+        return response.data;
+      });
+  }
+
+  function generateAdvancedReports(startDate, endDate, clientId) {
+    return Promise.all([
+      fetchAdvanced('/api/report/attendance/summary', startDate, endDate, clientId),
+      fetchAdvanced('/api/report/attendance/by-client', startDate, endDate, clientId),
+      fetchAdvanced('/api/report/attendance/by-employee', startDate, endDate, clientId),
+      fetchAdvanced('/api/report/attendance/ranking', startDate, endDate, clientId),
+      fetchAdvanced('/api/report/leave/pattern', startDate, endDate, clientId),
+      fetchAdvanced('/api/report/geo/anomaly', startDate, endDate, clientId)
+    ]).then(([summary, byClient, byEmployee, ranking, leavePattern, geoAnomaly]) => {
+      currentReports.advancedSummary = summary;
+      currentReports.advancedByClient = byClient;
+      currentReports.advancedByEmployee = byEmployee;
+      currentReports.advancedRanking = ranking;
+      currentReports.leavePattern = leavePattern;
+      currentReports.geoAnomaly = geoAnomaly;
+      renderAdvancedReports();
+    }).catch(error => {
+      document.getElementById('advancedInsightCards').innerHTML = `<div class="muted">${error.message}</div>`;
+    });
+  }
+
+  function renderAdvancedReports() {
+    const summary = currentReports.advancedSummary || {};
+    const ranking = currentReports.advancedRanking || {};
+    const topPerformer = (ranking.top_performer || [])[0];
+    const mostLate = (ranking.most_late || [])[0];
+    const frequentLeave = ((currentReports.leavePattern || {}).frequent_leave || [])[0];
+    document.getElementById('advancedInsightCards').innerHTML = [
+      ['Top Performer', topPerformer ? `${topPerformer.employee_name} (${topPerformer.present} hadir)` : '-'],
+      ['Most Late', mostLate ? `${mostLate.employee_name} (${mostLate.late_count} telat)` : '-'],
+      ['Frequent Leave', frequentLeave ? `${frequentLeave.employee_name} (${frequentLeave.leave_count} leave)` : '-'],
+      ['Geo Anomaly', `${summary.suspicious_location_count || 0} record`]
+    ].map(([label, value]) => `<div class="insight-item"><span class="muted">${label}</span><span class="insight-value">${value}</span></div>`).join('');
+    drawLineChart('advancedAttendanceChart', (summary.daily || []).map(row => ({ label: row.date.slice(5), value: row.present || 0 })));
+    drawBarChart('advancedClientChart', (currentReports.advancedByClient || []).slice(0, 8).map(row => ({ label: row.client_name, value: row.present || 0 })));
+    renderLeavePattern(currentReports.leavePattern);
+    renderGeoAnomaly(currentReports.geoAnomaly);
+  }
+
+  function renderLeavePattern(data) {
+    const rows = (data && data.by_type) || [];
+    const tbody = document.getElementById('advancedLeaveRows');
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="2" class="muted">Tidak ada leave pada periode ini.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = rows.map(row => `<tr><td>${row.type}</td><td>${row.total}</td></tr>`).join('');
+  }
+
+  function renderGeoAnomaly(rows) {
+    const tbody = document.getElementById('advancedGeoRows');
+    if (!rows || !rows.length) {
+      tbody.innerHTML = '<tr><td colspan="5" class="muted">Tidak ada anomali lokasi.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = rows.slice(0, 20).map(row => `
+      <tr>
+        <td>${formatDate(row.date)}</td>
+        <td>${row.employee_name || row.employee_email || '-'}</td>
+        <td>${row.site_name || '-'}</td>
+        <td>${row.reason || '-'}</td>
+        <td>${row.gps_distance_m ?? '-'}</td>
+      </tr>
+    `).join('');
+  }
+
+  function drawLineChart(canvasId, points) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const width = canvas.width = canvas.clientWidth || 320;
+    const height = canvas.height = 160;
+    ctx.clearRect(0, 0, width, height);
+    ctx.strokeStyle = '#667eea';
+    ctx.fillStyle = '#667eea';
+    ctx.lineWidth = 2;
+    const max = Math.max(1, ...points.map(p => p.value));
+    const pad = 24;
+    ctx.beginPath();
+    points.forEach((p, index) => {
+      const x = pad + (points.length <= 1 ? 0 : index * (width - pad * 2) / (points.length - 1));
+      const y = height - pad - (p.value / max) * (height - pad * 2);
+      if (index === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      ctx.fillRect(x - 2, y - 2, 4, 4);
+    });
+    ctx.stroke();
+  }
+
+  function drawBarChart(canvasId, bars) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const width = canvas.width = canvas.clientWidth || 320;
+    const height = canvas.height = 160;
+    ctx.clearRect(0, 0, width, height);
+    const max = Math.max(1, ...bars.map(p => p.value));
+    const gap = 8;
+    const barWidth = Math.max(12, (width - gap * (bars.length + 1)) / Math.max(1, bars.length));
+    ctx.fillStyle = '#28a745';
+    bars.forEach((bar, index) => {
+      const barHeight = (bar.value / max) * 110;
+      const x = gap + index * (barWidth + gap);
+      ctx.fillRect(x, height - 24 - barHeight, barWidth, barHeight);
+    });
   }
   
   // Update summary cards
@@ -847,6 +1065,9 @@
     if (advancedReportingEnabled) {
       document.getElementById('lateRows').innerHTML = '<tr><td colspan="7" class="muted"><span class="spinner"></span> Loading...</td></tr>';
       document.getElementById('absentRows').innerHTML = '<tr><td colspan="5" class="muted"><span class="spinner"></span> Loading...</td></tr>';
+      document.getElementById('advancedInsightCards').innerHTML = '<div class="muted"><span class="spinner"></span> Loading...</div>';
+      document.getElementById('advancedLeaveRows').innerHTML = '<tr><td colspan="2" class="muted"><span class="spinner"></span> Loading...</td></tr>';
+      document.getElementById('advancedGeoRows').innerHTML = '<tr><td colspan="5" class="muted"><span class="spinner"></span> Loading...</td></tr>';
     }
   }
   
