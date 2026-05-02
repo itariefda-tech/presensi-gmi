@@ -574,6 +574,16 @@ def test_advanced_reporting_endpoints_return_analytics(payroll_db, monkeypatch):
         )
         conn.execute(
             """
+            INSERT INTO attendance (
+                employee_id, client_id, branch_id, employee_name,
+                employee_email, date, time, action, method, source, created_at
+            ) VALUES (1, 1, 1, 'Employee One', 'employee@test.local',
+                '2026-01-16', '08:03', 'checkout', 'gps', 'app',
+                '2026-01-16 08:03:00')
+            """
+        )
+        conn.execute(
+            """
             INSERT INTO leave_requests (
                 employee_id, employee_user_id, assignment_id, employee_email,
                 client_id, site_id, client_id_snapshot, site_id_snapshot, branch_id,
@@ -581,6 +591,16 @@ def test_advanced_reporting_endpoints_return_analytics(payroll_db, monkeypatch):
             ) VALUES (1, 1, 1, 'employee@test.local', 1, 1, 1, 1, 1,
                 'izin', '2026-01-18', '2026-01-18', 'Family', 'approved',
                 '2026-01-17 12:00:00')
+            """
+        )
+        conn.execute("UPDATE clients SET addons = ? WHERE id = 1", ('["reporting_advanced"]',))
+        conn.execute(
+            """
+            INSERT INTO users (
+                id, email, name, role, password_hash, is_active,
+                client_id, site_id, tier, created_at
+            ) VALUES (2, 'client@test.local', 'Client Admin', 'client_admin',
+                'hash', 1, 1, 1, 'pro', '2026-01-01 00:00:00')
             """
         )
         conn.commit()
@@ -616,6 +636,88 @@ def test_advanced_reporting_endpoints_return_analytics(payroll_db, monkeypatch):
         geo_anomaly = client.get(f"/api/report/geo/anomaly?{query}")
         assert geo_anomaly.status_code == 200
         assert geo_anomaly.get_json()["data"][0]["reason"] == "outside_radius"
+
+        anomaly = client.get(f"/api/report/anomaly?{query}")
+        assert anomaly.status_code == 200
+        anomaly_data = anomaly.get_json()["data"]
+        assert anomaly_data["summary"]["rules"]["short_session"] == 1
+        assert anomaly_data["summary"]["rules"]["outside_radius"] == 1
+        assert anomaly_data["risk_scores"][0]["risk_score"] >= 60
+
+        performance = client.get(f"/api/report/client/performance?{query}")
+        assert performance.status_code == 200
+        performance_row = performance.get_json()["data"][0]
+        assert performance_row["client_name"] == "Client A"
+        assert "compliance_score" in performance_row
+
+        paged_performance = client.get(f"/api/report/client/performance?{query}&limit=1&offset=0")
+        assert paged_performance.status_code == 200
+        assert paged_performance.get_json()["pagination"]["limit"] == 1
+
+        bad_pagination = client.get(f"/api/report/client/performance?{query}&limit=9999")
+        assert bad_pagination.status_code == 400
+
+        export = client.get(f"/api/report/export?{query}&report_type=client_performance&format=csv")
+        assert export.status_code == 200
+        assert export.mimetype == "text/csv"
+        assert b"compliance_score" in export.data
+
+        monkeypatch.setattr(presensi, "REPORT_EXPORT_MAX_ROWS", 0)
+        limited_export = client.get(f"/api/report/export?{query}&report_type=client_performance&format=csv")
+        assert limited_export.status_code == 400
+        monkeypatch.setattr(presensi, "REPORT_EXPORT_MAX_ROWS", 5000)
+
+        with client.session_transaction() as sess:
+            sess["csrf_token"] = "csrf-test-token"
+        schedule = client.post(
+            "/api/report/schedule",
+            json={
+                "csrf_token": "csrf-test-token",
+                "report_type": "client_performance",
+                "frequency": "weekly",
+                "format": "csv",
+                "start_date": "2026-01-16",
+                "end_date": "2026-01-18",
+                "client_id": 1,
+            },
+        )
+        assert schedule.status_code == 200
+        assert schedule.get_json()["data"]["status"] == "active"
+
+        custom = client.post(
+            "/api/report/custom",
+            json={
+                "csrf_token": "csrf-test-token",
+                "start_date": "2026-01-16",
+                "end_date": "2026-01-18",
+                "client_id": 1,
+                "metrics": ["present", "late_count", "attendance_rate"],
+                "dimensions": ["date", "client"],
+                "template_name": "Daily client attendance",
+                "save_template": True,
+            },
+        )
+        assert custom.status_code == 200
+        custom_payload = custom.get_json()
+        assert custom_payload["template"]["name"] == "Daily client attendance"
+        assert custom_payload["data"]["rows"][0]["client"] == "Client A"
+        assert "attendance_rate" in custom_payload["data"]["rows"][0]
+
+        templates = client.get("/api/report/templates")
+        assert templates.status_code == 200
+        assert templates.get_json()["data"][0]["name"] == "Daily client attendance"
+
+        with client.session_transaction() as sess:
+            sess["user"] = {
+                "id": 2,
+                "email": "client@test.local",
+                "role": "client_admin",
+                "name": "Client Admin",
+                "tier": "pro",
+                "client_id": 1,
+            }
+        scoped = client.get("/api/report/client/performance?start_date=2026-01-16&end_date=2026-01-18&client_id=2")
+        assert scoped.status_code == 403
 
 
 def test_approved_payroll_is_immutable_for_regenerate_and_adjustment(payroll_db, monkeypatch):

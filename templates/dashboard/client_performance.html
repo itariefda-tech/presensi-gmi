@@ -1,0 +1,95 @@
+{% extends "dashboard/base.html" %}
+{% set active = "reports" %}
+{% set heading = "Client Performance" %}
+{% set subtitle = "Attendance, leave, manual attendance, and compliance score per client" %}
+
+{% block body %}
+<div class="card">
+  <div class="card-header-actions">
+    <div>
+      <h3>Client Performance</h3>
+      <p class="muted" style="margin:4px 0 0;">Ranking client terbaik dan terburuk berdasarkan compliance score.</p>
+    </div>
+    <span class="status-badge {{ 'status-on-time' if advanced_reporting_enabled else 'status-absent' }}">{{ 'Active' if advanced_reporting_enabled else 'Add-on required' }}</span>
+  </div>
+  <div class="client-performance-filters" style="margin-top:12px;">
+    <select class="input" id="clientPerformanceClient"><option value="">Semua client</option>{% for client in clients %}<option value="{{ client.id }}">{{ client.name }}</option>{% endfor %}</select>
+    <select class="input" id="clientPerformanceSite"><option value="">Semua site</option>{% for site in sites %}<option value="{{ site.id }}">{{ site.client_name or '-' }} - {{ site.name }}</option>{% endfor %}</select>
+    <input class="input" type="date" id="clientPerformanceStart">
+    <input class="input" type="date" id="clientPerformanceEnd">
+    <button class="btn primary" id="clientPerformanceGenerate" type="button">Generate</button>
+  </div>
+  <div class="client-performance-scorecards" id="clientPerformanceCards" style="margin-top:12px;"></div>
+  <div class="table-wrap" style="margin-top:12px;">
+    <table class="table" aria-label="Client performance report">
+      <thead><tr><th>Client</th><th>Attendance Rate</th><th>Leave Rate</th><th>Manual</th><th>Late</th><th>Compliance</th></tr></thead>
+      <tbody id="clientPerformanceRows"><tr><td colspan="6" class="muted">Generate report untuk melihat data.</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<style>
+.card-header-actions{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap}
+.client-performance-filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;align-items:end}
+.client-performance-scorecards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}
+.client-scorecard{border:1px solid var(--border,rgba(148,163,184,.24));border-radius:8px;padding:12px;text-align:left}
+.client-scorecard strong,.client-scorecard span{display:block}
+.client-scorecard .score{font-size:1.35rem;font-weight:800}
+.status-badge{padding:.25rem .75rem;border-radius:12px;font-size:.8rem;font-weight:500}
+.status-on-time{background:#d4edda;color:#155724}
+.status-late{background:#fff3cd;color:#856404}
+.status-absent{background:#f8d7da;color:#721c24}
+</style>
+
+<script>
+(function(){
+  const enabled = {{ advanced_reporting_enabled|default(false)|tojson }};
+  function initDates(){
+    const now = new Date();
+    document.getElementById('clientPerformanceStart').value = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+    document.getElementById('clientPerformanceEnd').value = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
+  }
+  function params(){
+    const p = new URLSearchParams({
+      start_date: document.getElementById('clientPerformanceStart').value,
+      end_date: document.getElementById('clientPerformanceEnd').value
+    });
+    const clientId = document.getElementById('clientPerformanceClient').value;
+    const siteId = document.getElementById('clientPerformanceSite').value;
+    if (clientId && !siteId) p.set('client_id', clientId);
+    if (siteId) p.set('site_id', siteId);
+    return p;
+  }
+  function load(){
+    const body = document.getElementById('clientPerformanceRows');
+    if (!enabled) {
+      body.innerHTML = '<tr><td colspan="6" class="muted">Advanced reporting add-on is required.</td></tr>';
+      return;
+    }
+    body.innerHTML = '<tr><td colspan="6" class="muted"><span class="spinner"></span> Loading...</td></tr>';
+    fetch(`/api/report/client/performance?${params()}`).then(r => r.json()).then(response => {
+      if (!response.ok) throw new Error(response.message || 'Gagal memuat performance client');
+      render(response.data || []);
+    }).catch(error => {
+      body.innerHTML = `<tr><td colspan="6" class="muted">${error.message}</td></tr>`;
+    });
+  }
+  function render(rows){
+    const body = document.getElementById('clientPerformanceRows');
+    const cards = document.getElementById('clientPerformanceCards');
+    if (!rows.length) {
+      body.innerHTML = '<tr><td colspan="6" class="muted">Tidak ada data.</td></tr>';
+      cards.innerHTML = '';
+      return;
+    }
+    cards.innerHTML = rows.slice(0, 6).map(row => `<div class="client-scorecard"><strong>${row.client_name || '-'}</strong><span class="score">${Number(row.compliance_score || 0).toFixed(1)}</span><span class="muted">Attendance ${Number(row.attendance_rate || 0).toFixed(1)}%</span></div>`).join('');
+    body.innerHTML = rows.map(row => `<tr><td>${row.client_name || '-'}</td><td>${Number(row.attendance_rate || 0).toFixed(1)}%</td><td>${Number(row.leave_rate || 0).toFixed(1)}%</td><td>${row.manual_attendance_count || 0}</td><td>${row.late_count || 0}</td><td><span class="status-badge ${Number(row.compliance_score || 0) >= 80 ? 'status-on-time' : 'status-late'}">${Number(row.compliance_score || 0).toFixed(1)}</span></td></tr>`).join('');
+  }
+  document.addEventListener('DOMContentLoaded', () => {
+    initDates();
+    document.getElementById('clientPerformanceGenerate').addEventListener('click', load);
+    load();
+  });
+})();
+</script>
+{% endblock %}

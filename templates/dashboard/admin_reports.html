@@ -34,59 +34,21 @@
   </div>
 </div>
 
-<div class="card advanced-report-card" style="margin-bottom:16px;">
-  <div class="card-header-actions">
-    <div>
-      <h3>Advanced Reporting</h3>
-      <p class="muted" style="margin:4px 0 0;">Attendance insight, leave pattern, and geo analytics.</p>
-    </div>
-    <span class="status-badge {{ 'status-on-time' if advanced_reporting_enabled else 'status-absent' }}">{{ 'Active' if advanced_reporting_enabled else 'Add-on required' }}</span>
-  </div>
-  <div class="advanced-grid" style="margin-top:12px;">
-    <section class="advanced-panel">
-      <h4>Insight</h4>
-      <div class="insight-list" id="advancedInsightCards">
-        <div class="muted">Generate report untuk melihat insight.</div>
-      </div>
-    </section>
-    <section class="advanced-panel">
-      <h4>Attendance Trend</h4>
-      <canvas id="advancedAttendanceChart" height="160" aria-label="Attendance trend chart"></canvas>
-    </section>
-    <section class="advanced-panel">
-      <h4>Client Attendance</h4>
-      <canvas id="advancedClientChart" height="160" aria-label="Attendance by client chart"></canvas>
-    </section>
-  </div>
-  <div class="advanced-grid advanced-grid--tables" style="margin-top:12px;">
-    <section class="advanced-panel">
-      <div class="table-header"><h4>Leave Pattern</h4></div>
-      <div class="table-wrap">
-        <table class="table" aria-label="Leave pattern">
-          <thead><tr><th>Type</th><th>Total</th></tr></thead>
-          <tbody id="advancedLeaveRows"><tr><td colspan="2" class="muted">Belum ada data.</td></tr></tbody>
-        </table>
-      </div>
-    </section>
-    <section class="advanced-panel">
-      <div class="table-header"><h4>Geo Anomaly</h4></div>
-      <div class="table-wrap">
-        <table class="table" aria-label="Geo anomaly">
-          <thead><tr><th>Date</th><th>Employee</th><th>Site</th><th>Reason</th><th>Distance</th></tr></thead>
-          <tbody id="advancedGeoRows"><tr><td colspan="5" class="muted">Belum ada data.</td></tr></tbody>
-        </table>
-      </div>
-    </section>
-  </div>
-</div>
-
-<div class="card">
+<div class="card reports-dashboard-card">
   <div class="card-header">
     <div class="card-header-actions">
       <h3>Reports Dashboard</h3>
       <div class="header-actions">
         <select id="clientSelect" class="input">
           <option value="">All Clients</option>
+        </select>
+        <select id="siteSelect" class="input">
+          <option value="">All Sites</option>
+          {% for site in sites %}<option value="{{ site.id }}" data-client-id="{{ site.client_id }}">{{ site.client_name or '-' }} - {{ site.name }}</option>{% endfor %}
+        </select>
+        <select id="employeeSelect" class="input">
+          <option value="">All Employees</option>
+          {% for employee in employees %}<option value="{{ employee.id }}" data-client-id="{{ employee.client_id or '' }}" data-site-id="{{ employee.site_id or '' }}">{{ employee.name or employee.email }}</option>{% endfor %}
         </select>
         <input type="date" id="startDate" class="input" placeholder="Start Date">
         <input type="date" id="endDate" class="input" placeholder="End Date">
@@ -96,8 +58,6 @@
   </div>
   
   <div class="card-body">
-    <div id="reportsAlert" class="alert info" style="display:none;"></div>
-    
     <!-- Summary Cards -->
     <div class="summary-cards" id="summaryCards">
       <div class="summary-card">
@@ -254,6 +214,125 @@
   </div>
 </div>
 
+<div class="card advanced-report-card" style="margin-bottom:16px;">
+  <div class="card-header-actions">
+    <div>
+      <h3>Advanced Reporting</h3>
+      <p class="muted" style="margin:4px 0 0;">Attendance insight, leave pattern, and geo analytics.</p>
+    </div>
+    <div class="header-actions">
+      <a class="btn secondary" href="{{ url_for('admin.client_performance_report') }}">Client Performance</a>
+      <span class="status-badge {{ 'status-on-time' if advanced_reporting_enabled else 'status-absent' }}">{{ 'Active' if advanced_reporting_enabled else 'Add-on required' }}</span>
+    </div>
+  </div>
+  <div class="advanced-grid" style="margin-top:12px;">
+    <section class="advanced-panel advanced-widget" data-widget-id="insight" draggable="true">
+      <h4>Insight</h4>
+      <div class="insight-list" id="advancedInsightCards">
+        <div class="muted">Generate report untuk melihat insight.</div>
+      </div>
+    </section>
+    <section class="advanced-panel advanced-widget" data-widget-id="attendance-trend" draggable="true">
+      <h4>Attendance Trend</h4>
+      <canvas id="advancedAttendanceChart" height="160" aria-label="Attendance trend chart"></canvas>
+    </section>
+    <section class="advanced-panel advanced-widget" data-widget-id="client-attendance" draggable="true">
+      <h4>Client Attendance</h4>
+      <canvas id="advancedClientChart" height="160" aria-label="Attendance by client chart"></canvas>
+    </section>
+  </div>
+  <div class="client-performance-scorecards" id="clientPerformanceCards" style="margin-top:12px;">
+    <div class="muted">Generate report untuk melihat scorecard client.</div>
+  </div>
+  <div class="advanced-grid advanced-grid--tables" style="margin-top:12px;">
+    <section class="advanced-panel advanced-widget" data-widget-id="leave-pattern" draggable="true">
+      <div class="table-header"><h4>Leave Pattern</h4></div>
+      <div class="table-wrap">
+        <table class="table" aria-label="Leave pattern">
+          <thead><tr><th>Type</th><th>Total</th></tr></thead>
+          <tbody id="advancedLeaveRows"><tr><td colspan="2" class="muted">Belum ada data.</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+    <section class="advanced-panel advanced-widget" data-widget-id="geo-anomaly" draggable="true">
+      <div class="table-header"><h4>Geo Anomaly</h4></div>
+      <div class="table-wrap">
+        <table class="table" aria-label="Geo anomaly">
+          <thead><tr><th>Date</th><th>Employee</th><th>Site</th><th>Reason</th><th>Distance</th></tr></thead>
+          <tbody id="advancedGeoRows"><tr><td colspan="5" class="muted">Belum ada data.</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+    <section class="advanced-panel advanced-widget" data-widget-id="fraud-detection" draggable="true">
+      <div class="table-header"><h4>Fraud Detection</h4></div>
+      <div class="table-wrap">
+        <table class="table" aria-label="Fraud detection">
+          <thead><tr><th>Date</th><th>Employee</th><th>Rule</th><th>Severity</th><th>Risk</th></tr></thead>
+          <tbody id="advancedFraudRows"><tr><td colspan="5" class="muted">Belum ada data.</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+    <section class="advanced-panel advanced-widget" data-widget-id="client-performance" draggable="true">
+      <div class="table-header"><h4>Client Performance</h4></div>
+      <div class="table-wrap">
+        <table class="table" aria-label="Client performance">
+          <thead><tr><th>Client</th><th>Attendance</th><th>Leave</th><th>Manual</th><th>Compliance</th></tr></thead>
+          <tbody id="advancedPerformanceRows"><tr><td colspan="5" class="muted">Belum ada data.</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+</div>
+
+<div class="card custom-report-card" style="margin-bottom:16px;">
+  <div class="card-header-actions">
+    <div>
+      <h3>Custom Report Builder</h3>
+      <p class="muted" style="margin:4px 0 0;">Pilih metric dan dimensi untuk membuat report fleksibel.</p>
+    </div>
+    <button class="btn secondary" id="btnLoadReportTemplates" type="button">Load Templates</button>
+  </div>
+  <div class="custom-builder-grid" style="margin-top:12px;">
+    <div>
+      <label class="label" for="customTemplateName">Template</label>
+      <input class="input" id="customTemplateName" placeholder="Nama template">
+    </div>
+    <div>
+      <span class="label">Dimensi</span>
+      <div class="custom-check-grid custom-check-grid--dimensions" id="customDimensions">
+        <label><input type="checkbox" value="date" checked> Date</label>
+        <label><input type="checkbox" value="client" checked> Client</label>
+        <label><input type="checkbox" value="site"> Site</label>
+        <label><input type="checkbox" value="employee"> Employee</label>
+      </div>
+    </div>
+    <div>
+      <span class="label">Metric</span>
+      <div class="custom-check-grid custom-check-grid--metrics" id="customMetrics">
+        <label><input type="checkbox" value="present" checked> Present</label>
+        <label><input type="checkbox" value="late_count"> Late Count</label>
+        <label><input type="checkbox" value="leave_count"> Leave Count</label>
+        <label><input type="checkbox" value="absent_count"> Absent Count</label>
+        <label><input type="checkbox" value="manual_attendance_count"> Manual Attendance</label>
+        <label><input type="checkbox" value="attendance_rate" checked> Attendance Rate</label>
+        <label><input type="checkbox" value="late_rate"> Late Rate</label>
+      </div>
+    </div>
+    <div class="custom-builder-actions">
+      <label class="label" for="customTemplateSelect">Saved Templates</label>
+      <select class="input" id="customTemplateSelect"><option value="">Belum dimuat</option></select>
+      <button class="btn primary" id="btnRunCustomReport" type="button">Run Custom</button>
+      <button class="btn secondary" id="btnSaveCustomReport" type="button">Save Template</button>
+    </div>
+  </div>
+  <div class="table-wrap" style="margin-top:12px;">
+    <table class="table" aria-label="Custom report builder result">
+      <thead id="customReportHead"><tr><th>Custom Report</th></tr></thead>
+      <tbody id="customReportRows"><tr><td class="muted">Run custom report untuk melihat data.</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
 <style>
 .card-header-actions {
   display: flex;
@@ -268,6 +347,18 @@
   gap: 0.5rem;
   align-items: center;
   flex-wrap: wrap;
+}
+
+.reports-dashboard-card .card-header {
+  padding-bottom: 18px;
+}
+
+.reports-dashboard-card .card-body {
+  padding-top: 18px;
+}
+
+.reports-dashboard-card .summary-cards {
+  margin-top: 4px;
 }
 
 .calendar-report-card .card-header-actions {
@@ -308,6 +399,48 @@
   justify-content: center;
 }
 
+.custom-builder-grid {
+  display: grid;
+  grid-template-columns: minmax(170px, .9fr) minmax(260px, 1.45fr) minmax(360px, 2fr) minmax(190px, .95fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.custom-builder-actions {
+  display: grid;
+  gap: 8px;
+}
+
+.custom-check-grid {
+  display: grid;
+  gap: 8px;
+  min-height: 132px;
+  padding: 10px;
+  border: 1px solid var(--border, rgba(148,163,184,.24));
+  border-radius: 8px;
+}
+
+.custom-check-grid--dimensions {
+  grid-template-columns: repeat(2, minmax(110px, 1fr));
+}
+
+.custom-check-grid--metrics {
+  grid-template-columns: repeat(2, minmax(160px, 1fr));
+}
+
+.custom-check-grid label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  white-space: nowrap;
+  font-size: .92rem;
+}
+
+.custom-check-grid input {
+  flex: 0 0 auto;
+}
+
 .advanced-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -320,6 +453,14 @@
 
 .advanced-panel {
   min-width: 0;
+}
+
+.advanced-widget {
+  cursor: grab;
+}
+
+.advanced-widget.is-dragging {
+  opacity: .55;
 }
 
 .advanced-panel h4 {
@@ -342,6 +483,29 @@
 .insight-value {
   font-weight: 700;
   font-size: 1.1rem;
+}
+
+.client-performance-scorecards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.client-scorecard {
+  border: 1px solid var(--border, rgba(148,163,184,.24));
+  border-radius: 8px;
+  padding: 12px;
+  cursor: pointer;
+}
+
+.client-scorecard strong,
+.client-scorecard span {
+  display: block;
+}
+
+.client-scorecard .score {
+  font-size: 1.35rem;
+  font-weight: 800;
 }
 
 .summary-cards {
@@ -510,6 +674,10 @@
   .calendar-date-range {
     grid-template-columns: 1fr;
   }
+
+  .custom-builder-grid {
+    grid-template-columns: 1fr;
+  }
   
   .header-actions {
     justify-content: stretch;
@@ -559,7 +727,9 @@
     advancedByEmployee: [],
     advancedRanking: null,
     leavePattern: null,
-    geoAnomaly: []
+    geoAnomaly: [],
+    fraudAnomaly: null,
+    clientPerformance: []
   };
   const advancedReportingEnabled = {{ advanced_reporting_enabled|default(false)|tojson }};
   let currentCalendarReport = [];
@@ -632,6 +802,88 @@
     const params = calendarReportParams();
     window.open(`/api/reports/calendar/export?${params.toString()}`, '_blank');
   }
+
+  function selectedValues(selectId) {
+    const field = document.getElementById(selectId);
+    if (!field) return [];
+    if (field.tagName === 'SELECT') {
+      return Array.from(field.selectedOptions).map(option => option.value);
+    }
+    return Array.from(field.querySelectorAll('input[type="checkbox"]:checked')).map(input => input.value);
+  }
+
+  function customReportPayload(saveTemplate) {
+    return {
+      start_date: document.getElementById('startDate').value,
+      end_date: document.getElementById('endDate').value,
+      client_id: document.getElementById('clientSelect').value || null,
+      site_id: document.getElementById('siteSelect').value || null,
+      employee_id: document.getElementById('employeeSelect').value || null,
+      metrics: selectedValues('customMetrics'),
+      dimensions: selectedValues('customDimensions'),
+      template_name: document.getElementById('customTemplateName').value,
+      save_template: Boolean(saveTemplate)
+    };
+  }
+
+  function renderCustomReport(data) {
+    const rows = (data && data.rows) || [];
+    const keys = [...((data && data.dimensions) || []), ...((data && data.metrics) || [])];
+    document.getElementById('customReportHead').innerHTML = `<tr>${keys.map(key => `<th>${key.replaceAll('_', ' ')}</th>`).join('')}</tr>`;
+    const body = document.getElementById('customReportRows');
+    if (!rows.length) {
+      body.innerHTML = `<tr><td colspan="${Math.max(1, keys.length)}" class="muted">Tidak ada data custom report.</td></tr>`;
+      return;
+    }
+    body.innerHTML = rows.map(row => `<tr>${keys.map(key => `<td>${row[key] ?? '-'}</td>`).join('')}</tr>`).join('');
+  }
+
+  function runCustomReport(saveTemplate = false) {
+    const body = document.getElementById('customReportRows');
+    body.innerHTML = '<tr><td class="muted"><span class="spinner"></span> Loading...</td></tr>';
+    return fetch('/api/report/custom', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': '{{ csrf_token }}' },
+      body: JSON.stringify(customReportPayload(saveTemplate))
+    }).then(r => r.json()).then(response => {
+      if (!response.ok) throw new Error(response.message || 'Custom report gagal dibuat');
+      renderCustomReport(response.data);
+      if (response.template) {
+        showAlert('Template report tersimpan', 'success');
+        loadReportTemplates();
+      }
+    }).catch(error => {
+      body.innerHTML = `<tr><td class="muted">${error.message}</td></tr>`;
+    });
+  }
+
+  function loadReportTemplates() {
+    return fetch('/api/report/templates')
+      .then(r => r.json())
+      .then(response => {
+        if (!response.ok) throw new Error(response.message || 'Gagal memuat template');
+        const select = document.getElementById('customTemplateSelect');
+        const rows = response.data || [];
+        select.innerHTML = '<option value="">Pilih template</option>' + rows.map(row => `<option value="${row.id}">${row.name}</option>`).join('');
+        select.dataset.templates = JSON.stringify(rows);
+      })
+      .catch(error => showAlert(error.message || 'Gagal memuat template', 'error'));
+  }
+
+  function applyReportTemplate() {
+    const select = document.getElementById('customTemplateSelect');
+    const templates = JSON.parse(select.dataset.templates || '[]');
+    const template = templates.find(row => String(row.id) === String(select.value));
+    if (!template) return;
+    document.getElementById('customTemplateName').value = template.name || '';
+    ['customMetrics', 'customDimensions'].forEach(selectId => {
+      const values = selectId === 'customMetrics' ? template.metrics || [] : template.dimensions || [];
+      const field = document.getElementById(selectId);
+      Array.from(field.querySelectorAll('input[type="checkbox"]')).forEach(input => {
+        input.checked = values.includes(input.value);
+      });
+    });
+  }
   
   // Load clients
   function loadClients() {
@@ -645,11 +897,54 @@
             const option = new Option(client.name, client.id);
             clientSelect.add(option);
           });
+          updateReportFilterCascade();
         }
       })
       .catch(() => {
         console.error('Failed to load clients');
       });
+  }
+
+  function setOptionVisibility(option, visible) {
+    option.hidden = !visible;
+    option.disabled = !visible;
+  }
+
+  function updateReportFilterCascade(options = {}) {
+    const clientSelect = document.getElementById('clientSelect');
+    const siteSelect = document.getElementById('siteSelect');
+    const employeeSelect = document.getElementById('employeeSelect');
+    const clientId = clientSelect.value || '';
+
+    Array.from(siteSelect.options).forEach(option => {
+      if (!option.value) {
+        setOptionVisibility(option, true);
+        return;
+      }
+      setOptionVisibility(option, !clientId || option.dataset.clientId === clientId);
+    });
+
+    if (options.resetSite || (siteSelect.value && siteSelect.selectedOptions[0]?.disabled)) {
+      siteSelect.value = '';
+    }
+
+    const siteId = siteSelect.value || '';
+    Array.from(employeeSelect.options).forEach(option => {
+      if (!option.value) {
+        setOptionVisibility(option, true);
+        return;
+      }
+      const employeeClientId = option.dataset.clientId || '';
+      const employeeSiteId = option.dataset.siteId || '';
+      const matchesClient = !clientId || employeeClientId === clientId;
+      const matchesSite = !siteId || employeeSiteId === siteId;
+      const visible = siteId ? matchesSite : matchesClient;
+      setOptionVisibility(option, visible);
+    });
+
+    if (options.resetEmployee || (employeeSelect.value && employeeSelect.selectedOptions[0]?.disabled)) {
+      employeeSelect.value = '';
+    }
   }
   
   // Generate all reports
@@ -848,11 +1143,18 @@
     document.getElementById('advancedInsightCards').innerHTML = '<div class="muted">Advanced reporting add-on is required.</div>';
     document.getElementById('advancedLeaveRows').innerHTML = '<tr><td colspan="2" class="muted">Advanced reporting add-on is required.</td></tr>';
     document.getElementById('advancedGeoRows').innerHTML = '<tr><td colspan="5" class="muted">Advanced reporting add-on is required.</td></tr>';
+    document.getElementById('advancedFraudRows').innerHTML = '<tr><td colspan="5" class="muted">Advanced reporting add-on is required.</td></tr>';
+    document.getElementById('advancedPerformanceRows').innerHTML = '<tr><td colspan="5" class="muted">Advanced reporting add-on is required.</td></tr>';
+    document.getElementById('clientPerformanceCards').innerHTML = '<div class="muted">Advanced reporting add-on is required.</div>';
   }
 
   function advancedParams(startDate, endDate, clientId) {
     const params = new URLSearchParams({ start_date: startDate, end_date: endDate });
     if (clientId) params.append('client_id', clientId);
+    const siteId = document.getElementById('siteSelect')?.value || '';
+    const employeeId = document.getElementById('employeeSelect')?.value || '';
+    if (siteId) params.append('site_id', siteId);
+    if (employeeId) params.append('employee_id', employeeId);
     return params;
   }
 
@@ -872,14 +1174,18 @@
       fetchAdvanced('/api/report/attendance/by-employee', startDate, endDate, clientId),
       fetchAdvanced('/api/report/attendance/ranking', startDate, endDate, clientId),
       fetchAdvanced('/api/report/leave/pattern', startDate, endDate, clientId),
-      fetchAdvanced('/api/report/geo/anomaly', startDate, endDate, clientId)
-    ]).then(([summary, byClient, byEmployee, ranking, leavePattern, geoAnomaly]) => {
+      fetchAdvanced('/api/report/geo/anomaly', startDate, endDate, clientId),
+      fetchAdvanced('/api/report/anomaly', startDate, endDate, clientId),
+      fetchAdvanced('/api/report/client/performance', startDate, endDate, clientId)
+    ]).then(([summary, byClient, byEmployee, ranking, leavePattern, geoAnomaly, fraudAnomaly, clientPerformance]) => {
       currentReports.advancedSummary = summary;
       currentReports.advancedByClient = byClient;
       currentReports.advancedByEmployee = byEmployee;
       currentReports.advancedRanking = ranking;
       currentReports.leavePattern = leavePattern;
       currentReports.geoAnomaly = geoAnomaly;
+      currentReports.fraudAnomaly = fraudAnomaly;
+      currentReports.clientPerformance = clientPerformance;
       renderAdvancedReports();
     }).catch(error => {
       document.getElementById('advancedInsightCards').innerHTML = `<div class="muted">${error.message}</div>`;
@@ -892,16 +1198,20 @@
     const topPerformer = (ranking.top_performer || [])[0];
     const mostLate = (ranking.most_late || [])[0];
     const frequentLeave = ((currentReports.leavePattern || {}).frequent_leave || [])[0];
+    const fraudSummary = (currentReports.fraudAnomaly || {}).summary || {};
     document.getElementById('advancedInsightCards').innerHTML = [
       ['Top Performer', topPerformer ? `${topPerformer.employee_name} (${topPerformer.present} hadir)` : '-'],
       ['Most Late', mostLate ? `${mostLate.employee_name} (${mostLate.late_count} telat)` : '-'],
       ['Frequent Leave', frequentLeave ? `${frequentLeave.employee_name} (${frequentLeave.leave_count} leave)` : '-'],
-      ['Geo Anomaly', `${summary.suspicious_location_count || 0} record`]
+      ['Geo Anomaly', `${summary.suspicious_location_count || 0} record`],
+      ['Fraud Alerts', `${fraudSummary.total_activities || 0} alert`]
     ].map(([label, value]) => `<div class="insight-item"><span class="muted">${label}</span><span class="insight-value">${value}</span></div>`).join('');
     drawLineChart('advancedAttendanceChart', (summary.daily || []).map(row => ({ label: row.date.slice(5), value: row.present || 0 })));
     drawBarChart('advancedClientChart', (currentReports.advancedByClient || []).slice(0, 8).map(row => ({ label: row.client_name, value: row.present || 0 })));
     renderLeavePattern(currentReports.leavePattern);
     renderGeoAnomaly(currentReports.geoAnomaly);
+    renderFraudAnomaly(currentReports.fraudAnomaly);
+    renderClientPerformance(currentReports.clientPerformance);
   }
 
   function renderLeavePattern(data) {
@@ -929,6 +1239,84 @@
         <td>${row.gps_distance_m ?? '-'}</td>
       </tr>
     `).join('');
+  }
+
+  function renderFraudAnomaly(data) {
+    const rows = (data && data.activities) || [];
+    const tbody = document.getElementById('advancedFraudRows');
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="5" class="muted">Tidak ada aktivitas mencurigakan.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = rows.slice(0, 20).map(row => `
+      <tr>
+        <td>${formatDate(row.date)}</td>
+        <td>${row.employee_name || row.employee_email || '-'}</td>
+        <td>${(row.rule || '-').replaceAll('_', ' ')}</td>
+        <td><span class="status-badge ${row.severity === 'high' ? 'status-absent' : 'status-late'}">${row.severity || '-'}</span></td>
+        <td>${row.risk_points || 0}</td>
+      </tr>
+    `).join('');
+  }
+
+  function renderClientPerformance(rows) {
+    const tbody = document.getElementById('advancedPerformanceRows');
+    const cards = document.getElementById('clientPerformanceCards');
+    if (!rows || !rows.length) {
+      tbody.innerHTML = '<tr><td colspan="5" class="muted">Tidak ada performance client.</td></tr>';
+      cards.innerHTML = '<div class="muted">Tidak ada scorecard client.</div>';
+      return;
+    }
+    cards.innerHTML = rows.slice(0, 6).map(row => `
+      <button class="client-scorecard" type="button" data-client-id="${row.client_id}" title="Klik untuk drill-down client">
+        <strong>${row.client_name || '-'}</strong>
+        <span class="score">${Number(row.compliance_score || 0).toFixed(1)}</span>
+        <span class="muted">Attendance ${Number(row.attendance_rate || 0).toFixed(1)}%</span>
+      </button>
+    `).join('');
+    tbody.innerHTML = rows.map(row => `
+      <tr data-client-id="${row.client_id}" title="Klik untuk melihat detail pegawai client ini">
+        <td>${row.client_name || '-'}</td>
+        <td>${Number(row.attendance_rate || 0).toFixed(1)}%</td>
+        <td>${Number(row.leave_rate || 0).toFixed(1)}%</td>
+        <td>${row.manual_attendance_count || 0}</td>
+        <td><span class="status-badge ${Number(row.compliance_score || 0) >= 80 ? 'status-on-time' : 'status-late'}">${Number(row.compliance_score || 0).toFixed(1)}</span></td>
+      </tr>
+    `).join('');
+    document.querySelectorAll('[data-client-id]').forEach(item => {
+      item.addEventListener('click', () => drillDownClient(item.dataset.clientId));
+    });
+  }
+
+  function drillDownClient(clientId) {
+    if (!clientId) return;
+    const select = document.getElementById('clientSelect');
+    if (select) select.value = clientId;
+    updateReportFilterCascade({ resetSite: true, resetEmployee: true });
+    generateReports();
+    showAlert('Client drill-down applied', 'info');
+  }
+
+  function initializeWidgetDrag() {
+    document.querySelectorAll('.advanced-grid').forEach(grid => {
+      const saved = JSON.parse(localStorage.getItem(`report_widgets_${grid.className}`) || '[]');
+      saved.forEach(id => {
+        const item = grid.querySelector(`[data-widget-id="${id}"]`);
+        if (item) grid.appendChild(item);
+      });
+      grid.querySelectorAll('.advanced-widget').forEach(widget => {
+        widget.addEventListener('dragstart', () => widget.classList.add('is-dragging'));
+        widget.addEventListener('dragend', () => {
+          widget.classList.remove('is-dragging');
+          localStorage.setItem(`report_widgets_${grid.className}`, JSON.stringify(Array.from(grid.querySelectorAll('.advanced-widget')).map(item => item.dataset.widgetId)));
+        });
+        widget.addEventListener('dragover', event => {
+          event.preventDefault();
+          const dragging = grid.querySelector('.is-dragging');
+          if (dragging && dragging !== widget) grid.insertBefore(dragging, widget);
+        });
+      });
+    });
   }
 
   function drawLineChart(canvasId, points) {
@@ -1050,6 +1438,10 @@
   
   function showAlert(message, type = 'info') {
     const alert = document.getElementById('reportsAlert');
+    if (!alert) {
+      if (type === 'error') console.error(message);
+      return;
+    }
     alert.textContent = message;
     alert.className = `alert ${type}`;
     alert.style.display = 'block';
@@ -1068,6 +1460,8 @@
       document.getElementById('advancedInsightCards').innerHTML = '<div class="muted"><span class="spinner"></span> Loading...</div>';
       document.getElementById('advancedLeaveRows').innerHTML = '<tr><td colspan="2" class="muted"><span class="spinner"></span> Loading...</td></tr>';
       document.getElementById('advancedGeoRows').innerHTML = '<tr><td colspan="5" class="muted"><span class="spinner"></span> Loading...</td></tr>';
+      document.getElementById('advancedFraudRows').innerHTML = '<tr><td colspan="5" class="muted"><span class="spinner"></span> Loading...</td></tr>';
+      document.getElementById('advancedPerformanceRows').innerHTML = '<tr><td colspan="5" class="muted"><span class="spinner"></span> Loading...</td></tr>';
     }
   }
   
@@ -1078,6 +1472,7 @@
   // Event listeners
   document.addEventListener('DOMContentLoaded', () => {
     initializeDateInputs();
+    initializeWidgetDrag();
     loadClients();
     
     // Tab switching
@@ -1099,6 +1494,19 @@
     
     // Generate reports button
     document.getElementById('btnGenerateReports').addEventListener('click', generateReports);
+    document.getElementById('btnRunCustomReport').addEventListener('click', () => runCustomReport(false));
+    document.getElementById('btnSaveCustomReport').addEventListener('click', () => runCustomReport(true));
+    document.getElementById('btnLoadReportTemplates').addEventListener('click', loadReportTemplates);
+    document.getElementById('customTemplateSelect').addEventListener('change', applyReportTemplate);
+    document.getElementById('clientSelect').addEventListener('change', () => {
+      updateReportFilterCascade({ resetSite: true, resetEmployee: true });
+      generateReports();
+    });
+    document.getElementById('siteSelect').addEventListener('change', () => {
+      updateReportFilterCascade({ resetEmployee: true });
+      generateReports();
+    });
+    document.getElementById('employeeSelect').addEventListener('change', generateReports);
     document.getElementById('btnCalendarReportGenerate').addEventListener('click', generateCalendarReport);
     document.getElementById('btnCalendarReportExport').addEventListener('click', exportCalendarReport);
     

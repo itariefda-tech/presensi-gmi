@@ -42,6 +42,10 @@ PERF_LOGGER = logging.getLogger("perf")
 API_ACCESS_TOKEN = (os.environ.get("API_ACCESS_TOKEN") or os.environ.get("HRIS_API_TOKEN") or "").strip()
 LOGIN_RATE_LIMIT_MAX = 5
 LOGIN_RATE_LIMIT_WINDOW_MINUTES = 15
+REPORT_CACHE_TTL_SECONDS = 30
+REPORT_EXPORT_MAX_ROWS = 5000
+REPORT_JSON_MAX_LIMIT = 500
+_REPORT_CACHE: dict[str, tuple[float, object]] = {}
 try:
     ADMIN_LIST_LIMIT = int(os.environ.get("ADMIN_LIST_LIMIT") or 0)
 except ValueError:
@@ -3454,7 +3458,15 @@ def create_app() -> Flask:
             return error_response
         if not _advanced_reporting_enabled(user, filters.get("client_id")):
             return _addon_required_response("Advanced reporting")
-        return jsonify(ok=True, filters=filters, data=factory(filters)), 200
+        data = _advanced_cached_payload(factory.__name__, filters, lambda: factory(filters))
+        pagination = _report_pagination_from_request()
+        if pagination[2]:
+            return pagination[2]
+        data, meta = _paginate_report_data(data, pagination[0], pagination[1])
+        response = {"ok": True, "filters": filters, "data": data}
+        if meta:
+            response["pagination"] = meta
+        return jsonify(response), 200
 
     @app.route("/api/report/attendance/summary", methods=["GET"])
     def advanced_report_attendance_summary():
@@ -3483,6 +3495,99 @@ def create_app() -> Flask:
     @app.route("/api/report/geo/anomaly", methods=["GET"])
     def advanced_report_geo_anomaly():
         return _advanced_report_response(_advanced_geo_anomaly)
+
+    @app.route("/api/report/anomaly", methods=["GET"])
+    def advanced_report_anomaly():
+        return _advanced_report_response(_advanced_anomaly_report)
+
+    @app.route("/api/report/client/performance", methods=["GET"])
+    def advanced_report_client_performance():
+        return _advanced_report_response(_advanced_client_performance)
+
+    @app.route("/api/report/export", methods=["GET"])
+    def advanced_report_export():
+        user = _current_user()
+        addon_block = _advanced_reporting_required_response(user)
+        if addon_block:
+            return addon_block
+        filters, error_response = _advanced_report_filters_from_request(user)
+        if error_response:
+            return error_response
+        if not _advanced_reporting_enabled(user, filters.get("client_id")):
+            return _addon_required_response("Advanced reporting")
+        report_type = (request.args.get("report_type") or "client_performance").strip().lower()
+        fmt = (request.args.get("format") or "csv").strip().lower()
+        if fmt not in {"csv", "pdf", "excel"}:
+            return jsonify(ok=False, message="format tidak valid."), 400
+        rows = _advanced_export_rows(report_type, filters)
+        if rows is None:
+            return jsonify(ok=False, message="report_type tidak valid."), 400
+        if len(rows) > REPORT_EXPORT_MAX_ROWS:
+            return jsonify(ok=False, message=f"Export dibatasi maksimal {REPORT_EXPORT_MAX_ROWS} baris. Persempit filter tanggal/client."), 400
+        filename_base = f"advanced-report-{report_type}-{filters['start_date']}-{filters['end_date']}"
+        if fmt == "pdf":
+            return _simple_pdf_response(f"{filename_base}.pdf", f"Advanced Report - {report_type}", rows)
+        if fmt == "excel":
+            return _csv_response(f"{filename_base}.xls", rows)
+        return _csv_response(f"{filename_base}.csv", rows)
+
+    @app.route("/api/report/schedule", methods=["POST"])
+    def advanced_report_schedule():
+        user = _current_user()
+        addon_block = _advanced_reporting_required_response(user)
+        if addon_block:
+            return addon_block
+        data = _get_json()
+        filters, filter_error = _advanced_filters_from_payload(user, data)
+        if filter_error:
+            return filter_error
+        report_type = (data.get("report_type") or "client_performance").strip().lower()
+        if _advanced_export_rows(report_type, filters) is None:
+            return jsonify(ok=False, message="report_type tidak valid."), 400
+        frequency = (data.get("frequency") or "weekly").strip().lower()
+        if frequency not in {"weekly", "monthly"}:
+            return jsonify(ok=False, message="frequency tidak valid."), 400
+        output_format = (data.get("format") or "csv").strip().lower()
+        if output_format not in {"csv", "pdf", "excel"}:
+            return jsonify(ok=False, message="format tidak valid."), 400
+        schedule = _create_report_schedule(user, report_type, frequency, output_format, filters, data.get("recipient_email"))
+        return jsonify(ok=True, message="Report schedule tersimpan.", data=schedule), 200
+
+    @app.route("/api/report/custom", methods=["POST"])
+    def advanced_report_custom():
+        user = _current_user()
+        addon_block = _advanced_reporting_required_response(user)
+        if addon_block:
+            return addon_block
+        data = _get_json()
+        filters, filter_error = _advanced_filters_from_payload(user, data)
+        if filter_error:
+            return filter_error
+        metrics = data.get("metrics") or []
+        dimensions = data.get("dimensions") or []
+        try:
+            limit = int(data.get("limit") or REPORT_JSON_MAX_LIMIT)
+            offset = int(data.get("offset") or 0)
+        except (TypeError, ValueError):
+            return jsonify(ok=False, message="pagination tidak valid."), 400
+        if limit < 1 or limit > REPORT_JSON_MAX_LIMIT or offset < 0:
+            return jsonify(ok=False, message=f"limit maksimal {REPORT_JSON_MAX_LIMIT} dan offset harus valid."), 400
+        try:
+            payload = _advanced_custom_report(filters, metrics, dimensions, limit=limit, offset=offset)
+        except ValueError as exc:
+            return jsonify(ok=False, message=str(exc)), 400
+        template = None
+        if data.get("save_template") or (data.get("template_name") or "").strip():
+            template = _save_report_template(user, data.get("template_name") or "Custom report", metrics, dimensions, filters)
+        return jsonify(ok=True, filters=filters, data=payload, template=template), 200
+
+    @app.route("/api/report/templates", methods=["GET"])
+    def advanced_report_templates():
+        user = _current_user()
+        addon_block = _advanced_reporting_required_response(user)
+        if addon_block:
+            return addon_block
+        return jsonify(ok=True, data=_list_report_templates(user)), 200
 
     @app.route("/admin/ai-analysis/summary", methods=["GET"])
     @app.route("/api/admin/ai-analysis/summary", methods=["GET"])
@@ -8511,9 +8616,37 @@ def _list_employee_users() -> list[dict]:
     try:
         cur = conn.execute(
             """
-            SELECT id, name, email, is_active
-            FROM users
-            WHERE role = 'employee'
+            SELECT
+                u.id,
+                u.name,
+                u.email,
+                u.is_active,
+                COALESCE(
+                    (
+                        SELECT a.client_id
+                        FROM assignments a
+                        WHERE a.employee_user_id = u.id
+                          AND upper(COALESCE(a.status, 'ACTIVE')) = 'ACTIVE'
+                          AND (a.end_date IS NULL OR a.end_date = '' OR a.end_date >= date('now'))
+                        ORDER BY a.start_date DESC, a.id DESC
+                        LIMIT 1
+                    ),
+                    u.client_id
+                ) AS client_id,
+                COALESCE(
+                    (
+                        SELECT a.site_id
+                        FROM assignments a
+                        WHERE a.employee_user_id = u.id
+                          AND upper(COALESCE(a.status, 'ACTIVE')) = 'ACTIVE'
+                          AND (a.end_date IS NULL OR a.end_date = '' OR a.end_date >= date('now'))
+                        ORDER BY a.start_date DESC, a.id DESC
+                        LIMIT 1
+                    ),
+                    u.site_id
+                ) AS site_id
+            FROM users u
+            WHERE u.role = 'employee'
             ORDER BY name, email
             """
         )
@@ -11559,6 +11692,44 @@ def _init_db() -> None:
         )
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS report_schedules (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                report_type TEXT NOT NULL,
+                frequency TEXT NOT NULL,
+                output_format TEXT NOT NULL DEFAULT 'csv',
+                filters_json TEXT,
+                recipient_email TEXT,
+                created_by_user_id INTEGER,
+                created_by_email TEXT,
+                status TEXT NOT NULL DEFAULT 'active',
+                last_generated_at TEXT,
+                next_run_hint TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT,
+                FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+            )
+            """
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_report_schedules_status ON report_schedules(status, frequency)")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS report_templates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                metrics_json TEXT NOT NULL,
+                dimensions_json TEXT NOT NULL,
+                filters_json TEXT,
+                created_by_user_id INTEGER,
+                created_by_email TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT,
+                FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+            )
+            """
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_report_templates_creator ON report_templates(created_by_email, created_at)")
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS patrol_routes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 client_id INTEGER,
@@ -12083,6 +12254,30 @@ def _init_db() -> None:
         if _table_exists(conn, "manual_attendance_requests"):
             _ensure_column(conn, "manual_attendance_requests", "client_id", "client_id INTEGER")
             _ensure_column(conn, "manual_attendance_requests", "branch_id", "branch_id INTEGER")
+        if _table_exists(conn, "report_schedules"):
+            _ensure_column(conn, "report_schedules", "report_type", "report_type TEXT")
+            _ensure_column(conn, "report_schedules", "frequency", "frequency TEXT")
+            _ensure_column(conn, "report_schedules", "output_format", "output_format TEXT DEFAULT 'csv'")
+            _ensure_column(conn, "report_schedules", "filters_json", "filters_json TEXT")
+            _ensure_column(conn, "report_schedules", "recipient_email", "recipient_email TEXT")
+            _ensure_column(conn, "report_schedules", "created_by_user_id", "created_by_user_id INTEGER")
+            _ensure_column(conn, "report_schedules", "created_by_email", "created_by_email TEXT")
+            _ensure_column(conn, "report_schedules", "status", "status TEXT NOT NULL DEFAULT 'active'")
+            _ensure_column(conn, "report_schedules", "last_generated_at", "last_generated_at TEXT")
+            _ensure_column(conn, "report_schedules", "next_run_hint", "next_run_hint TEXT")
+            _ensure_column(conn, "report_schedules", "created_at", "created_at TEXT")
+            _ensure_column(conn, "report_schedules", "updated_at", "updated_at TEXT")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_report_schedules_status ON report_schedules(status, frequency)")
+        if _table_exists(conn, "report_templates"):
+            _ensure_column(conn, "report_templates", "name", "name TEXT")
+            _ensure_column(conn, "report_templates", "metrics_json", "metrics_json TEXT")
+            _ensure_column(conn, "report_templates", "dimensions_json", "dimensions_json TEXT")
+            _ensure_column(conn, "report_templates", "filters_json", "filters_json TEXT")
+            _ensure_column(conn, "report_templates", "created_by_user_id", "created_by_user_id INTEGER")
+            _ensure_column(conn, "report_templates", "created_by_email", "created_by_email TEXT")
+            _ensure_column(conn, "report_templates", "created_at", "created_at TEXT")
+            _ensure_column(conn, "report_templates", "updated_at", "updated_at TEXT")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_report_templates_creator ON report_templates(created_by_email, created_at)")
         if _table_exists(conn, "attendance"):
             _ensure_column(conn, "attendance", "client_id", "client_id INTEGER")
             _ensure_column(conn, "attendance", "branch_id", "branch_id INTEGER")
@@ -12475,6 +12670,12 @@ def _init_db() -> None:
             )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_attendance_flags ON attendance(late_flag, early_checkout_flag, inside_radius_flag)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_attendance_report_range ON attendance(date, action, client_id, site_id)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_attendance_report_email_date ON attendance(lower(employee_email), date, action)"
             )
         if _table_exists(conn, "employee_registration_codes"):
             _ensure_column(conn, "employee_registration_codes", "year_month", "year_month TEXT")
@@ -14829,21 +15030,30 @@ def _advanced_report_filters_from_request(user: User) -> tuple[dict | None, tupl
         return None, error_response
     client_scope = get_current_client_scope(user)
     if client_scope:
+        requested_client_id = filters.get("client_id")
+        if requested_client_id and int(requested_client_id) != int(client_scope):
+            return None, _json_forbidden()
         filters["client_id"] = client_scope
     if filters.get("site_id"):
         site = _get_site_by_id(filters["site_id"])
         if not site:
             return None, (jsonify(ok=False, message="site_id tidak terdaftar."), 400)
         if client_scope and int(_row_get(site, "client_id") or 0) != int(client_scope):
-            return None, (_json_forbidden(), 403)
+            return None, _json_forbidden()
         filters["client_id"] = int(_row_get(site, "client_id") or 0) or filters.get("client_id")
     return filters, ()
 
 
 def _advanced_reporting_required_response(user: User, client_id: int | None = None):
-    if not user or user.role not in ADMIN_ROLES or not _is_pro(user):
+    if not user or user.role not in (ADMIN_ROLES | CLIENT_ROLES) or not _is_pro(user):
         return _json_forbidden()
-    if not _advanced_reporting_enabled(user, client_id):
+    client_scope = get_current_client_scope(user)
+    if user.role in CLIENT_ROLES and not client_scope:
+        return _json_forbidden()
+    if client_id and client_scope and int(client_id) != int(client_scope):
+        return _json_forbidden()
+    enabled_client_id = client_id or client_scope
+    if not _advanced_reporting_enabled(user, enabled_client_id):
         return _addon_required_response("Advanced reporting")
     return None
 
@@ -14854,6 +15064,7 @@ def get_attendance_by_range(
     client_id: int | None = None,
     site_id: int | None = None,
     employee_id: int | None = None,
+    role: str | None = None,
 ) -> list[dict]:
     conn = _db_connect()
     try:
@@ -14869,7 +15080,8 @@ def get_attendance_by_range(
                 COALESCE(a.client_id, e.client_id, s.client_id) AS resolved_client_id,
                 COALESCE(s.name, assign_site.name) AS site_name,
                 COALESCE(c.name, assign_client.name) AS client_name,
-                u.id AS user_id
+                u.id AS user_id,
+                u.role AS user_role
             FROM attendance a
             LEFT JOIN employees e ON lower(e.email) = lower(a.employee_email)
             LEFT JOIN users u ON lower(u.email) = lower(a.employee_email)
@@ -14897,6 +15109,8 @@ def get_attendance_by_range(
                 continue
             if employee_id and int(item.get("user_id") or 0) != int(employee_id):
                 continue
+            if role and (item.get("user_role") or "").strip().lower() != role:
+                continue
             action = _normalize_attendance_action(item.get("action"))
             minutes = _extract_minutes(item.get("time"), item.get("created_at"))
             late_minutes = calculate_late(minutes, assignment) if action == ATTENDANCE_ACTION_CHECKIN else 0
@@ -14908,6 +15122,7 @@ def get_attendance_by_range(
                     "site_id": resolved_site_id or None,
                     "client_name": item.get("client_name") or item.get("assign_client.name") or "-",
                     "site_name": item.get("site_name") or (assignment or {}).get("site_name") or "-",
+                    "role": item.get("user_role") or "-",
                     "action": action,
                     "minutes": minutes,
                     "late_minutes": late_minutes,
@@ -15018,6 +15233,7 @@ def _advanced_filter_args(filters: dict) -> dict:
         "client_id": filters.get("client_id"),
         "site_id": filters.get("site_id"),
         "employee_id": filters.get("employee_id"),
+        "role": filters.get("role"),
     }
 
 
@@ -15189,6 +15405,516 @@ def _advanced_geo_anomaly(filters: dict) -> list[dict]:
     return anomalies[:300]
 
 
+def _attendance_row_timestamp(row: dict) -> datetime | None:
+    for value in (row.get("created_at"), f"{row.get('date') or ''} {row.get('time') or ''}".strip()):
+        if not value:
+            continue
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
+            try:
+                return datetime.strptime(str(value)[:19], fmt)
+            except ValueError:
+                continue
+    return None
+
+
+def _advanced_anomaly_report(filters: dict) -> dict:
+    rows = get_attendance_by_range(**_advanced_filter_args(filters))
+    activities: list[dict] = []
+    risk: dict[str, dict] = {}
+
+    def add_activity(row: dict, rule: str, reason: str, points: int, severity: str, details: dict | None = None):
+        email = (row.get("employee_email") or "").strip().lower()
+        activity = {
+            "date": row.get("date"),
+            "employee_email": email,
+            "employee_name": row.get("employee_name") or email or "-",
+            "client_name": row.get("client_name") or "-",
+            "site_name": row.get("site_name") or "-",
+            "action": row.get("action") or "-",
+            "rule": rule,
+            "reason": reason,
+            "severity": severity,
+            "risk_points": points,
+            "time": row.get("time") or "-",
+            "lat": row.get("lat"),
+            "lng": row.get("lng"),
+            "details": details or {},
+        }
+        activities.append(activity)
+        if email:
+            item = risk.setdefault(
+                email,
+                {
+                    "employee_email": email,
+                    "employee_name": activity["employee_name"],
+                    "client_name": activity["client_name"],
+                    "site_name": activity["site_name"],
+                    "risk_score": 0,
+                    "anomaly_count": 0,
+                    "rules": set(),
+                },
+            )
+            item["risk_score"] += points
+            item["anomaly_count"] += 1
+            item["rules"].add(rule)
+
+    by_employee_date: dict[tuple[str, str], list[dict]] = {}
+    by_location: dict[tuple[str, float, float], list[dict]] = {}
+    qr_by_employee_date: dict[tuple[str, str], list[dict]] = {}
+    for row in rows:
+        email = (row.get("employee_email") or "").strip().lower()
+        date_key = row.get("date") or ""
+        if email and date_key:
+            by_employee_date.setdefault((email, date_key), []).append(row)
+            if "qr" in (row.get("method") or "").lower():
+                qr_by_employee_date.setdefault((email, date_key), []).append(row)
+        if row.get("action") == ATTENDANCE_ACTION_CHECKIN and row.get("lat") is not None and row.get("lng") is not None:
+            by_location.setdefault((date_key, round(float(row["lat"]), 5), round(float(row["lng"]), 5)), []).append(row)
+
+    for records in by_employee_date.values():
+        checkins = sorted([row for row in records if row.get("action") == ATTENDANCE_ACTION_CHECKIN], key=lambda row: _attendance_row_timestamp(row) or datetime.min)
+        checkouts = sorted([row for row in records if row.get("action") == ATTENDANCE_ACTION_CHECKOUT], key=lambda row: _attendance_row_timestamp(row) or datetime.min)
+        for checkin in checkins:
+            checkin_ts = _attendance_row_timestamp(checkin)
+            if not checkin_ts:
+                continue
+            checkout = next((row for row in checkouts if (_attendance_row_timestamp(row) or datetime.min) >= checkin_ts), None)
+            if not checkout:
+                continue
+            checkout_ts = _attendance_row_timestamp(checkout)
+            if not checkout_ts:
+                continue
+            duration_minutes = max(0, int((checkout_ts - checkin_ts).total_seconds() // 60))
+            if duration_minutes < 5:
+                add_activity(
+                    checkout,
+                    "short_session",
+                    "Check-in dan check-out kurang dari 5 menit",
+                    35,
+                    "high",
+                    {"checkin_time": checkin.get("time"), "checkout_time": checkout.get("time"), "duration_minutes": duration_minutes},
+                )
+
+    for location_rows in by_location.values():
+        employees = sorted({(row.get("employee_email") or "").strip().lower() for row in location_rows if row.get("employee_email")})
+        if len(employees) <= 1:
+            continue
+        for row in location_rows:
+            add_activity(
+                row,
+                "identical_location",
+                "Lokasi presensi identik dengan pegawai lain",
+                25,
+                "medium",
+                {"matched_employee_count": len(employees), "matched_employees": employees[:8]},
+            )
+
+    for qr_rows in qr_by_employee_date.values():
+        checkins = [row for row in qr_rows if row.get("action") == ATTENDANCE_ACTION_CHECKIN]
+        if len(checkins) <= 1:
+            continue
+        for row in checkins[1:]:
+            add_activity(
+                row,
+                "repeated_qr",
+                "QR digunakan berulang untuk check-in pada hari yang sama",
+                20,
+                "medium",
+                {"qr_checkin_count": len(checkins)},
+            )
+
+    for row in rows:
+        if row.get("suspicious_location_flag"):
+            add_activity(row, "outside_radius", "Presensi di luar radius site", 30, "high", {"gps_distance_m": row.get("gps_distance_m")})
+
+    risk_scores = []
+    for item in risk.values():
+        score = min(100, int(item["risk_score"]))
+        risk_scores.append(
+            {
+                "employee_email": item["employee_email"],
+                "employee_name": item["employee_name"],
+                "client_name": item["client_name"],
+                "site_name": item["site_name"],
+                "risk_score": score,
+                "risk_level": "high" if score >= 60 else "medium" if score >= 25 else "low",
+                "anomaly_count": item["anomaly_count"],
+                "rules": sorted(item["rules"]),
+            }
+        )
+
+    return {
+        "summary": {
+            "total_activities": len(activities),
+            "high_risk_employees": sum(1 for row in risk_scores if row["risk_level"] == "high"),
+            "rules": {
+                "short_session": sum(1 for row in activities if row["rule"] == "short_session"),
+                "identical_location": sum(1 for row in activities if row["rule"] == "identical_location"),
+                "repeated_qr": sum(1 for row in activities if row["rule"] == "repeated_qr"),
+                "outside_radius": sum(1 for row in activities if row["rule"] == "outside_radius"),
+            },
+        },
+        "activities": sorted(activities, key=lambda row: (row.get("date") or "", row.get("risk_points") or 0), reverse=True)[:300],
+        "risk_scores": sorted(risk_scores, key=lambda row: (-row["risk_score"], row["employee_name"]))[:100],
+    }
+
+
+def _manual_attendance_count(filters: dict, client_id: int | None = None) -> int:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "manual_attendance_requests"):
+            return 0
+        clauses = ["date >= ?", "date <= ?"]
+        params: list = [filters["start_date"], filters["end_date"]]
+        if client_id:
+            clauses.append("client_id = ?")
+            params.append(client_id)
+        if filters.get("site_id"):
+            clauses.append("branch_id = ?")
+            params.append(filters["site_id"])
+        if filters.get("employee_id"):
+            clauses.append("created_by_user_id = ?")
+            params.append(filters["employee_id"])
+        return int(conn.execute(f"SELECT COUNT(*) AS total FROM manual_attendance_requests WHERE {' AND '.join(clauses)}", params).fetchone()["total"] or 0)
+    finally:
+        conn.close()
+
+
+def _advanced_client_performance(filters: dict) -> list[dict]:
+    rows = get_attendance_by_range(**_advanced_filter_args(filters))
+    grouped = group_by_client(rows)
+    leave_rows = _advanced_leave_rows(filters)
+    leave_by_client: dict[int, int] = {}
+    for row in leave_rows:
+        client_id = int(row.get("client_id_snapshot") or row.get("client_id") or 0)
+        if client_id:
+            leave_by_client[client_id] = leave_by_client.get(client_id, 0) + 1
+
+    clients = []
+    for client in _clients():
+        client_id = int(client.get("id") or 0)
+        if filters.get("client_id") and client_id != int(filters["client_id"]):
+            continue
+        if client_id in grouped or client_id in leave_by_client or not filters.get("site_id"):
+            clients.append({"client_id": client_id, "client_name": client.get("name") or f"Client {client_id}"})
+
+    seen = {client["client_id"] for client in clients}
+    for client_id, item in grouped.items():
+        if client_id not in seen:
+            clients.append({"client_id": client_id, "client_name": item.get("client_name") or f"Client {client_id}"})
+
+    performance = []
+    for client in clients:
+        client_id = client["client_id"]
+        item = grouped.get(client_id, {})
+        present = int(item.get("checkins") or 0)
+        late = int(item.get("late_count") or 0)
+        suspicious = int(item.get("suspicious_location_count") or 0)
+        if filters.get("site_id") or filters.get("role") or filters.get("employee_id"):
+            leave_total = int(leave_by_client.get(client_id, 0))
+            absent_total = 0
+            expected = present + leave_total
+        else:
+            summary = _generate_summary_report(filters["start_date"], filters["end_date"], client_id)
+            leave_total = int(summary.get("total_leave") or 0)
+            absent_total = int(summary.get("total_absent") or 0)
+            expected = int(summary.get("total_days") or 0)
+            late = int(summary.get("total_late") or late)
+        manual_count = _manual_attendance_count(filters, client_id)
+        attendance_rate = _ai_rate(present, expected)
+        leave_rate = _ai_rate(leave_total, expected)
+        compliance_score = max(
+            0,
+            round(attendance_rate - _ai_rate(late, max(present, 1)) * 0.25 - _ai_rate(manual_count + suspicious, max(present + manual_count, 1)) * 0.2, 2),
+        )
+        performance.append(
+            {
+                "client_id": client_id,
+                "client_name": client["client_name"],
+                "attendance_rate": attendance_rate,
+                "leave_rate": leave_rate,
+                "manual_attendance_count": manual_count,
+                "compliance_score": compliance_score,
+                "present": present,
+                "leave_count": leave_total,
+                "absent_count": absent_total,
+                "late_count": late,
+                "suspicious_location_count": suspicious,
+            }
+        )
+    return sorted(performance, key=lambda row: (-row["compliance_score"], row["client_name"]))
+
+
+def _advanced_export_rows(report_type: str, filters: dict) -> list[dict] | None:
+    mapping = {
+        "attendance_summary": lambda: [_advanced_attendance_summary(filters)],
+        "attendance_by_client": lambda: _advanced_attendance_by_client(filters),
+        "attendance_by_employee": lambda: _advanced_attendance_by_employee(filters),
+        "attendance_ranking": lambda: [row | {"ranking_type": "top_performer"} for row in _advanced_attendance_ranking(filters).get("top_performer", [])]
+        + [row | {"ranking_type": "most_late"} for row in _advanced_attendance_ranking(filters).get("most_late", [])],
+        "leave_pattern": lambda: _advanced_leave_pattern(filters).get("by_type", []),
+        "geo_anomaly": lambda: _advanced_geo_anomaly(filters),
+        "anomaly": lambda: _advanced_anomaly_report(filters).get("activities", []),
+        "client_performance": lambda: _advanced_client_performance(filters),
+    }
+    factory = mapping.get(report_type)
+    return factory() if factory else None
+
+
+def _create_report_schedule(user: User, report_type: str, frequency: str, output_format: str, filters: dict, recipient_email: str | None) -> dict:
+    now = _now_ts()
+    next_run_hint = "Setiap Senin pagi" if frequency == "weekly" else "Tanggal 1 setiap bulan"
+    conn = _db_connect()
+    try:
+        cur = conn.execute(
+            """
+            INSERT INTO report_schedules (
+                report_type, frequency, output_format, filters_json, recipient_email,
+                created_by_user_id, created_by_email, status, next_run_hint, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
+            """,
+            (
+                report_type,
+                frequency,
+                output_format,
+                json.dumps(filters, ensure_ascii=True, sort_keys=True),
+                (recipient_email or user.email or "").strip(),
+                user.id if user.id and user.id > 0 else None,
+                user.email,
+                next_run_hint,
+                now,
+                now,
+            ),
+        )
+        conn.commit()
+        schedule_id = int(cur.lastrowid)
+    finally:
+        conn.close()
+    return {
+        "id": schedule_id,
+        "report_type": report_type,
+        "frequency": frequency,
+        "format": output_format,
+        "status": "active",
+        "next_run_hint": next_run_hint,
+    }
+
+
+CUSTOM_REPORT_METRICS = {
+    "present",
+    "late_count",
+    "leave_count",
+    "absent_count",
+    "manual_attendance_count",
+    "attendance_rate",
+    "late_rate",
+}
+CUSTOM_REPORT_DIMENSIONS = {"date", "client", "site", "employee", "role"}
+
+
+def _safe_json_loads(value: str | None, fallback):
+    try:
+        return json.loads(value or "")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return fallback
+
+
+def _custom_dimension_values(row: dict, dimensions: list[str]) -> tuple:
+    values = []
+    for dimension in dimensions:
+        if dimension == "date":
+            values.append(row.get("date") or "-")
+        elif dimension == "client":
+            values.append(row.get("client_name") or "-")
+        elif dimension == "site":
+            values.append(row.get("site_name") or "-")
+        elif dimension == "employee":
+            values.append(row.get("employee_name") or row.get("employee_email") or "-")
+        elif dimension == "role":
+            values.append(row.get("role") or "-")
+    return tuple(values)
+
+
+def _manual_attendance_rows(filters: dict) -> list[dict]:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "manual_attendance_requests"):
+            return []
+        clauses = ["mar.date >= ?", "mar.date <= ?"]
+        params: list = [filters["start_date"], filters["end_date"]]
+        if filters.get("client_id"):
+            clauses.append("mar.client_id = ?")
+            params.append(filters["client_id"])
+        if filters.get("site_id"):
+            clauses.append("mar.branch_id = ?")
+            params.append(filters["site_id"])
+        if filters.get("employee_id"):
+            clauses.append("mar.created_by_user_id = ?")
+            params.append(filters["employee_id"])
+        return [
+            dict(row)
+            for row in conn.execute(
+                f"""
+                SELECT mar.*, COALESCE(c.name, '-') AS client_name, COALESCE(s.name, '-') AS site_name,
+                       COALESCE(u.role, mar.created_by_role, '-') AS role
+                FROM manual_attendance_requests mar
+                LEFT JOIN clients c ON c.id = mar.client_id
+                LEFT JOIN sites s ON s.id = mar.branch_id
+                LEFT JOIN users u ON lower(u.email) = lower(mar.employee_email)
+                WHERE {' AND '.join(clauses)}
+                ORDER BY mar.date ASC, mar.created_at ASC
+                """,
+                params,
+            ).fetchall()
+        ]
+    finally:
+        conn.close()
+
+
+def _advanced_custom_report(filters: dict, metrics: list, dimensions: list, limit: int = REPORT_JSON_MAX_LIMIT, offset: int = 0) -> dict:
+    selected_metrics = [str(item).strip().lower() for item in metrics if str(item).strip()]
+    selected_dimensions = [str(item).strip().lower() for item in dimensions if str(item).strip()]
+    if not selected_metrics:
+        raise ValueError("Pilih minimal satu metric.")
+    if not selected_dimensions:
+        raise ValueError("Pilih minimal satu dimensi.")
+    invalid_metrics = [item for item in selected_metrics if item not in CUSTOM_REPORT_METRICS]
+    invalid_dimensions = [item for item in selected_dimensions if item not in CUSTOM_REPORT_DIMENSIONS]
+    if invalid_metrics:
+        raise ValueError(f"Metric tidak valid: {', '.join(invalid_metrics)}")
+    if invalid_dimensions:
+        raise ValueError(f"Dimensi tidak valid: {', '.join(invalid_dimensions)}")
+
+    grouped: dict[tuple, dict] = {}
+
+    def item_for(row: dict) -> dict:
+        key = _custom_dimension_values(row, selected_dimensions)
+        item = grouped.setdefault(key, {dimension: value for dimension, value in zip(selected_dimensions, key)})
+        item.setdefault("present", 0)
+        item.setdefault("late_count", 0)
+        item.setdefault("leave_count", 0)
+        item.setdefault("absent_count", 0)
+        item.setdefault("manual_attendance_count", 0)
+        return item
+
+    for row in get_attendance_by_range(**_advanced_filter_args(filters)):
+        if row.get("action") != ATTENDANCE_ACTION_CHECKIN:
+            continue
+        item = item_for(row)
+        item["present"] += 1
+        item["late_count"] += 1 if row.get("late_flag") else 0
+
+    for row in _advanced_leave_rows(filters):
+        item = item_for(
+            {
+                "date": row.get("date_from"),
+                "client_name": row.get("client_name"),
+                "site_name": row.get("site_name"),
+                "employee_name": row.get("employee_name"),
+                "employee_email": row.get("employee_email"),
+                "role": "employee",
+            }
+        )
+        item["leave_count"] += 1
+
+    if "absent_count" in selected_metrics or "attendance_rate" in selected_metrics:
+        for row in _generate_absent_report(filters["start_date"], filters["end_date"], filters.get("client_id")):
+            if filters.get("site_id") and (row.get("site_id") or row.get("branch_id")) != filters.get("site_id"):
+                continue
+            item = item_for({**row, "role": "employee"})
+            if row.get("status") == "ABSENT":
+                item["absent_count"] += 1
+
+    for row in _manual_attendance_rows(filters):
+        item = item_for(row)
+        item["manual_attendance_count"] += 1
+
+    rows = []
+    for item in grouped.values():
+        expected = item["present"] + item["leave_count"] + item["absent_count"]
+        full = {
+            **{dimension: item.get(dimension, "-") for dimension in selected_dimensions},
+            "present": item["present"],
+            "late_count": item["late_count"],
+            "leave_count": item["leave_count"],
+            "absent_count": item["absent_count"],
+            "manual_attendance_count": item["manual_attendance_count"],
+            "attendance_rate": _ai_rate(item["present"], expected),
+            "late_rate": _ai_rate(item["late_count"], item["present"]),
+        }
+        rows.append({**{dimension: full[dimension] for dimension in selected_dimensions}, **{metric: full[metric] for metric in selected_metrics}})
+    sorted_rows = sorted(rows, key=lambda row: tuple(str(row.get(dimension, "")) for dimension in selected_dimensions))
+    return {
+        "metrics": selected_metrics,
+        "dimensions": selected_dimensions,
+        "rows": sorted_rows[offset:offset + limit],
+        "pagination": {"total": len(sorted_rows), "limit": limit, "offset": offset, "has_more": offset + limit < len(sorted_rows)},
+    }
+
+
+def _save_report_template(user: User, name: str, metrics: list, dimensions: list, filters: dict) -> dict:
+    now = _now_ts()
+    clean_name = (name or "Custom report").strip()[:120]
+    conn = _db_connect()
+    try:
+        cur = conn.execute(
+            """
+            INSERT INTO report_templates (
+                name, metrics_json, dimensions_json, filters_json,
+                created_by_user_id, created_by_email, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                clean_name,
+                json.dumps(metrics, ensure_ascii=True),
+                json.dumps(dimensions, ensure_ascii=True),
+                json.dumps(filters, ensure_ascii=True, sort_keys=True),
+                user.id if user.id and user.id > 0 else None,
+                user.email,
+                now,
+                now,
+            ),
+        )
+        conn.commit()
+        template_id = int(cur.lastrowid)
+    finally:
+        conn.close()
+    return {"id": template_id, "name": clean_name, "metrics": metrics, "dimensions": dimensions, "filters": filters}
+
+
+def _list_report_templates(user: User) -> list[dict]:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "report_templates"):
+            return []
+        rows = conn.execute(
+            """
+            SELECT id, name, metrics_json, dimensions_json, filters_json, created_by_email, created_at
+            FROM report_templates
+            WHERE created_by_email = ? OR ? IN ('owner', 'hr_superadmin', 'admin')
+            ORDER BY created_at DESC, id DESC
+            LIMIT 100
+            """,
+            (user.email, user.role),
+        ).fetchall()
+        result = []
+        for row in rows:
+            result.append(
+                {
+                    "id": row["id"],
+                    "name": row["name"],
+                    "metrics": _safe_json_loads(row["metrics_json"], []),
+                    "dimensions": _safe_json_loads(row["dimensions_json"], []),
+                    "filters": _safe_json_loads(row["filters_json"], {}),
+                    "created_by_email": row["created_by_email"],
+                    "created_at": row["created_at"],
+                }
+            )
+        return result
+    finally:
+        conn.close()
+
+
 def _report_filters_from_request() -> tuple[dict | None, tuple]:
     start_date = _normalize_date_input(request.args.get("start_date"))
     end_date = _normalize_date_input(request.args.get("end_date"))
@@ -15204,10 +15930,94 @@ def _report_filters_from_request() -> tuple[dict | None, tuple]:
         "client_id": _calendar_int(request.args.get("client_id")),
         "site_id": _calendar_int(request.args.get("site_id")),
         "employee_id": _calendar_int(request.args.get("employee_id")),
+        "role": (request.args.get("role") or "").strip().lower(),
     }
+    if filters["role"] and filters["role"] not in {"employee", "client_admin", "admin", "hr_superadmin", "owner"}:
+        return None, (jsonify(ok=False, message="role tidak valid."), 400)
     if filters["site_id"]:
         filters["client_id"] = None
     return filters, ()
+
+
+def _report_pagination_from_request() -> tuple[int | None, int, tuple | None]:
+    limit_raw = (request.args.get("limit") or "").strip()
+    page_raw = (request.args.get("page") or "").strip()
+    offset_raw = (request.args.get("offset") or "").strip()
+    if not limit_raw and not page_raw and not offset_raw:
+        return None, 0, None
+    try:
+        limit = int(limit_raw or REPORT_JSON_MAX_LIMIT)
+        page = int(page_raw or 1)
+        offset = int(offset_raw or max(0, page - 1) * limit)
+    except ValueError:
+        return None, 0, (jsonify(ok=False, message="pagination tidak valid."), 400)
+    if limit < 1 or limit > REPORT_JSON_MAX_LIMIT or offset < 0 or page < 1:
+        return None, 0, (jsonify(ok=False, message=f"limit maksimal {REPORT_JSON_MAX_LIMIT} dan offset/page harus valid."), 400)
+    return limit, offset, None
+
+
+def _paginate_report_data(data, limit: int | None, offset: int) -> tuple[object, dict | None]:
+    if limit is None:
+        return data, None
+    if isinstance(data, list):
+        total = len(data)
+        return data[offset:offset + limit], {"total": total, "limit": limit, "offset": offset, "has_more": offset + limit < total}
+    if isinstance(data, dict):
+        paged = dict(data)
+        meta: dict[str, dict] = {}
+        for key, value in data.items():
+            if isinstance(value, list):
+                total = len(value)
+                paged[key] = value[offset:offset + limit]
+                meta[key] = {"total": total, "limit": limit, "offset": offset, "has_more": offset + limit < total}
+        return paged, meta or None
+    return data, None
+
+
+def _advanced_cached_payload(cache_name: str, filters: dict, factory):
+    cache_key = json.dumps({"name": cache_name, "filters": filters}, sort_keys=True, default=str)
+    now = time.time()
+    cached = _REPORT_CACHE.get(cache_key)
+    if cached and now - cached[0] <= REPORT_CACHE_TTL_SECONDS:
+        return cached[1]
+    value = factory()
+    _REPORT_CACHE[cache_key] = (now, value)
+    if len(_REPORT_CACHE) > 128:
+        oldest_key = min(_REPORT_CACHE, key=lambda key: _REPORT_CACHE[key][0])
+        _REPORT_CACHE.pop(oldest_key, None)
+    return value
+
+
+def _advanced_filters_from_payload(user: User, data: dict) -> tuple[dict | None, tuple | None]:
+    start_dt, end_dt = _month_bounds()
+    filters = {
+        "start_date": _normalize_date_input(data.get("start_date")) or start_dt.strftime("%Y-%m-%d"),
+        "end_date": _normalize_date_input(data.get("end_date")) or end_dt.strftime("%Y-%m-%d"),
+        "client_id": _calendar_int(data.get("client_id")),
+        "site_id": _calendar_int(data.get("site_id")),
+        "employee_id": _calendar_int(data.get("employee_id")),
+        "role": (data.get("role") or "").strip().lower(),
+    }
+    if filters["start_date"] > filters["end_date"]:
+        return None, (jsonify(ok=False, message="Rentang tanggal tidak valid."), 400)
+    if filters["role"] and filters["role"] not in {"employee", "client_admin", "admin", "hr_superadmin", "owner"}:
+        return None, (jsonify(ok=False, message="role tidak valid."), 400)
+    client_scope = get_current_client_scope(user)
+    if client_scope:
+        if filters.get("client_id") and int(filters["client_id"]) != int(client_scope):
+            return None, _json_forbidden()
+        filters["client_id"] = client_scope
+    if filters.get("site_id"):
+        site = _get_site_by_id(filters["site_id"])
+        if not site:
+            return None, (jsonify(ok=False, message="site_id tidak terdaftar."), 400)
+        site_client_id = int(_row_get(site, "client_id") or 0)
+        if client_scope and site_client_id != int(client_scope):
+            return None, _json_forbidden()
+        filters["client_id"] = site_client_id or filters.get("client_id")
+    if not _advanced_reporting_enabled(user, filters.get("client_id")):
+        return None, _addon_required_response("Advanced reporting")
+    return filters, None
 
 
 def _calendar_schedule_report_rows(filters: dict) -> list[dict]:
@@ -21259,6 +22069,24 @@ def admin_bp() -> Blueprint:
             clients=_clients(),
             sites=_list_sites(),
             employees=_list_employee_users(),
+        )
+
+    @bp.route("/reports/client-performance", methods=["GET"])
+    def client_performance_report():
+        user = _current_user()
+        if not _is_pro(user):
+            return render_template(
+                "dashboard/upgrade_prompt.html",
+                user=user,
+                feature="Client Performance",
+                message="Client performance report hanya tersedia untuk HRIS PRO dan Enterprise.",
+            )
+        return render_template(
+            "dashboard/client_performance.html",
+            user=user,
+            advanced_reporting_enabled=_advanced_reporting_enabled(user),
+            clients=_clients(),
+            sites=_list_sites(),
         )
 
     @bp.route("/guard-tour", methods=["GET"])
