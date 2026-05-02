@@ -22,8 +22,8 @@
     </select></div>
     <div class="calendar-report-field calendar-report-field--dates"><label class="label" for="calendarReportStart">Tanggal</label><div class="calendar-date-range"><input class="input" type="date" id="calendarReportStart"><input class="input" type="date" id="calendarReportEnd"></div></div>
     <div class="calendar-report-field"><label class="label" for="calendarReportClient">Client</label><select class="input" id="calendarReportClient"><option value="">Semua client</option>{% for client in clients %}<option value="{{ client.id }}">{{ client.name }}</option>{% endfor %}</select></div>
-    <div class="calendar-report-field"><label class="label" for="calendarReportSite">Site</label><select class="input" id="calendarReportSite"><option value="">Semua site</option>{% for site in sites %}<option value="{{ site.id }}">{{ site.client_name or '-' }} - {{ site.name }}</option>{% endfor %}</select></div>
-    <div class="calendar-report-field"><label class="label" for="calendarReportEmployee">Employee</label><select class="input" id="calendarReportEmployee"><option value="">Semua employee</option>{% for employee in employees %}<option value="{{ employee.id }}">{{ employee.name or employee.email }}</option>{% endfor %}</select></div>
+    <div class="calendar-report-field"><label class="label" for="calendarReportSite">Site</label><select class="input" id="calendarReportSite"><option value="">Semua site</option>{% for site in sites %}<option value="{{ site.id }}" data-client-id="{{ site.client_id }}">{{ site.client_name or '-' }} - {{ site.name }}</option>{% endfor %}</select></div>
+    <div class="calendar-report-field"><label class="label" for="calendarReportEmployee">Employee</label><select class="input" id="calendarReportEmployee"><option value="">Semua employee</option>{% for employee in employees %}<option value="{{ employee.id }}" data-client-id="{{ employee.client_id or '' }}" data-site-id="{{ employee.site_id or '' }}">{{ employee.name or employee.email }}</option>{% endfor %}</select></div>
     <div class="calendar-report-field calendar-report-actions"><button class="btn primary" id="btnCalendarReportGenerate" type="button">Generate Calendar Report</button></div>
   </div>
   <div class="table-wrap" style="margin-top:12px;">
@@ -421,7 +421,8 @@
 }
 
 .custom-check-grid--dimensions {
-  grid-template-columns: repeat(2, minmax(110px, 1fr));
+  grid-template-columns: 1fr;
+  align-content: start;
 }
 
 .custom-check-grid--metrics {
@@ -801,6 +802,42 @@
   function exportCalendarReport() {
     const params = calendarReportParams();
     window.open(`/api/reports/calendar/export?${params.toString()}`, '_blank');
+  }
+
+  function updateCalendarFilterCascade(options = {}) {
+    const clientSelect = document.getElementById('calendarReportClient');
+    const siteSelect = document.getElementById('calendarReportSite');
+    const employeeSelect = document.getElementById('calendarReportEmployee');
+    const clientId = clientSelect.value || '';
+
+    Array.from(siteSelect.options).forEach(option => {
+      if (!option.value) {
+        setOptionVisibility(option, true);
+        return;
+      }
+      setOptionVisibility(option, !clientId || option.dataset.clientId === clientId);
+    });
+
+    if (options.resetSite || (siteSelect.value && siteSelect.selectedOptions[0]?.disabled)) {
+      siteSelect.value = '';
+    }
+
+    const siteId = siteSelect.value || '';
+    Array.from(employeeSelect.options).forEach(option => {
+      if (!option.value) {
+        setOptionVisibility(option, true);
+        return;
+      }
+      const employeeClientId = option.dataset.clientId || '';
+      const employeeSiteId = option.dataset.siteId || '';
+      const matchesClient = !clientId || employeeClientId === clientId;
+      const matchesSite = !siteId || employeeSiteId === siteId;
+      setOptionVisibility(option, siteId ? matchesSite : matchesClient);
+    });
+
+    if (options.resetEmployee || (employeeSelect.value && employeeSelect.selectedOptions[0]?.disabled)) {
+      employeeSelect.value = '';
+    }
   }
 
   function selectedValues(selectId) {
@@ -1507,6 +1544,15 @@
       generateReports();
     });
     document.getElementById('employeeSelect').addEventListener('change', generateReports);
+    document.getElementById('calendarReportClient').addEventListener('change', () => {
+      updateCalendarFilterCascade({ resetSite: true, resetEmployee: true });
+      generateCalendarReport();
+    });
+    document.getElementById('calendarReportSite').addEventListener('change', () => {
+      updateCalendarFilterCascade({ resetEmployee: true });
+      generateCalendarReport();
+    });
+    document.getElementById('calendarReportEmployee').addEventListener('change', generateCalendarReport);
     document.getElementById('btnCalendarReportGenerate').addEventListener('click', generateCalendarReport);
     document.getElementById('btnCalendarReportExport').addEventListener('click', exportCalendarReport);
     
@@ -1516,6 +1562,7 @@
     document.getElementById('btnExportAbsent').addEventListener('click', exportAbsentCSV);
     
     // Auto-generate on load
+    updateCalendarFilterCascade();
     generateCalendarReport();
     generateReports();
   });
