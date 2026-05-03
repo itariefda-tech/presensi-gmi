@@ -1,0 +1,570 @@
+{% extends "dashboard/base.html" %}
+{% set active = "upgrade" %}
+{% set heading = "Paket & Add-on" %}
+{% set subtitle = feature %}
+
+{% block body %}
+<section class="promo-shell" aria-label="Penawaran paket {{ feature }}">
+  <div class="promo-hero">
+    <div class="promo-copy">
+      <span class="promo-eyebrow">Upgrade Access</span>
+      <h3>{{ feature }}</h3>
+      <p class="promo-message">{{ message }}</p>
+      <div class="promo-points" aria-label="Nilai tambah Guard Tour">
+        <div class="promo-point">
+          <strong>Patroli real-time</strong>
+          <span>Checkpoint, route, dan bukti patroli tercatat rapi per shift.</span>
+        </div>
+        <div class="promo-point">
+          <strong>Kontrol lapangan</strong>
+          <span>Supervisor lebih cepat melihat gap patroli, route miss, dan aktivitas janggal.</span>
+        </div>
+        <div class="promo-point">
+          <strong>Siap operasional</strong>
+          <span>Seluruh alur patroli, monitoring, dan evaluasi berada di satu dashboard.</span>
+        </div>
+      </div>
+    </div>
+    <div class="promo-visual" aria-hidden="true">
+      <div class="promo-visual-panel promo-visual-panel--main">
+        <span class="promo-chip">Guard Tour</span>
+        <strong>Live Route Control</strong>
+        <small>Tracking patroli, titik inspeksi, dan status ronde dalam satu alur.</small>
+      </div>
+      <div class="promo-visual-grid">
+        <div class="promo-visual-panel">
+          <span class="promo-stat">12</span>
+          <small>Checkpoint / route</small>
+        </div>
+        <div class="promo-visual-panel">
+          <span class="promo-stat">24/7</span>
+          <small>Operational watch</small>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="promo-plans-section">
+    <div class="promo-section-head">
+      <div>
+        <h4>Pilih paket anda</h4>
+        <p>Susun versi aplikasi sesuai skala operasional yang ingin dijalankan.</p>
+      </div>
+      <span class="promo-note">Guard Tour aktif penuh di Enterprise.</span>
+    </div>
+
+    <div class="promo-plan-grid" aria-label="Pilihan paket">
+      <article class="promo-plan-card {% if current_suite == 'pro' %}is-current{% endif %}">
+        <span class="promo-plan-kicker">Core Package</span>
+        <div class="promo-plan-head">
+          <h5>HRIS Pro</h5>
+          <span class="promo-plan-price">Core operational</span>
+        </div>
+        <p class="promo-plan-desc">Fokus ke workflow inti tanpa add-on tier tambahan.</p>
+        <ul class="promo-plan-features">
+          <li>Attendance core</li>
+          <li>Approval workflow</li>
+          <li>Reports inti</li>
+          <li>Payroll mengikuti policy site</li>
+        </ul>
+        {% if current_suite == 'pro' %}
+        <span class="promo-plan-state">Paket aktif saat ini</span>
+        {% endif %}
+      </article>
+
+      <article class="promo-plan-card promo-plan-card--featured {% if current_suite == 'pro_plus' %}is-current{% endif %}">
+        <span class="promo-plan-badge">Flexible</span>
+        <span class="promo-plan-kicker">Custom Add-on</span>
+        <div class="promo-plan-head">
+          <h5>HRIS Pro Plus</h5>
+          <span class="promo-plan-price">Max 5 add-on</span>
+        </div>
+        <p class="promo-plan-desc">Cocok untuk tim yang ingin tetap di layer Pro tapi menyalakan add-on pilihan secara selektif.</p>
+        <ul class="promo-plan-features">
+          <li>Semua fasilitas HRIS Pro</li>
+          <li>Custom add-on maks 5 add-on</li>
+          <li>Fleksibel untuk kebutuhan tim</li>
+          <li>Harga menyesuaikan kebutuhan</li>
+          <li class="promo-plan-features-scroll-item">
+            <div class="promo-addon-scroll" aria-label="Daftar add-on Pro Plus">
+              <span class="promo-addon-pill">Guard Tour</span>
+              <span class="promo-addon-pill">Patroli Ops</span>
+              <span class="promo-addon-pill">Calendar</span>
+              <span class="promo-addon-pill">Reporting Adv</span>
+              <span class="promo-addon-pill">API Access</span>
+              <span class="promo-addon-pill">Payroll Plus</span>
+              <span class="promo-addon-pill">AI Analysis</span>
+              <span class="promo-addon-pill">Billing + Contract</span>
+              <span class="promo-addon-pill">SLA Tracking</span>
+              <span class="promo-addon-pill">Live Chat</span>
+              <span class="promo-addon-pill">Annauncement</span>
+              <span class="promo-addon-pill">Incident System</span>
+            </div>
+          </li>
+        </ul>
+        {% if current_suite == 'pro_plus' %}
+        <span class="promo-plan-state">Paket aktif saat ini</span>
+        {% endif %}
+      </article>
+
+      <article class="promo-plan-card promo-plan-card--enterprise {% if current_suite == 'enterprise' %}is-current{% endif %}">
+        <span class="promo-plan-kicker">Full Access</span>
+        <div class="promo-plan-head">
+          <h5>HRIS Enterprise</h5>
+          <span class="promo-plan-price">ALL add on full</span>
+        </div>
+        <p class="promo-plan-desc">Seluruh add-on aktif penuh, termasuk Guard Tour, layer koordinasi, dan kontrol enterprise.</p>
+        <ul class="promo-plan-features">
+          <li>Semua fasilitas Pro Plus</li>
+          <li>Guard Tour &amp; Patroli ops full</li>
+          <li>Advanced reporting &amp; Calender</li>
+          <li>Seluruh add-on tier aktif</li>
+          <li class="promo-plan-features-scroll-item">
+            <div class="promo-addon-scroll" aria-label="Daftar add-on Enterprise">
+              <span class="promo-addon-pill">Guard Tour</span>
+              <span class="promo-addon-pill">Patroli Ops</span>
+              <span class="promo-addon-pill">Calendar</span>
+              <span class="promo-addon-pill">Reporting Adv</span>
+              <span class="promo-addon-pill">API Access</span>
+              <span class="promo-addon-pill">Payroll Plus</span>
+              <span class="promo-addon-pill">AI Analysis</span>
+              <span class="promo-addon-pill">Billing + Contract</span>
+              <span class="promo-addon-pill">SLA Tracking</span>
+              <span class="promo-addon-pill">Live Chat</span>
+              <span class="promo-addon-pill">Annauncement</span>
+              <span class="promo-addon-pill">Incident System</span>
+            </div>
+          </li>
+        </ul>
+        {% if current_suite == 'enterprise' %}
+        <span class="promo-plan-state">Paket aktif saat ini</span>
+        {% endif %}
+      </article>
+    </div>
+  </div>
+</section>
+
+<style>
+.promo-shell{
+  display:grid;
+  gap:18px;
+}
+
+.promo-hero{
+  display:grid;
+  grid-template-columns:minmax(0, 1.2fr) minmax(320px, .8fr);
+  gap:18px;
+  padding:24px;
+  border-radius:18px;
+  background:
+    linear-gradient(135deg, rgba(22,163,74,.18), rgba(14,165,233,.2) 40%, rgba(147,51,234,.18)),
+    linear-gradient(180deg, rgba(15,23,42,.92), rgba(30,41,59,.88));
+  border:1px solid rgba(255,255,255,.08);
+  overflow:hidden;
+  position:relative;
+}
+
+.promo-hero::before{
+  content:"";
+  position:absolute;
+  inset:0;
+  background:
+    radial-gradient(circle at top left, rgba(255,255,255,.14), transparent 34%),
+    linear-gradient(120deg, transparent 0%, rgba(255,255,255,.08) 46%, transparent 72%);
+  pointer-events:none;
+}
+
+.promo-copy,
+.promo-visual{
+  position:relative;
+  z-index:1;
+}
+
+.promo-eyebrow{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  padding:6px 10px;
+  border-radius:999px;
+  background:rgba(255,255,255,.12);
+  color:#dbeafe;
+  font-size:12px;
+  font-weight:800;
+  text-transform:uppercase;
+  letter-spacing:.08em;
+}
+
+.promo-copy h3{
+  margin:14px 0 8px;
+  font-size:clamp(28px, 4vw, 42px);
+  line-height:1.05;
+}
+
+.promo-message{
+  margin:0;
+  max-width:680px;
+  color:rgba(241,245,249,.88);
+  font-size:16px;
+  line-height:1.6;
+}
+
+.promo-points{
+  display:grid;
+  grid-template-columns:repeat(3, minmax(0, 1fr));
+  gap:12px;
+  margin-top:18px;
+}
+
+.promo-point{
+  padding:14px;
+  border-radius:14px;
+  background:rgba(15,23,42,.38);
+  border:1px solid rgba(255,255,255,.08);
+  display:grid;
+  gap:6px;
+}
+
+.promo-point strong{
+  font-size:14px;
+}
+
+.promo-point span{
+  color:rgba(226,232,240,.76);
+  font-size:13px;
+  line-height:1.5;
+}
+
+.promo-visual{
+  display:grid;
+  gap:12px;
+  align-content:start;
+}
+
+.promo-visual-grid{
+  display:grid;
+  grid-template-columns:repeat(2, minmax(0, 1fr));
+  gap:12px;
+}
+
+.promo-visual-panel{
+  padding:16px;
+  border-radius:16px;
+  background:linear-gradient(180deg, rgba(255,255,255,.14), rgba(255,255,255,.06));
+  border:1px solid rgba(255,255,255,.12);
+  display:grid;
+  gap:8px;
+  box-shadow:0 18px 40px rgba(15,23,42,.22);
+}
+
+.promo-visual-panel--main{
+  min-height:168px;
+  background:linear-gradient(145deg, rgba(14,165,233,.28), rgba(139,92,246,.22));
+}
+
+.promo-chip{
+  display:inline-flex;
+  width:max-content;
+  padding:5px 9px;
+  border-radius:999px;
+  background:rgba(15,23,42,.3);
+  color:#e2e8f0;
+  font-size:12px;
+  font-weight:700;
+}
+
+.promo-visual-panel strong{
+  font-size:20px;
+}
+
+.promo-visual-panel small{
+  color:rgba(226,232,240,.8);
+  line-height:1.5;
+}
+
+.promo-stat{
+  font-size:26px;
+  font-weight:900;
+  color:#f8fafc;
+}
+
+.promo-plans-section{
+  display:grid;
+  gap:14px;
+}
+
+.promo-section-head{
+  display:flex;
+  justify-content:space-between;
+  gap:12px;
+  align-items:flex-end;
+  flex-wrap:wrap;
+}
+
+.promo-section-head h4{
+  margin:0 0 4px;
+  font-size:24px;
+}
+
+.promo-section-head p{
+  margin:0;
+  color:var(--muted);
+}
+
+.promo-note{
+  display:inline-flex;
+  align-items:center;
+  padding:8px 12px;
+  border-radius:999px;
+  background:linear-gradient(135deg, rgba(236,72,153,.18), rgba(249,115,22,.18));
+  color:var(--text);
+  font-size:13px;
+  font-weight:700;
+}
+
+.promo-plan-grid{
+  display:grid;
+  grid-template-columns:repeat(3, minmax(0, 1fr));
+  gap:14px;
+  align-items:stretch;
+}
+
+.promo-plan-card{
+  position:relative;
+  display:grid;
+  gap:12px;
+  padding:18px;
+  border-radius:18px;
+  border:1px solid rgba(148,163,184,.2);
+  background:linear-gradient(180deg, rgba(15,23,42,.78), rgba(30,41,59,.72));
+  overflow:hidden;
+}
+
+.promo-plan-card::before{
+  content:"";
+  position:absolute;
+  inset:auto -20% 72% 25%;
+  height:90px;
+  background:linear-gradient(135deg, rgba(59,130,246,.26), rgba(236,72,153,.16));
+  filter:blur(24px);
+  pointer-events:none;
+}
+
+.promo-plan-card--featured{
+  background:linear-gradient(180deg, rgba(14,165,233,.2), rgba(124,58,237,.2)), linear-gradient(180deg, rgba(15,23,42,.9), rgba(30,41,59,.88));
+  border-color:rgba(96,165,250,.34);
+  box-shadow:0 24px 48px rgba(14,165,233,.14);
+}
+
+.promo-plan-card--enterprise{
+  background:linear-gradient(180deg, rgba(16,185,129,.18), rgba(234,88,12,.2)), linear-gradient(180deg, rgba(15,23,42,.92), rgba(30,41,59,.88));
+  border-color:rgba(52,211,153,.28);
+}
+
+.promo-plan-card.is-current{
+  border-color:rgba(250,204,21,.44);
+  box-shadow:0 22px 42px rgba(250,204,21,.12);
+}
+
+.promo-plan-kicker{
+  font-size:12px;
+  font-weight:800;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+  color:rgba(191,219,254,.9);
+}
+
+.promo-plan-badge{
+  position:absolute;
+  top:14px;
+  right:14px;
+  padding:6px 10px;
+  border-radius:999px;
+  background:linear-gradient(135deg, #f97316, #ec4899);
+  color:#fff;
+  font-size:12px;
+  font-weight:800;
+}
+
+.promo-plan-head{
+  display:grid;
+  gap:4px;
+}
+
+.promo-plan-head h5{
+  margin:0;
+  font-size:24px;
+}
+
+.promo-plan-price{
+  color:rgba(226,232,240,.84);
+  font-size:14px;
+  font-weight:700;
+}
+
+.promo-plan-desc{
+  margin:0;
+  color:rgba(226,232,240,.78);
+  line-height:1.6;
+}
+
+.promo-plan-features{
+  list-style:none;
+  padding:0;
+  margin:0;
+  display:grid;
+  gap:8px;
+}
+
+.promo-plan-features li{
+  display:flex;
+  align-items:flex-start;
+  gap:10px;
+  color:rgba(248,250,252,.9);
+  line-height:1.45;
+}
+
+.promo-plan-features li::before{
+  content:"";
+  width:8px;
+  height:8px;
+  margin-top:6px;
+  border-radius:999px;
+  background:linear-gradient(135deg, #22c55e, #38bdf8);
+  flex:0 0 auto;
+}
+
+.promo-plan-state{
+  display:inline-flex;
+  width:max-content;
+  padding:7px 10px;
+  border-radius:999px;
+  background:rgba(30,64,175,.16);
+  color:#bfdbfe;
+  font-size:12px;
+  font-weight:800;
+}
+
+.promo-plan-features-scroll-item{
+  display:block !important;
+}
+
+.promo-plan-features-scroll-item::before{
+  display:none;
+}
+
+.promo-addon-scroll{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  max-height:108px;
+  overflow:auto;
+  padding:10px;
+  border-radius:14px;
+  background:rgba(15,23,42,.34);
+  border:1px solid rgba(255,255,255,.08);
+  scrollbar-width:thin;
+}
+
+.promo-addon-pill{
+  display:inline-flex;
+  align-items:center;
+  padding:7px 10px;
+  border-radius:999px;
+  background:linear-gradient(135deg, rgba(59,130,246,.18), rgba(236,72,153,.18));
+  border:1px solid rgba(255,255,255,.12);
+  color:#f8fafc;
+  font-size:12px;
+  font-weight:700;
+}
+
+html[data-theme="light"] .promo-hero{
+  background:
+    linear-gradient(135deg, rgba(20,184,166,.18), rgba(56,189,248,.18) 36%, rgba(244,114,182,.16)),
+    linear-gradient(180deg, rgba(255,255,255,.94), rgba(248,250,252,.98));
+  border-color:rgba(148,163,184,.18);
+}
+
+html[data-theme="light"] .promo-eyebrow{
+  background:rgba(15,23,42,.06);
+  color:#0f172a;
+}
+
+html[data-theme="light"] .promo-message,
+html[data-theme="light"] .promo-point span,
+html[data-theme="light"] .promo-visual-panel small,
+html[data-theme="light"] .promo-plan-desc,
+html[data-theme="light"] .promo-plan-price{
+  color:rgba(15,23,42,.74);
+}
+
+html[data-theme="light"] .promo-point{
+  background:rgba(255,255,255,.7);
+  border-color:rgba(148,163,184,.2);
+}
+
+html[data-theme="light"] .promo-visual-panel{
+  background:linear-gradient(180deg, rgba(255,255,255,.84), rgba(248,250,252,.72));
+  border-color:rgba(148,163,184,.2);
+}
+
+html[data-theme="light"] .promo-plan-card{
+  background:linear-gradient(180deg, rgba(255,255,255,.98), rgba(248,250,252,.95));
+  border-color:rgba(148,163,184,.22);
+}
+
+html[data-theme="light"] .promo-plan-card--featured{
+  background:linear-gradient(180deg, rgba(224,242,254,.98), rgba(250,245,255,.98));
+}
+
+html[data-theme="light"] .promo-plan-card--enterprise{
+  background:linear-gradient(180deg, rgba(236,253,245,.98), rgba(255,247,237,.98));
+}
+
+html[data-theme="light"] .promo-plan-features li,
+html[data-theme="light"] .promo-note{
+  color:#0f172a;
+}
+
+html[data-theme="light"] .promo-plan-state{
+  background:rgba(30,64,175,.12);
+  color:#1e3a8a;
+}
+
+html[data-theme="light"] .promo-addon-scroll{
+  background:rgba(255,255,255,.82);
+  border-color:rgba(148,163,184,.18);
+}
+
+html[data-theme="light"] .promo-addon-pill{
+  color:#0f172a;
+  border-color:rgba(148,163,184,.18);
+}
+
+@media (max-width: 1180px){
+  .promo-hero{
+    grid-template-columns:1fr;
+  }
+  .promo-points{
+    grid-template-columns:1fr;
+  }
+}
+
+@media (max-width: 980px){
+  .promo-plan-grid{
+    grid-template-columns:1fr;
+  }
+  .promo-plan-card--featured{
+    order:-1;
+  }
+}
+
+@media (max-width: 640px){
+  .promo-hero{
+    padding:18px;
+  }
+  .promo-shell{
+    gap:14px;
+  }
+}
+</style>
+{% endblock %}

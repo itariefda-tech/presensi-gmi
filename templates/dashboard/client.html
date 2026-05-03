@@ -19,8 +19,62 @@
   </script>
   <title>{{ client.name if client else "Client" }} | Dashboard Client</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/client_dashboard.css') }}" />
+  <style>
+    .client-access-shell { display:grid; gap:14px; margin-bottom:16px; }
+    .client-access-shell .panel { overflow:hidden; }
+    .client-access-shell .panel-head { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; flex-wrap:wrap; }
+    .client-access-shell .panel-head > div { min-width:0; display:grid; gap:4px; }
+    .client-access-shell .panel-head h3 { margin:0; line-height:1.2; }
+    .client-access-shell .panel-sub { font-size:12px; line-height:1.45; max-width:58ch; }
+    .client-access-grid { display:grid; grid-template-columns:minmax(0, 1.08fr) minmax(300px, .92fr); gap:14px; align-items:start; }
+    .client-access-stack { display:grid; gap:14px; min-width:0; }
+    .client-access-summary { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:10px; align-items:stretch; }
+    .client-access-kpi { border:1px solid rgba(255,255,255,.08); border-radius:10px; padding:13px; background:rgba(255,255,255,.02); display:grid; gap:4px; min-width:0; }
+    .client-access-kpi strong { font-size:21px; line-height:1.1; }
+    .client-access-kpi .muted { font-size:12px; line-height:1.4; }
+    .client-access-badges, .client-access-addon-list, .client-access-warning-list { display:flex; flex-wrap:wrap; gap:8px; }
+    .client-access-addon-pill, .client-access-status-pill { display:inline-flex; align-items:center; min-height:28px; border-radius:999px; padding:0 12px; font-size:12px; font-weight:700; max-width:100%; }
+    .client-access-addon-pill { background:rgba(255,255,255,.07); color:var(--text); }
+    .client-access-addon-pill.is-off { background:rgba(255,255,255,.03); color:var(--muted); }
+    .client-access-status-pill.status-on { background:#173b2a; color:#9ef0bf; }
+    .client-access-status-pill.status-off { background:#4a2a1a; color:#ffcfa3; }
+    .client-access-status-pill.status-plan { background:#12344a; color:#9fd8ff; }
+    .client-access-token-box { border:1px dashed rgba(255,255,255,.16); border-radius:10px; padding:14px; background:rgba(18,52,74,.12); display:grid; gap:8px; min-width:0; }
+    .client-access-token-value { font-family:ui-monospace, SFMono-Regular, Consolas, monospace; word-break:break-all; font-size:12px; line-height:1.5; }
+    .client-access-mini-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px; align-items:stretch; }
+    .client-access-mini-card { border:1px solid rgba(255,255,255,.08); border-radius:10px; padding:12px; background:rgba(255,255,255,.02); display:grid; gap:4px; min-width:0; }
+    .client-access-mini-card strong { font-size:17px; line-height:1.2; }
+    .client-access-mini-card .muted { font-size:12px; line-height:1.4; }
+    .client-access-log-list, .client-access-token-list { display:grid; gap:10px; }
+    .client-access-log-row, .client-access-token-row { border:1px solid rgba(255,255,255,.08); border-radius:10px; padding:12px; background:rgba(255,255,255,.02); display:grid; gap:8px; min-width:0; }
+    .client-access-log-row-top, .client-access-token-row-top { display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:flex-start; }
+    .client-access-log-row-top strong,
+    .client-access-token-row-top strong { line-height:1.25; overflow-wrap:anywhere; }
+    .client-access-empty { border:1px dashed rgba(255,255,255,.12); border-radius:10px; padding:18px; color:var(--muted); text-align:center; font-size:12px; line-height:1.5; }
+    .client-access-shell .site-form { display:grid; gap:10px; }
+    .client-access-shell .form-grid { grid-template-columns:1fr; gap:10px; }
+    .client-access-shell .form-row { margin:0; min-width:0; }
+    .client-access-shell .label { margin-bottom:6px; display:block; }
+    .client-access-shell .input { width:100%; min-width:0; }
+    .client-access-shell .form-actions { display:flex; justify-content:flex-start; gap:10px; flex-wrap:wrap; }
+    @media (max-width: 1080px) {
+      .client-access-grid,
+      .client-access-summary,
+      .client-access-mini-grid { grid-template-columns:1fr; }
+    }
+    @media (max-width: 720px) {
+      .client-access-shell .panel-sub,
+      .client-access-kpi .muted,
+      .client-access-mini-card .muted,
+      .client-access-empty { font-size:11px; }
+      .client-access-kpi strong { font-size:19px; }
+      .client-access-mini-card strong { font-size:16px; }
+      .client-access-status-pill,
+      .client-access-addon-pill { font-size:11px; padding:0 10px; }
+    }
+  </style>
 </head>
-<body data-dashboard-home="{{ url_for('dashboard_client') }}">
+<body data-dashboard-home="{{ url_for('dashboard_client') }}" data-initial-tab="{{ initial_pane }}">
   {% macro employee_action_menu(employee, csrf_token) %}
   {% set notes = (employee.notes or "")|replace('\n', ' ') %}
   <div class="employee-actions"
@@ -109,6 +163,10 @@
       </div>
     </div>
   </header>
+
+  {% for msg in get_flashed_messages() %}
+  <div class="alert info" style="margin:12px 0;">{{ msg }}</div>
+  {% endfor %}
 
   <main class="client-main">
     <div class="swipe-viewport">

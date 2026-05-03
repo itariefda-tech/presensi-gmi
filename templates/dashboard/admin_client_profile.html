@@ -15,15 +15,15 @@
 </div>
 
 <div class="card" style="margin-top:12px;">
-  <div class="tabs">
-    <button class="tab-btn active" data-tab="overview" type="button">Overview</button>
-    <button class="tab-btn" data-tab="sites" type="button">Sites</button>
-    <button class="tab-btn" data-tab="assignments" type="button">Assignments</button>
-    <button class="tab-btn" data-tab="policies" type="button">Policies</button>
+  <div class="tabs client-profile-tabs">
+    <button class="tab-btn client-profile-tab-btn active" data-tab="overview" type="button">Overview</button>
+    <button class="tab-btn client-profile-tab-btn" data-tab="sites" type="button">Sites</button>
+    <button class="tab-btn client-profile-tab-btn" data-tab="assignments" type="button">Assignments</button>
+    <button class="tab-btn client-profile-tab-btn" data-tab="policies" type="button">Policies</button>
     {% if user.role == "hr_superadmin" %}
-    <button class="tab-btn" data-tab="billing" type="button">Contract & Billing</button>
+    <button class="tab-btn client-profile-tab-btn" data-tab="billing" type="button">Contract & Billing</button>
     {% endif %}
-    <button class="tab-btn" data-tab="contacts" type="button">Contacts (PIC)</button>
+    <button class="tab-btn client-profile-tab-btn" data-tab="contacts" type="button">Contacts (PIC)</button>
   </div>
 
   <div class="tab-panel active" id="tab-overview">
@@ -175,50 +175,7 @@
 
   {% if user.role == "hr_superadmin" %}
   <div class="tab-panel" id="tab-billing">
-    <div class="form-grid" style="grid-template-columns: repeat(4, minmax(160px, 1fr));">
-      <div class="form-row">
-        <div class="label">Package</div>
-        <div><span class="badge">{{ subscription.package|title }}</span></div>
-      </div>
-      <div class="form-row">
-        <div class="label">Billing Engine</div>
-        <div>{% if subscription.billing_enabled %}Aktif{% else %}Nonaktif{% endif %}</div>
-      </div>
-      <div class="form-row">
-        <div class="label">Billing Type</div>
-        <div>{{ billing_summary.billing_type|replace('_', ' ')|title }}</div>
-      </div>
-      <div class="form-row">
-        <div class="label">Estimasi Bulan Ini</div>
-        <div>Rp {{ "{:,.0f}".format(billing_summary.calculated_amount or 0).replace(",", ".") }}</div>
-      </div>
-    </div>
-    {% if billing_summary.warnings %}
-    <div class="alert info" style="margin-top:12px;">
-      {% for warning in billing_summary.warnings %}
-      <div>{{ warning }}</div>
-      {% endfor %}
-    </div>
-    {% endif %}
-    <div class="form-grid" style="grid-template-columns: repeat(4, minmax(160px, 1fr)); margin-top:12px;">
-      <div class="form-row">
-        <div class="label">Pegawai</div>
-        <div>{{ billing_summary.total_employees }}</div>
-      </div>
-      <div class="form-row">
-        <div class="label">Sites</div>
-        <div>{{ billing_summary.total_sites }}</div>
-      </div>
-      <div class="form-row">
-        <div class="label">Attendance</div>
-        <div>{{ billing_summary.total_attendance }}</div>
-      </div>
-      <div class="form-row">
-        <div class="label">Shifts</div>
-        <div>{{ billing_summary.total_shifts }}</div>
-      </div>
-    </div>
-    <div class="form-grid" style="grid-template-columns: repeat(2, minmax(280px, 1fr)); margin-top:12px;">
+    <div class="form-grid client-profile-billing-panels">
       <div class="card">
         <div style="font-weight:700; margin-bottom:8px;">Kontrak Aktif</div>
         <form class="stack" method="post" action="{{ url_for('admin.client_contract_save', client_id=client.id) }}">
@@ -227,13 +184,13 @@
             <label class="label" for="contract-no">Nomor Kontrak</label>
             <input class="input" id="contract-no" name="contract_no" value="{{ active_contract.contract_no if active_contract else client.contract_no or '' }}" required />
           </div>
-          <div class="form-grid" style="grid-template-columns: repeat(2, minmax(120px, 1fr));">
+          <div class="form-grid client-profile-contract-dates">
             <div class="form-row">
-              <label class="label" for="contract-start">Mulai</label>
+              <label class="label" for="contract-start">Mulai\Berakhir</label>
               <input class="input" id="contract-start" type="date" name="start_date" value="{{ active_contract.start_date if active_contract else client.contract_start or '' }}" />
             </div>
             <div class="form-row">
-              <label class="label" for="contract-end">Berakhir</label>
+              <div class="label client-profile-label-spacer" aria-hidden="true"></div>
               <input class="input" id="contract-end" type="date" name="end_date" value="{{ active_contract.end_date if active_contract else client.contract_end or '' }}" />
             </div>
           </div>
@@ -266,7 +223,7 @@
               {% endfor %}
             </select>
           </div>
-          <div class="form-grid" style="grid-template-columns: repeat(2, minmax(120px, 1fr));">
+          <div class="form-grid client-profile-billing-inline-fields">
             <div class="form-row">
               <label class="label" for="billing-rate">Rate</label>
               <input class="input" id="billing-rate" type="number" min="0" step="1000" name="rate" value="{{ billing_config.rate if billing_config else 0 }}" />
@@ -292,6 +249,52 @@
             <button class="btn primary btn-fixed-100" type="submit">Simpan</button>
           </div>
         </form>
+      </div>
+    </div>
+    <div class="form-grid client-profile-billing-summary-grid" style="margin-top:12px;">
+      <div class="client-profile-status-card">
+        <span class="client-profile-status-label">Billing Engine</span>
+        <strong class="client-profile-status-value">{% if subscription.billing_enabled %}Aktif{% else %}Nonaktif{% endif %}</strong>
+        <span class="client-profile-status-meta">Mengikuti owner credential</span>
+      </div>
+      <div class="client-profile-status-card">
+        <span class="client-profile-status-label">Billing Type</span>
+        <strong class="client-profile-status-value">{{ billing_summary.billing_type|replace('_', ' ')|title }}</strong>
+        <span class="client-profile-status-meta">Formula aktif saat ini</span>
+      </div>
+      <div class="client-profile-status-card">
+        <span class="client-profile-status-label">Estimasi Bulan Ini</span>
+        <strong class="client-profile-status-value">Rp {{ "{:,.0f}".format(billing_summary.calculated_amount or 0).replace(",", ".") }}</strong>
+        <span class="client-profile-status-meta">Subtotal + tax periode aktif</span>
+      </div>
+    </div>
+    {% if billing_summary.warnings %}
+    <div class="alert info" style="margin-top:12px;">
+      {% for warning in billing_summary.warnings %}
+      <div>{{ warning }}</div>
+      {% endfor %}
+    </div>
+    {% endif %}
+    <div class="form-grid client-profile-billing-metrics-grid" style="margin-top:12px;">
+      <div class="client-profile-status-card">
+        <span class="client-profile-status-label">Pegawai</span>
+        <strong class="client-profile-status-value">{{ billing_summary.total_employees }}</strong>
+        <span class="client-profile-status-meta">Unit aktif terhitung</span>
+      </div>
+      <div class="client-profile-status-card">
+        <span class="client-profile-status-label">Sites</span>
+        <strong class="client-profile-status-value">{{ billing_summary.total_sites }}</strong>
+        <span class="client-profile-status-meta">Lokasi aktif client</span>
+      </div>
+      <div class="client-profile-status-card">
+        <span class="client-profile-status-label">Attendance</span>
+        <strong class="client-profile-status-value">{{ billing_summary.total_attendance }}</strong>
+        <span class="client-profile-status-meta">Check-in periode aktif</span>
+      </div>
+      <div class="client-profile-status-card">
+        <span class="client-profile-status-label">Shifts</span>
+        <strong class="client-profile-status-value">{{ billing_summary.total_shifts }}</strong>
+        <span class="client-profile-status-meta">Jadwal yang dihitung</span>
       </div>
     </div>
   </div>
@@ -413,7 +416,7 @@
 
 <script>
   (function(){
-    const tabButtons = Array.from(document.querySelectorAll(".tab-btn"));
+    const tabButtons = Array.from(document.querySelectorAll(".client-profile-tab-btn"));
     const tabPanels = Array.from(document.querySelectorAll(".tab-panel"));
     function setActiveTab(name){
       tabButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.tab === name));

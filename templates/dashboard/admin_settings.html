@@ -10,8 +10,6 @@
     <a class="tab-btn {% if tab == 'users' %}active{% endif %}" href="{{ url_for('admin.settings', tab='users') }}">Users</a>
     <a class="tab-btn {% if tab == 'roles' %}active{% endif %}" href="{{ url_for('admin.settings', tab='roles') }}">Roles</a>
     <a class="tab-btn {% if tab == 'addons' %}active{% endif %}" href="{{ url_for('admin.settings', tab='addons') }}">Add-on</a>
-    <a class="tab-btn {% if tab == 'subscription' %}active{% endif %}" href="{{ url_for('admin.settings', tab='subscription') }}">Subscription</a>
-    <a class="tab-btn {% if tab == 'communication' %}active{% endif %}" href="{{ url_for('admin.settings', tab='communication') }}">Communication</a>
     {% endif %}
     {% if permissions.get('manage_settings_codes') %}
     <a class="tab-btn {% if tab == 'hr' %}active{% endif %}" href="{{ url_for('admin.settings', tab='hr') }}">Kode Reg</a>
@@ -42,7 +40,7 @@
       </select>
       <select class="input" name="tier">
         {% for tier in tier_options %}
-        <option value="{{ tier }}">{{ tier|title }}</option>
+        <option value="{{ tier }}">{{ tier|replace('_',' ')|title }}</option>
         {% endfor %}
       </select>
       <input class="input" type="password" name="password" placeholder="Password awal" required />
@@ -73,7 +71,7 @@
           <td>{{ u.name }}</td>
           <td>{{ u.email }}</td>
           <td>{{ u.role|replace('_',' ')|title }}</td>
-          <td><span class="badge">{{ (u.tier or "basic")|title }}</span></td>
+          <td><span class="badge">{{ (u.tier or "pro")|replace('_',' ')|title }}</span></td>
           <td>
             <span class="badge">{% if u.is_active %}Active{% else %}Disabled{% endif %}</span>
             {% if u.must_change_password %}<div class="muted">Must change</div>{% endif %}
@@ -121,7 +119,7 @@
             <label class="label" for="user-tier-{{ u.id }}">Tier</label>
             <select class="input" id="user-tier-{{ u.id }}" name="tier">
               {% for tier in tier_options %}
-              <option value="{{ tier }}" {% if (u.tier or "basic") == tier %}selected{% endif %}>{{ tier|title }}</option>
+              <option value="{{ tier }}" {% if (u.tier or "pro") == tier %}selected{% endif %}>{{ tier|replace('_',' ')|title }}</option>
               {% endfor %}
             </select>
           </div>
@@ -199,50 +197,66 @@
   {% if tab == 'subscription' and user.role == "hr_superadmin" %}
   <style>
     .subscription-shell { display:grid; gap:16px; margin-top:12px; }
-    .subscription-hero { display:grid; gap:8px; }
+    .subscription-shell > * { min-width:0; }
+    .subscription-hero { display:grid; gap:8px; min-width:0; }
     .subscription-hero h3 { margin:0; font-size:24px; }
-    .subscription-hero p { margin:0; color:var(--muted); line-height:1.6; max-width:760px; }
-    .subscription-filter-grid { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:12px; align-items:end; }
-    .subscription-filter-actions { display:flex; gap:12px; align-items:end; }
+    .subscription-hero p { margin:0; color:var(--muted); font-size:13px; line-height:1.5; max-width:760px; }
+    .subscription-filter-grid { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:12px; align-items:start; }
+    .subscription-filter-grid > * { min-width:0; }
+    .subscription-filter-grid .form-row { display:grid; gap:6px; min-width:0; }
+    .subscription-filter-grid .label { font-size:12px; line-height:1.35; }
+    .subscription-filter-grid .input { width:100%; min-width:0; }
+    .subscription-filter-actions { display:flex; gap:12px; align-items:end; flex-wrap:wrap; min-width:0; }
     .subscription-stat-grid { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:12px; }
-    .subscription-stat-card { border:1px solid rgba(255,255,255,.08); border-radius:8px; padding:16px; background:rgba(255,255,255,.02); display:grid; gap:6px; min-height:92px; }
+    .subscription-stat-card { border:1px solid rgba(255,255,255,.08); border-radius:8px; padding:16px; background:rgba(255,255,255,.02); display:grid; gap:6px; min-height:92px; min-width:0; }
     .subscription-stat-value { font-size:22px; font-weight:700; }
     .subscription-client-list { display:grid; gap:16px; }
     .subscription-client-card { border:1px solid rgba(255,255,255,.08); border-radius:8px; background:rgba(255,255,255,.02); overflow:hidden; }
     .subscription-client-head { display:flex; justify-content:space-between; gap:16px; flex-wrap:wrap; padding:16px; border-bottom:1px solid rgba(255,255,255,.08); }
-    .subscription-client-title { display:grid; gap:4px; }
+    .subscription-client-title { display:grid; gap:4px; min-width:0; }
     .subscription-client-title h4 { margin:0; font-size:18px; }
-    .subscription-client-meta { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
-    .subscription-badge-row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+    .subscription-client-title .muted { font-size:12px; line-height:1.4; word-break:break-word; }
+    .subscription-client-meta { display:flex; gap:8px; flex-wrap:wrap; align-items:center; min-width:0; }
+    .subscription-badge-row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; min-width:0; }
     .subscription-plan-badge, .subscription-status-badge { display:inline-flex; align-items:center; min-height:28px; border-radius:999px; padding:0 12px; font-size:12px; font-weight:700; }
-    .plan-basic { background:#2f3238; color:#d7dde9; }
     .plan-pro { background:#12344a; color:#9fd8ff; }
+    .plan-pro_plus { background:#4b245f; color:#efc6ff; }
     .plan-enterprise { background:#173b2a; color:#9ef0bf; }
     .status-owner-off { background:#5b3a18; color:#ffd9a3; }
     .status-client-active { background:#173b2a; color:#9ef0bf; }
     .status-client-inactive { background:#3a223b; color:#f0c0ff; }
-    .subscription-client-body { display:grid; gap:16px; padding:16px; }
-    .subscription-main-grid { display:grid; grid-template-columns:minmax(0, 1.2fr) minmax(320px, .8fr); gap:16px; }
-    .subscription-section-card { border:1px solid rgba(255,255,255,.08); border-radius:8px; padding:16px; background:rgba(255,255,255,.015); display:grid; gap:12px; }
+    .subscription-client-body { display:grid; gap:16px; padding:16px; min-width:0; }
+    .subscription-main-grid { display:grid; grid-template-columns:minmax(0, 1.15fr) minmax(300px, .85fr); gap:16px; align-items:start; }
+    .subscription-section-card { border:1px solid rgba(255,255,255,.08); border-radius:8px; padding:16px; background:rgba(255,255,255,.015); display:grid; gap:12px; min-width:0; }
     .subscription-section-head { display:grid; gap:4px; }
     .subscription-section-head h5 { margin:0; font-size:16px; }
-    .subscription-section-head p { margin:0; color:var(--muted); line-height:1.5; }
-    .subscription-config-grid { display:grid; grid-template-columns:minmax(220px, 280px) minmax(0, 1fr); gap:16px; align-items:start; }
-    .subscription-addon-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; }
-    .subscription-addon-card { border:1px solid rgba(255,255,255,.08); border-radius:8px; padding:12px; background:rgba(255,255,255,.02); display:grid; gap:8px; min-height:120px; }
-    .subscription-addon-head { display:flex; justify-content:space-between; gap:10px; align-items:flex-start; }
-    .subscription-addon-head .check { display:flex; align-items:flex-start; gap:10px; }
+    .subscription-section-head p { margin:0; color:var(--muted); font-size:12px; line-height:1.4; }
+    .subscription-config-grid { display:grid; grid-template-columns:minmax(220px, 260px) minmax(0, 1fr); gap:16px; align-items:start; min-width:0; }
+    .subscription-config-grid .form-row { display:grid; gap:6px; min-width:0; }
+    .subscription-config-grid .label { font-size:12px; line-height:1.35; }
+    .subscription-config-grid .input { width:100%; min-width:0; }
+    .subscription-addon-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; min-width:0; }
+    .subscription-addon-card { border:1px solid rgba(255,255,255,.08); border-radius:8px; padding:12px; background:rgba(255,255,255,.02); display:grid; gap:8px; min-height:120px; min-width:0; align-content:start; }
+    .subscription-addon-head { display:flex; justify-content:space-between; gap:10px; align-items:flex-start; flex-wrap:wrap; min-width:0; }
+    .subscription-addon-head .check { display:flex; align-items:flex-start; gap:10px; min-width:0; flex:1 1 180px; }
+    .subscription-addon-head .check span { min-width:0; line-height:1.35; word-break:break-word; }
+    .subscription-addon-card .muted { font-size:11px; line-height:1.4; word-break:break-word; }
     .subscription-kpi-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; }
-    .subscription-kpi-card { border:1px solid rgba(255,255,255,.08); border-radius:8px; padding:12px; background:rgba(255,255,255,.02); display:grid; gap:4px; }
+    .subscription-kpi-card { border:1px solid rgba(255,255,255,.08); border-radius:8px; padding:12px; background:rgba(255,255,255,.02); display:grid; gap:4px; min-width:0; }
     .subscription-kpi-card strong { font-size:18px; }
-    .subscription-list { display:grid; gap:10px; }
-    .subscription-row { display:grid; grid-template-columns:minmax(140px, 1fr) minmax(100px, .8fr) minmax(140px, .8fr) auto; gap:12px; align-items:center; border:1px solid rgba(255,255,255,.08); border-radius:8px; padding:12px; background:rgba(255,255,255,.02); }
+    .subscription-kpi-card .muted { font-size:11px; line-height:1.35; }
+    .subscription-list { display:grid; gap:10px; min-width:0; }
+    .subscription-row { display:grid; grid-template-columns:minmax(140px, 1fr) minmax(100px, .8fr) minmax(140px, .8fr) auto; gap:12px; align-items:center; border:1px solid rgba(255,255,255,.08); border-radius:8px; padding:12px; background:rgba(255,255,255,.02); min-width:0; }
     .subscription-row--log { grid-template-columns:minmax(140px, .9fr) 88px minmax(0, 1.4fr) minmax(120px, .9fr) 72px; }
-    .subscription-row-label { font-weight:700; }
-    .subscription-row-sub { color:var(--muted); font-size:13px; }
-    .subscription-action-grid { display:grid; grid-template-columns:minmax(0, 1fr) minmax(0, 1fr); gap:16px; padding-top:16px; border-top:1px solid rgba(255,255,255,.08); }
+    .subscription-row > * { min-width:0; }
+    .subscription-row-label { font-weight:700; line-height:1.35; word-break:break-word; }
+    .subscription-row-sub { color:var(--muted); font-size:12px; line-height:1.35; word-break:break-word; }
+    .subscription-row--log > :nth-child(3),
+    .subscription-row--log > :nth-child(4) { word-break:break-word; }
+    .subscription-action-grid { display:grid; grid-template-columns:minmax(0, 1fr) minmax(0, 1fr); gap:16px; padding-top:16px; border-top:1px solid rgba(255,255,255,.08); min-width:0; }
     .subscription-empty { border:1px dashed rgba(255,255,255,.12); border-radius:8px; padding:24px; display:grid; gap:8px; text-align:center; color:var(--muted); }
-    .subscription-filter-note { color:var(--muted); line-height:1.5; }
+    .subscription-empty span { font-size:12px; line-height:1.45; }
+    .subscription-filter-note { color:var(--muted); font-size:12px; line-height:1.4; }
     @media (max-width: 1080px) {
       .subscription-filter-grid,
       .subscription-stat-grid,
@@ -261,6 +275,10 @@
       .subscription-badge-row,
       .subscription-filter-actions { align-items:flex-start; }
       .subscription-hero h3 { font-size:20px; }
+      .subscription-section-card,
+      .subscription-stat-card,
+      .subscription-client-head,
+      .subscription-client-body { padding:14px; }
     }
   </style>
   <div class="subscription-shell">
@@ -294,8 +312,8 @@
           <label class="label" for="subscription-plan">Plan</label>
           <select class="input" id="subscription-plan" name="subscription_plan">
             <option value="all" {% if subscription_filters.plan == 'all' %}selected{% endif %}>All Plans</option>
-            <option value="basic" {% if subscription_filters.plan == 'basic' %}selected{% endif %}>Basic</option>
             <option value="pro" {% if subscription_filters.plan == 'pro' %}selected{% endif %}>Pro</option>
+            <option value="pro_plus" {% if subscription_filters.plan == 'pro_plus' %}selected{% endif %}>Pro Plus</option>
             <option value="enterprise" {% if subscription_filters.plan == 'enterprise' %}selected{% endif %}>Enterprise</option>
           </select>
         </div>
@@ -351,7 +369,7 @@
             <div class="muted">{{ c.office_email or "-" }}</div>
           </div>
           <div class="subscription-client-meta">
-            <span class="subscription-plan-badge plan-{{ (subscription.package or 'basic')|lower }}">{{ subscription.package|title }}</span>
+            <span class="subscription-plan-badge plan-{{ (subscription.package or 'PRO')|lower }}">{{ (subscription.package or 'PRO')|replace('_', ' ')|title }}</span>
             {% if not api_access.owner_enabled %}
             <span class="subscription-status-badge status-owner-off">Owner Off</span>
             {% elif api_access.client_enabled %}
@@ -391,15 +409,18 @@
                     {% set is_api_access = addon_key == 'api_access' %}
                     {% set addon_active = subscription and addon_key in subscription.addons %}
                     {% set addon_unavailable = is_api_access and not owner_api_enabled %}
+                    {% set addon_custom_blocked = subscription and subscription.package not in ['PRO_PLUS', 'ENTERPRISE'] %}
                     {% set addon_package_blocked = is_api_access and subscription and subscription.package != 'ENTERPRISE' %}
                     <div class="subscription-addon-card">
                       <div class="subscription-addon-head">
                         <label class="check">
-                          <input type="checkbox" name="addons" value="{{ addon_key }}" {% if addon_active %}checked{% endif %} {% if addon_unavailable or addon_package_blocked %}disabled{% endif %} />
+                          <input type="checkbox" name="addons" value="{{ addon_key }}" {% if addon_active %}checked{% endif %} {% if addon_unavailable or addon_package_blocked or addon_custom_blocked %}disabled{% endif %} />
                           <span>{{ addon_label }}</span>
                         </label>
                         {% if addon_package_blocked %}
                         <span class="badge" style="background:#433c15; color:#f2df8f;">Enterprise Only</span>
+                        {% elif addon_custom_blocked %}
+                        <span class="badge" style="background:#203047; color:#b7d6ff;">Pro Plus / Enterprise</span>
                         {% elif addon_unavailable %}
                         <span class="badge" style="background:#5b3a18; color:#ffd9a3;">Unavailable</span>
                         {% elif addon_active %}
@@ -578,331 +599,10 @@
   </div>
   {% endif %}
 
-  {% if tab == 'communication' and user.role in ["hr_superadmin", "manager_operational", "supervisor", "admin_asistent"] %}
-  <style>
-    .communication-shell { display:grid; gap:16px; margin-top:12px; }
-    .communication-hero { display:grid; gap:6px; }
-    .communication-hero h3 { margin:0; font-size:24px; }
-    .communication-hero p { margin:0; color:var(--muted); line-height:1.6; max-width:780px; }
-    .communication-stat-grid { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:12px; }
-    .communication-stat-card { border:1px solid rgba(255,255,255,.08); border-radius:8px; padding:16px; background:rgba(255,255,255,.02); display:grid; gap:6px; min-height:88px; }
-    .communication-stat-value { font-size:22px; font-weight:700; }
-    .communication-main-grid { display:grid; grid-template-columns:minmax(320px, 420px) minmax(0, 1fr); gap:16px; }
-    .communication-config-list { display:grid; gap:16px; }
-    .communication-config-grid { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:12px; align-items:end; }
-    .communication-panel { border:1px solid rgba(255,255,255,.08); border-radius:8px; background:rgba(255,255,255,.02); padding:16px; display:grid; gap:12px; }
-    .communication-panel-head { display:grid; gap:4px; }
-    .communication-panel-head h4 { margin:0; font-size:17px; }
-    .communication-panel-head p { margin:0; color:var(--muted); line-height:1.5; }
-    .communication-stack { display:grid; gap:16px; }
-    .communication-table-wrap { overflow:auto; }
-    .communication-badge { display:inline-flex; align-items:center; min-height:28px; border-radius:999px; padding:0 12px; font-size:12px; font-weight:700; background:rgba(255,255,255,.08); }
-    .communication-badge--incident { background:#452615; color:#ffcb9e; }
-    .communication-badge--announcement { background:#173b2a; color:#9ef0bf; }
-    .communication-empty { border:1px dashed rgba(255,255,255,.12); border-radius:8px; padding:20px; text-align:center; color:var(--muted); }
-    @media (max-width: 1100px) {
-      .communication-stat-grid,
-      .communication-main-grid,
-      .communication-config-grid { grid-template-columns:1fr; }
-    }
-    @media (max-width: 720px) {
-      .communication-stat-grid { grid-template-columns:1fr 1fr; }
-    }
-    @media (max-width: 560px) {
-      .communication-stat-grid { grid-template-columns:1fr; }
-      .communication-hero h3 { font-size:20px; }
-    }
-  </style>
-  <div class="communication-shell">
-    <section class="card communication-hero">
-      <h3>Operational Communication</h3>
-      <p>Panel ini merangkum pengumuman, incident, aktivitas chat, dan audit trail agar koordinasi lapangan tetap terstruktur dan mudah ditelusuri.</p>
-    </section>
-
-    <section class="communication-stat-grid">
-      <div class="communication-stat-card">
-        <span class="muted">Announcement aktif</span>
-        <div class="communication-stat-value">{{ communication_announcements|length }}</div>
-        <span class="muted">Scope yang terlihat oleh akun ini</span>
-      </div>
-      <div class="communication-stat-card">
-        <span class="muted">Incident terbaru</span>
-        <div class="communication-stat-value">{{ communication_incidents|length }}</div>
-        <span class="muted">Termasuk room chat incident</span>
-      </div>
-      <div class="communication-stat-card">
-        <span class="muted">Aktivitas chat</span>
-        <div class="communication-stat-value">{{ communication_recent_messages|length }}</div>
-        <span class="muted">Snapshot 30 pesan terakhir</span>
-      </div>
-      <div class="communication-stat-card">
-        <span class="muted">Audit trail</span>
-        <div class="communication-stat-value">{{ communication_recent_audit|length }}</div>
-        <span class="muted">Log aksi komunikasi terbaru</span>
-      </div>
-    </section>
-
-    {% if user.role == "hr_superadmin" %}
-    <section class="communication-panel">
-      <div class="communication-panel-head">
-        <h4>Client Communication Control</h4>
-        <p>Aktifkan komunikasi per client, tentukan tier operasional, serta batasi kuota pesan dan ukuran lampiran incident. Semua nilai di bawah ini mengikuti plafon dari Credential Owner.</p>
-      </div>
-      <div class="communication-panel" style="padding:14px;">
-        <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
-          <span class="communication-badge {% if communication_owner_policy.chat_enabled %}communication-badge--announcement{% endif %}">Chat: {% if communication_owner_policy.chat_enabled %}ON{% else %}OFF{% endif %}</span>
-          <span class="communication-badge {% if communication_owner_policy.announcement_enabled %}communication-badge--announcement{% endif %}">Announcement: {% if communication_owner_policy.announcement_enabled %}ON{% else %}OFF{% endif %}</span>
-          <span class="communication-badge {% if communication_owner_policy.incident_enabled %}communication-badge--incident{% endif %}">Incident: {% if communication_owner_policy.incident_enabled %}ON{% else %}OFF{% endif %}</span>
-          <span class="communication-badge {% if communication_owner_policy.api_enabled %}communication-badge--announcement{% endif %}">API: {% if communication_owner_policy.api_enabled %}ON{% else %}OFF{% endif %}</span>
-          <span class="communication-badge">Max Tier Owner: {{ communication_owner_policy.max_tier|title }}</span>
-        </div>
-        <div class="muted" style="line-height:1.5;">Jika toggle owner mematikan komunikasi atau menahan tier di level tertentu, konfigurasi client di bawah otomatis mengikuti batas tersebut.</div>
-      </div>
-      <div class="communication-config-list">
-        {% for c in clients %}
-        {% set communication_config = communication_client_configs.get(c.id, {}) %}
-        <form class="communication-panel" method="post" action="{{ url_for('admin.settings_communication_update') }}" style="padding:14px;">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-          <input type="hidden" name="client_id" value="{{ c.id }}" />
-          <div style="display:flex; justify-content:space-between; gap:12px; align-items:flex-start; flex-wrap:wrap;">
-            <div>
-              <div style="font-weight:700;">{{ c.name }}</div>
-              <div class="muted">{{ c.office_email or "-" }}</div>
-            </div>
-            <label class="check" style="margin:0;">
-              <input type="checkbox" name="communication_enabled" value="1" {% if communication_config.raw_enabled %}checked{% endif %} {% if not communication_owner_policy.chat_enabled %}disabled{% endif %} />
-              <span>Communication Enabled</span>
-            </label>
-          </div>
-          <div class="communication-config-grid">
-            <div class="form-row" style="margin:0;">
-              <label class="label" for="communication-tier-{{ c.id }}">Tier</label>
-              <select class="input" id="communication-tier-{{ c.id }}" name="communication_tier" {% if not communication_owner_policy.chat_enabled %}disabled{% endif %}>
-                <option value="basic" {% if communication_config.raw_tier == 'basic' %}selected{% endif %}>Basic</option>
-                <option value="pro" {% if communication_config.raw_tier == 'pro' %}selected{% endif %}>Pro</option>
-                <option value="enterprise" {% if communication_config.raw_tier == 'enterprise' %}selected{% endif %}>Enterprise</option>
-              </select>
-            </div>
-            <div class="form-row" style="margin:0;">
-              <label class="label" for="communication-message-limit-{{ c.id }}">Message / Day</label>
-              <input class="input" id="communication-message-limit-{{ c.id }}" type="number" min="1" name="communication_message_limit_per_day" value="{{ communication_config.message_limit_per_day or 300 }}" />
-            </div>
-            <div class="form-row" style="margin:0;">
-              <label class="label" for="communication-attachment-limit-{{ c.id }}">Attachment MB</label>
-              <input class="input" id="communication-attachment-limit-{{ c.id }}" type="number" min="1" name="communication_attachment_limit_mb" value="{{ communication_config.attachment_limit_mb or 5 }}" />
-            </div>
-            <div class="form-row" style="margin:0;">
-              <label class="label">Feature Scope</label>
-              <div class="muted" style="line-height:1.5;">
-                Requested: {{ communication_config.raw_tier|title }}. Effective: {{ communication_config.tier|title }}{% if not communication_config.enabled %} (owner/client off){% endif %}.
-              </div>
-            </div>
-          </div>
-          <div class="btn-row">
-            <button class="btn primary btn-fixed-100" type="submit">Simpan</button>
-          </div>
-        </form>
-        {% endfor %}
-      </div>
-    </section>
-    {% endif %}
-
-    <section class="communication-main-grid">
-      <div class="communication-panel">
-        <div class="communication-panel-head">
-          <h4>Create Announcement</h4>
-          <p>Gunakan untuk broadcast global, role, atau site agar arahan operasional tidak tercecer di luar sistem.</p>
-        </div>
-        <form id="announcementCreateForm" class="stack">
-          <div class="form-row" style="margin:0;">
-            <label class="label" for="announcement-title">Judul</label>
-            <input class="input" id="announcement-title" type="text" name="title" maxlength="160" placeholder="Judul pengumuman" required />
-          </div>
-          <div class="form-row" style="margin:0;">
-            <label class="label" for="announcement-message">Pesan</label>
-            <textarea class="input" id="announcement-message" name="message" rows="5" placeholder="Isi pengumuman operasional" required></textarea>
-          </div>
-          <div class="form-grid" style="grid-template-columns: repeat(2, minmax(0, 1fr)); gap:12px;">
-            <div class="form-row" style="margin:0;">
-              <label class="label" for="announcement-target-type">Target</label>
-              <select class="input" id="announcement-target-type" name="target_type">
-                <option value="global">Global</option>
-                <option value="role">Role</option>
-                <option value="site">Site</option>
-              </select>
-            </div>
-            <div class="form-row" style="margin:0;">
-              <label class="label" for="announcement-target-id">Target ID</label>
-              <input class="input" id="announcement-target-id" type="text" name="target_id" placeholder="role atau site_id" />
-            </div>
-          </div>
-          <div class="form-grid" style="grid-template-columns: minmax(0, 1fr) auto; gap:12px; align-items:end;">
-            <div class="form-row" style="margin:0;">
-              <label class="label" for="announcement-expired-at">Expired At</label>
-              <input class="input" id="announcement-expired-at" type="date" name="expired_at" />
-            </div>
-            <label class="check" style="margin:0 0 10px 0;">
-              <input type="checkbox" name="is_mandatory" value="1" />
-              <span>Mandatory</span>
-            </label>
-          </div>
-          <div class="btn-row">
-            <button class="btn primary btn-fixed-100" type="submit" id="announcementCreateSubmit">Publish</button>
-          </div>
-          <div class="alert info" id="announcementCreateAlert" style="display:none;"></div>
-        </form>
-      </div>
-
-      <div class="communication-stack">
-        <div class="communication-panel">
-          <div class="communication-panel-head">
-            <h4>Announcement Feed</h4>
-            <p>Riwayat pengumuman yang masih aktif beserta target distribusinya.</p>
-          </div>
-          {% if not communication_announcements %}
-          <div class="communication-empty">Belum ada pengumuman aktif.</div>
-          {% else %}
-          <div class="communication-table-wrap">
-            <table class="table" aria-label="Announcement list">
-              <thead>
-                <tr>
-                  <th>Judul</th>
-                  <th>Target</th>
-                  <th>Status</th>
-                  <th>Dibuat</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for item in communication_announcements %}
-                <tr>
-                  <td>
-                    <div style="font-weight:700;">{{ item.title }}</div>
-                    <div class="muted">{{ item.message[:120] }}{% if item.message|length > 120 %}...{% endif %}</div>
-                  </td>
-                  <td>{{ item.target_type }}{% if item.target_id %}: {{ item.target_id }}{% endif %}</td>
-                  <td>{% if item.is_mandatory %}<span class="communication-badge communication-badge--announcement">Mandatory</span>{% else %}<span class="muted">Normal</span>{% endif %}</td>
-                  <td>{{ item.created_at|display_datetime or "-" }}</td>
-                </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-          {% endif %}
-        </div>
-
-        <div class="communication-panel">
-          <div class="communication-panel-head">
-            <h4>Incident Feed</h4>
-            <p>Laporan kejadian yang masuk dari site beserta room chat incident yang dibuat otomatis.</p>
-          </div>
-          {% if not communication_incidents %}
-          <div class="communication-empty">Belum ada incident aktif.</div>
-          {% else %}
-          <div class="communication-table-wrap">
-            <table class="table" aria-label="Incident list">
-              <thead>
-                <tr>
-                  <th>Incident</th>
-                  <th>Scope</th>
-                  <th>Status</th>
-                  <th>Dibuat</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for item in communication_incidents %}
-                <tr>
-                  <td>
-                    <div style="font-weight:700;">{{ item.title }}</div>
-                    <div class="muted">{{ item.description[:120] }}{% if item.description|length > 120 %}...{% endif %}</div>
-                    {% if item.room_name %}<div class="muted">Room: {{ item.room_name }}</div>{% endif %}
-                  </td>
-                  <td>Site {{ item.site_id or "-" }}{% if item.client_id %} / Client {{ item.client_id }}{% endif %}</td>
-                  <td><span class="communication-badge communication-badge--incident">{{ item.status|upper }}</span></td>
-                  <td>{{ item.created_at|display_datetime or "-" }}</td>
-                </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-          {% endif %}
-        </div>
-
-        <div class="communication-panel">
-          <div class="communication-panel-head">
-            <h4>Recent Chat Monitoring</h4>
-            <p>Ringkasan pesan terbaru untuk membantu follow-up cepat ke room yang aktif.</p>
-          </div>
-          {% if not communication_recent_messages %}
-          <div class="communication-empty">Belum ada aktivitas chat.</div>
-          {% else %}
-          <div class="communication-table-wrap">
-            <table class="table" aria-label="Recent chat monitoring">
-              <thead>
-                <tr>
-                  <th>Room</th>
-                  <th>Sender</th>
-                  <th>Pesan</th>
-                  <th>Waktu</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for item in communication_recent_messages %}
-                <tr>
-                  <td>{{ item.room_name }}</td>
-                  <td>{{ item.sender_email }}</td>
-                  <td>{{ item.message[:100] }}{% if item.message|length > 100 %}...{% endif %}</td>
-                  <td>{{ item.created_at|display_datetime or "-" }}</td>
-                </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-          {% endif %}
-        </div>
-
-        <div class="communication-panel">
-          <div class="communication-panel-head">
-            <h4>Audit Trail</h4>
-            <p>Jejak aksi komunikasi untuk kebutuhan kontrol dan investigasi.</p>
-          </div>
-          {% if not communication_recent_audit %}
-          <div class="communication-empty">Belum ada audit komunikasi.</div>
-          {% else %}
-          <div class="communication-table-wrap">
-            <table class="table" aria-label="Communication audit trail">
-              <thead>
-                <tr>
-                  <th>Entity</th>
-                  <th>Aksi</th>
-                  <th>Aktor</th>
-                  <th>Ringkasan</th>
-                  <th>Waktu</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for item in communication_recent_audit %}
-                <tr>
-                  <td>{{ item.entity_type }}{% if item.entity_id %} #{{ item.entity_id }}{% endif %}</td>
-                  <td>{{ item.action }}</td>
-                  <td>{{ item.actor_email }}</td>
-                  <td>{{ item.summary }}</td>
-                  <td>{{ item.created_at|display_datetime or "-" }}</td>
-                </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-          {% endif %}
-        </div>
-      </div>
-    </section>
-  </div>
-  {% endif %}
-
   {% if tab == 'addons' and user.role == "hr_superadmin" %}
   <div class="card" style="margin-top:12px;">
     <div style="font-weight:700; margin-bottom:8px;">Owner Add-on Coordinator</div>
-    <div class="muted" style="margin-bottom:12px;">Mode owner menentukan versi aplikasi utama, lalu add-on mengikuti mode Enterprise, Pro, atau Pro Plus.</div>
+    <div class="muted" style="margin-bottom:12px;">Panel ini mengikuti setup awal dari Credential Owner saat login. Setelah password owner tervalidasi, tab ini dapat mengubah layer aplikasi dan add-on aktif, lalu menyimpan perubahan sebagai pengaturan owner yang baru.</div>
     <div class="stack" id="ownerAddonPanel">
       <form class="inline" id="ownerAddonUnlockForm">
         <input class="input" type="password" id="ownerAddonPassword" placeholder="Password owner add-on" autocomplete="current-password" required />
@@ -941,15 +641,6 @@
           <input type="checkbox" data-owner-addon value="payroll_plus" disabled />
           <span>Payroll Plus</span>
         </label>
-        <div style="border:1px solid rgba(255,255,255,.08); border-radius:8px; padding:10px 12px; background:rgba(255,255,255,.02);">
-          <label class="check">
-            <input type="checkbox" data-owner-addon value="api_access" disabled />
-            <span>API access</span>
-          </label>
-          <div class="muted" style="margin-top:8px; line-height:1.5;">
-            Add-on terpisah untuk integrasi eksternal. Toggle ini hanya membuka ketersediaan fitur, aktivasi tetap dilakukan per client.
-          </div>
-        </div>
         <label class="check">
           <input type="checkbox" data-owner-addon value="ai" disabled />
           <span>AI Analysis</span>
@@ -962,24 +653,18 @@
           <input type="checkbox" data-owner-addon value="sla_tracking" disabled />
           <span>SLA Tracking</span>
         </label>
-        <div style="border:1px solid rgba(255,255,255,.08); border-radius:8px; padding:10px 12px; background:rgba(255,255,255,.02); display:grid; gap:8px;">
-          <label class="check">
-            <input type="checkbox" data-owner-addon value="communication_chat" disabled />
-            <span>Live chat</span>
-          </label>
-          <label class="check">
-            <input type="checkbox" data-owner-addon value="communication_announcement" disabled />
-            <span>Annauncement</span>
-          </label>
-          <label class="check">
-            <input type="checkbox" data-owner-addon value="communication_incident" disabled />
-            <span>Incident System</span>
-          </label>
-          <label class="check">
-            <input type="checkbox" data-owner-addon value="communication_api" disabled />
-            <span>API Communication</span>
-          </label>
-        </div>
+        <label class="check">
+          <input type="checkbox" data-owner-addon value="communication_chat" disabled />
+          <span>Live chat</span>
+        </label>
+        <label class="check">
+          <input type="checkbox" data-owner-addon value="communication_announcement" disabled />
+          <span>Annauncement</span>
+        </label>
+        <label class="check">
+          <input type="checkbox" data-owner-addon value="communication_incident" disabled />
+          <span>Incident System</span>
+        </label>
       </div>
       <div class="btn-row">
         <button class="btn primary btn-fixed-100" type="button" id="ownerAddonSave" disabled>Simpan</button>
@@ -1117,14 +802,26 @@
     const communicationChatKey = "communication_chat";
     const communicationAnnouncementKey = "communication_announcement";
     const communicationIncidentKey = "communication_incident";
-    const communicationApiKey = "communication_api";
-    const apiAccessKey = "api_access";
     const modeKeys = new Set([enterpriseAddonKey, proAddonKey, proPlusAddonKey]);
 
     function showMessage(message) {
       if (!alertBox) return;
       alertBox.textContent = message;
       alertBox.style.display = "block";
+    }
+
+    function clearAddons() {
+      toggles.forEach((toggle) => {
+        toggle.checked = false;
+      });
+    }
+
+    function selectedModeLabel() {
+      const enterpriseToggle = toggles.find((toggle) => toggle.value === enterpriseAddonKey);
+      const proPlusToggle = toggles.find((toggle) => toggle.value === proPlusAddonKey);
+      if (enterpriseToggle?.checked) return "HRIS Enterprise";
+      if (proPlusToggle?.checked) return "HRIS Pro Plus";
+      return "HRIS Pro";
     }
 
     function setBusy(button, busyLabel, isBusy) {
@@ -1243,8 +940,6 @@
       const chatToggle = toggles.find((toggle) => toggle.value === communicationChatKey);
       const announcementToggle = toggles.find((toggle) => toggle.value === communicationAnnouncementKey);
       const incidentToggle = toggles.find((toggle) => toggle.value === communicationIncidentKey);
-      const apiToggle = toggles.find((toggle) => toggle.value === communicationApiKey);
-      const apiAccessToggle = toggles.find((toggle) => toggle.value === apiAccessKey);
       if (incidentToggle?.checked) {
         if (chatToggle) chatToggle.checked = true;
         if (announcementToggle) announcementToggle.checked = true;
@@ -1255,9 +950,6 @@
       if (!chatToggle?.checked) {
         if (announcementToggle) announcementToggle.checked = false;
         if (incidentToggle) incidentToggle.checked = false;
-      }
-      if (apiToggle?.checked && apiAccessToggle) {
-        apiAccessToggle.checked = true;
       }
     }
 
@@ -1295,14 +987,12 @@
       return payload;
     }
 
-    requestJson("/api/owner/addons", { method: "GET", headers: {} })
-      .then((payload) => {
-        const data = payload.data || {};
-        applyAddons(data.addons || []);
-        setUnlocked(Boolean(data.unlocked));
-        if (data.unlocked) showMessage("Akses owner add-on aktif.");
-      })
-      .catch((error) => showMessage(error.message));
+    setUnlocked(false);
+    clearAddons();
+    showMessage("Masukkan password Credential Owner untuk membuka dan mengubah add-on dari tab ini.");
+
+    requestJson("/api/owner/addons/lock", { method: "POST" })
+      .catch(() => null);
 
     unlockForm?.addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -1316,7 +1006,7 @@
         applyAddons(payload.data?.addons || []);
         setUnlocked(true);
         if (passwordInput) passwordInput.value = "";
-        showMessage(payload.message || "Akses owner aktif.");
+        showMessage(`${payload.message || "Akses owner aktif."} Anda bisa mengubah layer dan add-on dari tab ini. Layer saat ini: ${selectedModeLabel()}.`);
       } catch (error) {
         showMessage(error.message);
       } finally {
@@ -1332,7 +1022,10 @@
           body: JSON.stringify({ addons: selectedAddons() }),
         });
         applyAddons(payload.data?.addons || []);
-        showMessage(payload.message || "Add-on tersimpan.");
+        await requestJson("/api/owner/addons/lock", { method: "POST" }).catch(() => null);
+        setUnlocked(false);
+        if (passwordInput) passwordInput.value = "";
+        showMessage(`${payload.message || "Pengaturan owner tersimpan."} Layer aktif sekarang: ${selectedModeLabel()}. Akses owner dikunci ulang, masukkan password lagi untuk mengubah add-on.`);
       } catch (error) {
         showMessage(error.message);
       } finally {
@@ -1383,66 +1076,6 @@
 
     document.querySelectorAll("[data-api-revoke]").forEach((button) => {
       button.form?.addEventListener("submit", () => setBusy(button, "Revoking..."));
-    });
-  })();
-</script>
-{% endif %}
-{% if tab == 'communication' and user.role in ["hr_superadmin", "manager_operational", "supervisor", "admin_asistent"] %}
-<script>
-  (function () {
-    const form = document.getElementById("announcementCreateForm");
-    const alertBox = document.getElementById("announcementCreateAlert");
-    const submitButton = document.getElementById("announcementCreateSubmit");
-    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute("content") || "";
-
-    function showMessage(message, isError) {
-      if (!alertBox) return;
-      alertBox.textContent = message;
-      alertBox.className = `alert ${isError ? "error" : "info"}`;
-      alertBox.style.display = "block";
-    }
-
-    form?.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      if (!form) return;
-      if (submitButton) {
-        submitButton.disabled = true;
-        submitButton.textContent = "Publishing...";
-      }
-      const formData = new FormData(form);
-      const payload = {
-        title: formData.get("title"),
-        message: formData.get("message"),
-        target_type: formData.get("target_type"),
-        target_id: formData.get("target_id"),
-        expired_at: formData.get("expired_at"),
-        is_mandatory: formData.get("is_mandatory") === "1",
-      };
-      try {
-        const response = await fetch("/api/announcement/create", {
-          method: "POST",
-          credentials: "same-origin",
-          headers: {
-            "Content-Type": "application/json",
-            "X-CSRF-Token": csrfToken,
-          },
-          body: JSON.stringify(payload),
-        });
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok || data.ok === false) {
-          throw new Error(data.message || "Gagal membuat announcement.");
-        }
-        showMessage(data.message || "Announcement dibuat.", false);
-        form.reset();
-        window.setTimeout(() => window.location.reload(), 350);
-      } catch (error) {
-        showMessage(error.message || "Gagal membuat announcement.", true);
-      } finally {
-        if (submitButton) {
-          submitButton.disabled = false;
-          submitButton.textContent = "Publish";
-        }
-      }
     });
   })();
 </script>

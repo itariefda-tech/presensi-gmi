@@ -141,3 +141,48 @@ def test_admin_employee_page_hides_addon_nav_when_owner_mode_is_hris_pro(theme_d
     assert 'href="/dashboard/admin/ai-analysis"' not in html
     assert 'href="/dashboard/admin/billing"' not in html
     assert 'href="/dashboard/admin/contract"' not in html
+
+
+def test_legacy_basic_package_normalizes_to_pro_and_pro_plus_supports_addons(theme_db):
+    assert presensi._normalize_client_package("BASIC") == presensi.CLIENT_PACKAGE_PRO
+    assert presensi._normalize_client_package(None) == presensi.CLIENT_PACKAGE_PRO
+    assert presensi._client_package_supports_custom_addons(presensi.CLIENT_PACKAGE_PRO) is False
+    assert presensi._client_package_supports_custom_addons(presensi.CLIENT_PACKAGE_PRO_PLUS) is True
+    assert presensi._normalize_communication_tier("basic") == "pro"
+
+
+def test_hr_settings_user_tier_hides_basic_and_shows_pro_plus(theme_db, monkeypatch):
+    monkeypatch.setenv("FLASK_SECRET", "test-secret-hr-settings-tier")
+    conn = sqlite3.connect(theme_db)
+    try:
+        conn.execute(
+            """
+            INSERT INTO users (
+                id, email, name, role, password_hash, is_active,
+                tier, created_at
+            ) VALUES (1, 'admin@test.local', 'Admin', 'hr_superadmin',
+                'hash', 1, 'basic', '2026-01-01 00:00:00')
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    flask_app = presensi.create_app()
+    flask_app.config.update(TESTING=True)
+    with flask_app.test_client() as client:
+        with client.session_transaction() as sess:
+            sess["user"] = {
+                "id": 1,
+                "email": "admin@test.local",
+                "role": "hr_superadmin",
+                "name": "Admin",
+                "tier": "pro",
+            }
+
+        response = client.get("/dashboard/admin/settings?tab=users")
+        assert response.status_code == 200
+        html = response.get_data(as_text=True)
+
+    assert ">Basic<" not in html
+    assert ">Pro Plus<" in html

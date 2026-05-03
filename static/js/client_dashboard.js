@@ -4,6 +4,7 @@
   const navButtons = Array.from(document.querySelectorAll(".nav-btn"));
   const headerButtons = Array.from(document.querySelectorAll(".header-action-btn[data-tab]"));
   const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || "";
+  const initialTabFromPage = Number(document.body?.dataset.initialTab || "0");
   let swipeIndex = 0;
   const tabStorageKey = "client_active_tab";
   const patrolState = {
@@ -2326,6 +2327,6 @@
     try {
       localStorage.removeItem(tabStorageKey);
     } catch (e) {}
-    go(0);
+    go(Number.isFinite(initialTabFromPage) ? initialTabFromPage : 0);
   });
 })();

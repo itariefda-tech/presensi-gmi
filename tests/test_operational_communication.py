@@ -106,15 +106,12 @@ def _admin_session(client) -> None:
         sess["csrf_token"] = "csrf-test-token"
 
 
-def _enable_communication_stack(*, tier: str = "enterprise", enable_api: bool = False) -> None:
+def _enable_communication_stack(*, tier: str = "enterprise") -> None:
     global_addons = [
         presensi.ADDON_COMMUNICATION_CHAT,
         presensi.ADDON_COMMUNICATION_ANNOUNCEMENT,
         presensi.ADDON_COMMUNICATION_INCIDENT,
     ]
-    if enable_api:
-        global_addons.extend([presensi.ADDON_COMMUNICATION_API, presensi.ADDON_API_ACCESS])
-        presensi._set_client_addons(1, [presensi.ADDON_API_ACCESS])
     presensi._set_global_addons(global_addons)
     presensi._set_communication_client_config(
         1,
@@ -203,7 +200,7 @@ def test_announcement_create_list_and_read_flow(communication_db):
         assert updated["read_at"] is not None
 
 
-def test_admin_settings_communication_tab_renders(communication_db):
+def test_admin_communication_page_renders(communication_db):
     _seed_communication_data(communication_db)
     _enable_communication_stack()
     flask_app = presensi.create_app()
@@ -211,15 +208,18 @@ def test_admin_settings_communication_tab_renders(communication_db):
 
     with flask_app.test_client() as client:
         _admin_session(client)
-        response = client.get("/dashboard/admin/settings?tab=communication")
+        response = client.get("/dashboard/admin/communication")
         assert response.status_code == 200
         html = response.get_data(as_text=True)
 
     assert "Operational Communication" in html
     assert "Create Announcement" in html
-    assert "Recent Chat Monitoring" in html
-    assert "Incident Feed" in html
-    assert "Audit Trail" in html
+    assert "Live Chat" in html
+    assert "Feed, Monitor & History" in html
+    assert "Client Communication Control" in html
+    assert "Pilih client" in html
+    assert "Pilih site" in html
+    assert ">Basic<" not in html
 
 
 def test_incident_create_list_and_auto_room_flow(communication_db):
@@ -399,50 +399,16 @@ def test_employee_dashboard_communication_section_renders(communication_db):
     assert "Incident Aktif" in html
 
 
-def test_communication_api_token_can_access_chat_and_logs_usage(communication_db):
-    _seed_communication_data(communication_db)
-    _enable_communication_stack(enable_api=True)
-    flask_app = presensi.create_app()
-    flask_app.config.update(TESTING=True)
-
-    actor = presensi.User(id=3, email="admin@test.local", role="hr_superadmin", name="Admin", tier="enterprise")
-    token_row, plain_token = presensi._generate_client_api_token(1, "Communication Integration", actor)
-    assert token_row["id"] > 0
-
-    with flask_app.test_client() as client:
-        response = client.get("/api/chat/list", headers={"X-API-Key": plain_token})
-        assert response.status_code == 200
-        payload = response.get_json()["data"]
-        assert isinstance(payload, list)
-
-    conn = sqlite3.connect(communication_db)
-    try:
-        row = conn.execute(
-            """
-            SELECT endpoint, status_code
-            FROM api_access_logs
-            ORDER BY id DESC
-            LIMIT 1
-            """
-        ).fetchone()
-        assert row is not None
-        assert row[0] == "/api/chat/list"
-        assert row[1] == 200
-    finally:
-        conn.close()
-
-
-def test_communication_tier_blocks_incident_when_client_only_basic(communication_db):
+def test_communication_site_disable_blocks_incident(communication_db):
     _seed_communication_data(communication_db)
     presensi._set_global_addons([
         presensi.ADDON_COMMUNICATION_CHAT,
         presensi.ADDON_COMMUNICATION_ANNOUNCEMENT,
         presensi.ADDON_COMMUNICATION_INCIDENT,
     ])
-    presensi._set_communication_client_config(
+    presensi._set_communication_site_config(
         1,
-        enabled=True,
-        tier="basic",
+        enabled=False,
         message_limit_per_day=300,
         attachment_limit_mb=5,
     )
@@ -454,12 +420,23 @@ def test_communication_tier_blocks_incident_when_client_only_basic(communication
         response = client.post(
             "/api/incident/create",
             data={
-                "title": "Basic Tier Block",
-                "description": "Tidak boleh lolos pada tier basic.",
+                "title": "Site Communication Block",
+                "description": "Tidak boleh lolos saat communication pada site dimatikan.",
                 "csrf_token": "csrf-test-token",
             },
             headers={"X-CSRF-Token": "csrf-test-token"},
         )
+        assert response.status_code == 403
+
+
+def test_communication_endpoint_no_longer_accepts_api_token_auth(communication_db):
+    _seed_communication_data(communication_db)
+    _enable_communication_stack()
+    flask_app = presensi.create_app()
+    flask_app.config.update(TESTING=True)
+
+    with flask_app.test_client() as client:
+        response = client.get("/api/chat/list", headers={"X-API-Key": "fake-token"})
         assert response.status_code == 403
 
 

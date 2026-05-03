@@ -1,7 +1,7 @@
 {% extends "dashboard/base.html" %}
 {% set active = "billing" %}
 {% set heading = "Billing" %}
-{% set subtitle = "Ringkasan biaya enterprise per client" %}
+{% set subtitle = "Ringkasan biaya operasional per client" %}
 
 {% block body %}
 <div class="card">
@@ -10,16 +10,22 @@
   <form class="inline" method="get">
     <input class="input" type="month" name="period" value="{{ period }}" style="width:160px;" />
     <button class="btn primary" type="submit">Lihat</button>
-    <a class="btn secondary" href="{{ url_for('admin.settings', tab='subscription') }}">Subscription</a>
   </form>
 </div>
 
 <div class="table-wrap" style="margin-top:12px;">
-  <table class="table" aria-label="Ringkasan billing client">
+  <table class="table billing-table" aria-label="Ringkasan billing client">
+    <colgroup>
+      <col class="billing-col-client" />
+      <col class="billing-col-status" />
+      <col class="billing-col-type" />
+      <col class="billing-col-usage" />
+      <col class="billing-col-estimate" />
+      <col class="billing-col-action" />
+    </colgroup>
     <thead>
       <tr>
         <th>Client</th>
-        <th>Package</th>
         <th>Status</th>
         <th>Billing Type</th>
         <th>Usage</th>
@@ -29,17 +35,15 @@
     </thead>
     <tbody>
       {% if not rows %}
-      <tr><td colspan="7" class="muted">Belum ada client.</td></tr>
+      <tr><td colspan="6" class="muted">Belum ada client.</td></tr>
       {% endif %}
       {% for row in rows %}
       {% set summary = row.summary %}
-      {% set subscription = row.subscription %}
       <tr>
         <td>
           <div style="font-weight:700;">{{ row.client.name }}</div>
           <div class="muted">{{ row.client.office_email or "-" }}</div>
         </td>
-        <td><span class="badge">{{ subscription.package|title }}</span></td>
         <td>
           {% if summary.billing_enabled and row.billing_config and row.active_contract %}
           <span class="badge">Aktif</span>

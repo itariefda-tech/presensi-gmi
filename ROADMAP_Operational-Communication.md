@@ -7,6 +7,23 @@ Ini adalah layer komunikasi operasional terstruktur untuk sistem outsource:
 - Incident berbasis event
 - Audit komunikasi
 
+## Status Pencapaian Saat Ini
+
+Sampai titik ini, layer operational communication sudah melewati fondasi basic chat dan sudah masuk mode usable untuk operasional:
+
+- room komunikasi `private`, `site`, `role`, `incident`, dan `shift` sudah hidup
+- announcement, incident reporting, dan thread discussion sudah tersedia
+- polling notification, sound, dan vibration dasar sudah berjalan
+- hardening dasar sudah aktif: rate limit, audit trail, duplicate throttle, scope validation
+- fitur communication sekarang difokuskan ke tiga layer inti: live chat, announcement, dan incident system
+- owner credential modal sekarang menjadi perintah induk untuk fitur komunikasi
+
+Catatan paket:
+
+- `HRIS Pro` tidak otomatis membuka seluruh layer communication enterprise
+- `HRIS Pro Plus` mengikuti add-on yang diaktifkan satu per satu
+- `HRIS Enterprise` membuka keseluruhan layer communication yang sudah tersedia, kecuali item roadmap yang memang masih belum dicentang
+
 ---
 
 # 🎯 OBJECTIVE
@@ -299,7 +316,7 @@ Ini adalah layer komunikasi operasional terstruktur untuk sistem outsource:
 ## Feature Flag (PENTING)
 - [x] Tambah field di user / tenant:
   - [x] `communication_enabled`
-  - [x] `tier_level` (basic / pro / enterprise)
+  - [x] `tier_level` (pro / pro_plus / enterprise)
 
 ---
 
@@ -313,19 +330,19 @@ Tambahkan:
   - [x] Enable Incident System
 
 - [x] Dropdown Tier:
-  - [x] Basic
   - [x] Pro
+  - [x] Pro Plus
   - [x] Enterprise
 
 ---
 
 ## Behavior Tier
 
-### BASIC
+### PRO
 - [x] Chat private
 - [x] Chat site
 
-### PRO
+### PRO PLUS
 - [x] + Announcement
 - [x] + Read tracking
 
@@ -335,31 +352,20 @@ Tambahkan:
 - [ ] + Escalation
 
 ### Implementasi Add-on System
-- [x] Owner panel sekarang punya toggle global untuk chat, announcement, incident system, dan API communication access.
+- [x] Owner panel sekarang punya toggle global untuk chat, announcement, dan incident system.
 - [x] Konfigurasi per client tersedia di tab Communication untuk enable/disable komunikasi, pilih tier, serta atur limit pesan dan attachment.
-- [x] Gating fitur sudah mengikuti tier: Basic untuk chat, Pro menambah announcement, Enterprise membuka incident dan thread.
+- [x] Gating fitur sudah mengikuti tier: Pro untuk chat, Pro Plus menambah announcement, Enterprise membuka incident dan thread.
 - [x] Credential Owner menjadi perintah induk: saat toggle owner mematikan atau membatasi tier komunikasi, konfigurasi client dan endpoint otomatis mengikuti batas tersebut.
+- [x] Layer mode aplikasi `HRIS Pro`, `HRIS Pro Plus`, dan `HRIS Enterprise` sekarang ikut membatasi perilaku add-on komunikasi dari level owner.
 
 ---
 
-# 🔐 API ACCESS & HARDENING INTEGRATION
-
-## API Access
-- [x] Protect endpoint:
-  - [x] `/api/chat/*`
-  - [x] `/api/announcement/*`
-  - [x] `/api/incident/*`
-
-- [x] Token-based access
-
----
+# 🔐 HARDENING INTEGRATION
 
 ## Hardening
 - [x] Rate limit:
   - [x] chat send
   - [x] upload
-
-- [x] Logging API usage
 
 - [x] Role validation di setiap endpoint
 
@@ -367,16 +373,12 @@ Tambahkan:
 
 ## Credential Owner Panel
 Tambahkan:
-- [x] Toggle:
-  - [x] API Communication Access
-
 - [x] Limit:
   - [x] message/day
   - [x] attachment size
 
-### Implementasi API Access & Hardening Integration
-- [x] Endpoint komunikasi sekarang bisa dibuka lewat token API client yang sudah lolos `API access` dan `API Communication Access`.
-- [x] Semua request token komunikasi tercatat ke `api_access_logs` dengan endpoint, status, dan scope client.
+### Implementasi Hardening Integration
+- [x] Endpoint komunikasi sekarang kembali murni mengikuti session login dan tier communication owner/client, tanpa kaitan API access.
 - [x] Rate limit harian pesan dan limit ukuran attachment incident mengikuti konfigurasi komunikasi per client.
 
 ---

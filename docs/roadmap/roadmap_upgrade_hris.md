@@ -3,6 +3,21 @@
 ## Overview
 Upgrade aplikasi presensi menjadi HRIS (Human Resource Information System) tanpa mengubah stack/framework yang ada. Fokus pada penambahan fitur HRIS bertahap dengan mempertahankan kode existing.
 
+## Status Produk Saat Ini
+
+Roadmap ini sekarang sudah melampaui bentuk awal `Presensi -> HRIS PRO`. Implementasi terkini sudah berkembang menjadi layer produk berikut:
+
+- `HRIS Pro`
+  - paket inti operasional
+  - add-on lanjutan tidak otomatis aktif
+- `HRIS Pro Plus`
+  - tetap di basis Pro
+  - add-on dapat dipilih custom satu per satu
+- `HRIS Enterprise`
+  - membuka seluruh add-on tier yang tersedia dari owner policy
+
+Owner credential modal sekarang berfungsi sebagai pengendali induk untuk versi aplikasi dan add-on. Jadi layer versi tidak lagi sekadar label, tetapi sudah mempengaruhi UI, navigation, reporting, communication, promo guard tour, dan gating fitur di backend.
+
 ---
 
 ## Phase 1: Foundation (Presensi -> HRIS PRO)
@@ -305,18 +320,26 @@ Pembeda utama di market security
 ## Final Checklist
 
 ### HRIS PRO READY (Green Check)
-- [ ] Attendance stabil
-- [ ] Leave berjalan
-- [ ] Approval center aktif
-- [ ] Payroll sederhana jalan
-- [ ] Tier system aktif
+- [x] Attendance stabil
+- [x] Leave berjalan
+- [x] Approval center aktif
+- [x] Payroll sederhana jalan
+- [x] Tier system aktif
 
 ### HRIS ENTERPRISE READY (Red Check)
-- [ ] Multi client
+- [x] Multi client
 - [x] Add-on system
-- [ ] Patrol aktif
-- [ ] Payroll advanced
+- [x] Patrol aktif
+- [x] Payroll advanced
 - [ ] AI analysis basic
+
+## Pencapaian Relevan Tambahan
+
+- Reports sudah dibagi sesuai layer versi dan add-on.
+- `HRIS Calendar Reports` hanya muncul jika fitur `Calendar` aktif.
+- `Advanced Reporting` dan `Custom Report Builder` tidak tampil pada `HRIS Pro` murni.
+- Promo paket untuk `Guard Tour` sudah memakai halaman brosur khusus agar pacing upgrade tidak tersebar ke banyak halaman.
+- API access add-on sudah usable untuk integrasi attendance client.
 
 ---
 

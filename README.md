@@ -3,6 +3,84 @@
 HRIS GMI adalah aplikasi HRIS ringan untuk presensi, izin, dan approval.
 Fokus Phase 8: role access real (SQLite), HR settings, dan flow aplikasi stabil.
 
+## Karakter Aplikasi
+
+HRIS GMI bukan landing page atau demo HR biasa, tetapi aplikasi operasional harian yang dipakai untuk mengelola tenaga kerja outsource secara langsung. Karakter utamanya:
+
+- **Operasional dulu, kosmetik belakangan**  
+  Struktur halaman, filter, dan alur fitur diarahkan untuk pekerjaan admin, HR, supervisor, dan employee yang berulang setiap hari.
+
+- **Berbasis site dan assignment nyata**  
+  Sistem dibangun dengan konsep `client -> site -> assignment -> employee`, jadi logika presensi, payroll, reporting, dan komunikasi mengikuti struktur kerja lapangan.
+
+- **Modular dengan layer versi aplikasi**  
+  Aplikasi sekarang punya layer `HRIS Pro`, `HRIS Pro Plus`, dan `HRIS Enterprise`, dengan owner toggle sebagai pengendali induk untuk add-on dan perilaku fitur.
+
+- **Satu produk, banyak mode kerja**  
+  Employee dashboard, admin dashboard, client scope, attendance, reporting, payroll, communication, patrol, hingga API access berada dalam satu codebase dan satu model data.
+
+- **Siap tumbuh bertahap**  
+  Fitur tidak dipukul rata. Beberapa area hanya hidup bila paket atau add-on aktif, sehingga aplikasi bisa dipakai dari core workflow sampai enterprise workflow yang lebih kompleks.
+
+## Pencapaian Saat Ini
+
+Sampai titik ini, aplikasi sudah berkembang cukup jauh dari sistem presensi dasar. Ringkasnya:
+
+- **Core HRIS stabil**
+  - login, signup, reset password
+  - attendance check-in / check-out
+  - leave, approval, manual attendance
+  - role & permission berbasis SQLite
+
+- **Struktur organisasi dan operasional sudah matang**
+  - client, site, assignment, policy, shift
+  - flow berbasis site sebagai unit kerja utama
+  - filter yang mengkerucut di beberapa dashboard penting
+
+- **Layer versi dan add-on owner sudah hidup**
+  - `HRIS Pro`
+  - `HRIS Pro Plus`
+  - `HRIS Enterprise`
+  - owner credential modal menjadi sumber perintah utama untuk add-on dan layer versi
+
+- **Reporting sudah berkembang**
+  - Reports Dashboard
+  - HRIS Calendar Reports
+  - Advanced Reporting
+  - Custom Report Builder
+  - gating laporan kini mengikuti paket / add-on secara lebih konsisten
+
+- **Payroll sudah berjalan**
+  - generate payroll
+  - detail payroll
+  - payroll plus adjustment
+  - filter payroll sudah dirapikan agar mengikuti policy site, bukan duplikasi aturan manual
+
+- **Operational Communication sudah tersedia**
+  - chat room operasional
+  - announcement
+  - incident reporting
+  - thread discussion
+  - owner policy dan tier communication
+
+- **API Access add-on sudah usable**
+  - owner toggle
+  - client activation
+  - token generate / revoke
+  - token hashing
+  - scoped attendance API
+  - usage log dan hardening dasar
+
+- **Guard Tour dan promo paket sudah diarahkan**
+  - akses Guard Tour mengikuti layer versi dan add-on
+  - halaman promo khusus untuk paket / add-on Guard Tour sudah tersedia
+
+- **Dokumentasi dan test bertambah**
+  - roadmap dan dokumen fitur penting sudah mulai dipisah
+  - regression test untuk API access, billing/contract, theme/owner settings, dan operational communication sudah ada
+
+Secara keseluruhan, repo ini sekarang sudah berada di fase **HRIS operasional modular**: bukan lagi presensi sederhana, tetapi platform kerja yang mulai punya versi produk, add-on, aturan akses, dan pengalaman dashboard yang lebih spesifik per fungsi.
+
 ## Run (Windows)
 
 1. **Dev standar**

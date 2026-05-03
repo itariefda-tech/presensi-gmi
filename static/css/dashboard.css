@@ -1022,6 +1022,37 @@ html[data-theme="light"] .overview-line-wrap{
 .ai-click-row:hover{
   background:rgba(56,189,248,.08);
 }
+.ai-classification-table{
+  table-layout:fixed;
+}
+.ai-classification-table .ai-col-employee{
+  width:20ch;
+}
+.ai-classification-table .ai-col-score{
+  width:8ch;
+}
+.ai-classification-table .ai-col-grade{
+  width:8ch;
+}
+.ai-classification-table .ai-col-late{
+  width:16ch;
+}
+.ai-classification-table .ai-col-absence{
+  width:16ch;
+}
+.ai-classification-table .ai-col-discipline{
+  width:14ch;
+}
+.ai-classification-table .ai-col-insight{
+  width:22ch;
+}
+.ai-classification-table .ai-col-recommendation{
+  width:30ch;
+}
+.ai-classification-table th,
+.ai-classification-table td{
+  vertical-align:top;
+}
 .ai-list-item.warning{
   border-color:rgba(251,191,36,.55);
 }
@@ -1497,6 +1528,168 @@ html[data-theme="light"] .alert{
 }
 .tab-btn.active{
   background: linear-gradient(135deg, rgba(56,189,248,.25), rgba(34,197,94,.18));
+}
+.client-profile-tabs{
+  gap:10px;
+  flex-wrap:wrap;
+}
+.client-profile-tab-btn{
+  position:relative;
+  min-width:128px;
+  justify-content:center;
+}
+.client-profile-tab-btn.active{
+  background: linear-gradient(135deg, rgba(56,189,248,.3), rgba(34,197,94,.22));
+  border-color: rgba(56,189,248,.5);
+  box-shadow: 0 12px 24px rgba(0,0,0,.24);
+  transform: translateY(-1px);
+}
+.client-profile-tab-btn.active::after{
+  content:"";
+  position:absolute;
+  left:12px;
+  right:12px;
+  bottom:-6px;
+  height:3px;
+  border-radius:999px;
+  background: linear-gradient(90deg, rgba(56,189,248,.9), rgba(34,197,94,.75));
+}
+.billing-table,
+.contract-table{
+  table-layout: fixed;
+}
+.billing-col-client{
+  width: calc(20ch + 3px);
+}
+.billing-col-status{
+  width: 18ch;
+}
+.billing-col-type{
+  width: 16ch;
+}
+.billing-col-usage{
+  width: 26ch;
+}
+.billing-col-estimate{
+  width: 18ch;
+}
+.billing-col-action{
+  width: calc(12ch + 7px);
+}
+.contract-col-client{
+  width: 21ch;
+}
+.contract-col-number{
+  width: 16ch;
+}
+.contract-col-period{
+  width: 24ch;
+}
+.contract-col-notice{
+  width: 12ch;
+}
+.contract-col-sla{
+  width: 24ch;
+}
+.contract-col-action{
+  width: 12ch;
+}
+.client-profile-billing-summary-grid{
+  grid-template-columns: repeat(3, minmax(180px, 1fr)) !important;
+}
+.client-profile-billing-metrics-grid{
+  grid-template-columns: repeat(4, minmax(160px, 1fr)) !important;
+}
+.client-profile-billing-panels{
+  grid-template-columns: minmax(460px, 1.15fr) minmax(340px, 0.85fr) !important;
+  margin-top: 12px;
+}
+.client-profile-status-card{
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  background: rgba(15,23,42,.38);
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+.client-profile-status-label{
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+.client-profile-status-value{
+  display: block;
+  font-size: 20px;
+  line-height: 1.2;
+}
+.client-profile-status-meta{
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+.client-profile-label-spacer{
+  min-height: 16px;
+}
+html[data-theme="light"] .client-profile-status-label,
+html[data-theme="light"] .client-profile-status-meta{
+  color: #ffffff;
+}
+html[data-theme="light"] .client-profile-status-value{
+  color: #0b2a4a;
+}
+.client-profile-contract-dates,
+.client-profile-billing-inline-fields{
+  grid-template-columns: repeat(2, minmax(180px, 1fr)) !important;
+}
+.client-profile-contract-dates{
+  grid-template-columns: repeat(2, minmax(260px, 1fr)) !important;
+}
+.client-profile-billing-panels .card,
+.client-profile-billing-panels .form-row,
+.client-profile-contract-dates .form-row,
+.client-profile-billing-inline-fields .form-row{
+  min-width: 0;
+}
+.client-profile-billing-panels .input,
+.client-profile-contract-dates .input,
+.client-profile-billing-inline-fields .input{
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+.client-profile-contract-dates input[type="date"]{
+  min-inline-size: 15.5rem;
+  padding-inline-end: 10px;
+}
+.client-profile-contract-dates input[type="date"]::-webkit-datetime-edit{
+  display: inline-flex;
+  align-items: center;
+}
+.client-profile-contract-dates input[type="date"]::-webkit-datetime-edit-fields-wrapper{
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  white-space: nowrap;
+}
+@media (max-width: 900px){
+  .client-profile-billing-summary-grid{
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+  .client-profile-billing-metrics-grid{
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+  .client-profile-billing-panels,
+  .client-profile-contract-dates,
+  .client-profile-billing-inline-fields{
+    grid-template-columns: 1fr !important;
+  }
+}
+@media (max-width: 560px){
+  .client-profile-billing-summary-grid,
+  .client-profile-billing-metrics-grid{
+    grid-template-columns: 1fr !important;
+  }
 }
 .btn:hover,
 .btn:focus-visible,

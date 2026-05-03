@@ -435,8 +435,6 @@ const OWNER_ADDON_CONTRACT_KEY = "contract_management";
 const OWNER_COMMUNICATION_CHAT_KEY = "communication_chat";
 const OWNER_COMMUNICATION_ANNOUNCEMENT_KEY = "communication_announcement";
 const OWNER_COMMUNICATION_INCIDENT_KEY = "communication_incident";
-const OWNER_COMMUNICATION_API_KEY = "communication_api";
-const OWNER_API_ACCESS_KEY = "api_access";
 const OWNER_MODE_KEYS = new Set([OWNER_ADDON_ENTERPRISE_KEY, OWNER_ADDON_PRO_KEY, OWNER_ADDON_PRO_PLUS_KEY]);
 
 if (heroGalleryData){
@@ -609,8 +607,6 @@ function applyOwnerCommunicationAddons(){
   const chatToggle = ownerAddonToggles.find(toggle => toggle.dataset.ownerAddon === OWNER_COMMUNICATION_CHAT_KEY);
   const announcementToggle = ownerAddonToggles.find(toggle => toggle.dataset.ownerAddon === OWNER_COMMUNICATION_ANNOUNCEMENT_KEY);
   const incidentToggle = ownerAddonToggles.find(toggle => toggle.dataset.ownerAddon === OWNER_COMMUNICATION_INCIDENT_KEY);
-  const apiToggle = ownerAddonToggles.find(toggle => toggle.dataset.ownerAddon === OWNER_COMMUNICATION_API_KEY);
-  const apiAccessToggle = ownerAddonToggles.find(toggle => toggle.dataset.ownerAddon === OWNER_API_ACCESS_KEY);
   if (incidentToggle?.checked){
     if (chatToggle) chatToggle.checked = true;
     if (announcementToggle) announcementToggle.checked = true;
@@ -621,9 +617,6 @@ function applyOwnerCommunicationAddons(){
   if (!chatToggle?.checked){
     if (announcementToggle) announcementToggle.checked = false;
     if (incidentToggle) incidentToggle.checked = false;
-  }
-  if (apiToggle?.checked && apiAccessToggle){
-    apiAccessToggle.checked = true;
   }
 }
 

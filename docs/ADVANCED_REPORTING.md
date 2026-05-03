@@ -2,6 +2,23 @@
 
 Advanced Reporting adalah modul laporan analitik untuk mengubah data presensi, leave, lokasi, manual attendance, dan assignment menjadi insight operasional. Modul ini berada di menu **Reports** dan ditujukan untuk admin/HR/supervisor agar bisa memantau pola kehadiran, kedisiplinan, risiko fraud, dan performa client/site.
 
+## Status Saat Ini
+
+Sampai kondisi implementasi sekarang, halaman `Reports` sudah dibagi lebih tegas berdasarkan paket aplikasi:
+
+- `HRIS Pro`
+  - Menampilkan `Reports Dashboard` sebagai laporan inti.
+  - `Advanced Reporting` dan `Custom Report Builder` disembunyikan.
+  - `HRIS Calendar Reports` hanya muncul bila fitur `Calendar` aktif.
+- `HRIS Pro Plus`
+  - Tetap berbasis `HRIS Pro`, tetapi card tambahan mengikuti add-on yang benar-benar diaktifkan.
+  - `HRIS Calendar Reports` muncul bila add-on `Calendar` aktif.
+  - `Advanced Reporting` dan `Custom Report Builder` tersedia untuk kebutuhan reporting yang lebih dalam.
+- `HRIS Enterprise`
+  - Semua layer reporting aktif, termasuk `HRIS Calendar Reports`, `Advanced Reporting`, dan `Custom Report Builder`.
+
+Artinya, halaman ini tidak lagi memperlakukan semua paket sama. Struktur report sekarang mengikuti mode aplikasi dan status add-on secara konsisten.
+
 ## Tujuan
 
 - Memberi ringkasan kehadiran real-time berbasis data presensi.
@@ -28,6 +45,8 @@ Advanced Reporting berada di `dashboard/admin_reports.html` dengan urutan card:
 
 Ada juga halaman fokus **Client Performance** di `dashboard/client_performance.html`.
 
+Urutan ini sengaja dibuat top-down: filter dulu, lalu output inti, lalu analitik lanjutan. Beberapa filter yang terasa janggal pada iterasi awal sudah dihapus agar halaman lebih cepat dipindai.
+
 ## Filter
 
 Filter utama Reports Dashboard dibuat mengkerucut:
@@ -37,6 +56,16 @@ Filter utama Reports Dashboard dibuat mengkerucut:
 - Employee filter mengambil metadata assignment aktif dari backend.
 
 Filter HRIS Calendar juga mengikuti pola yang sama.
+
+Filter yang sudah dihilangkan dari UI utama karena tidak cocok dengan karakter laporan saat ini:
+
+- filter `role`
+- filter `client performance`
+- filter `fraud`
+- filter `by ...`
+- filter `geo ...`
+
+Filter tersebut tidak dipakai lagi di permukaan halaman utama agar alur baca tetap rapi dan tidak membingungkan.
 
 ## Modul yang Tersedia
 
@@ -199,3 +228,9 @@ Parameter umum yang digunakan:
 ## Catatan Product
 
 Advanced Reporting difokuskan untuk operasional presensi employee, bukan untuk menganalisa admin/internal role. Karena itu UI utama memakai filter client, site, employee, dan tanggal. Filter role tetap dapat ditangani backend untuk kompatibilitas lama, tetapi tidak ditampilkan di UI utama.
+
+Selain itu:
+
+- `Reports Dashboard` mengambil data dari sumber attendance yang tersimpan di backend, bukan menyalin tampilan halaman Attendance.
+- `HRIS Calendar Reports` menggabungkan konteks schedule dan attendance.
+- Halaman `Reports` sekarang diposisikan sebagai dashboard analitik manajerial, bukan layar input operasional harian.

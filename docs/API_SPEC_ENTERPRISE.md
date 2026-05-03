@@ -2,6 +2,23 @@
 
 Dokumen ini merangkum endpoint enterprise yang sudah tersedia dan cara mengaktifkan `API access` untuk integrasi eksternal.
 
+## Status Implementasi Saat Ini
+
+Feature `API access` sudah usable untuk kebutuhan integrasi attendance per client, dengan karakter implementasi sebagai berikut:
+
+- owner/global toggle menjadi master availability
+- aktivasi nyata tetap dilakukan per client dari `Settings -> Subscription`
+- token disimpan sebagai hash, bukan plaintext
+- token bisa generate dan revoke dari UI
+- endpoint `/api/v1/attendance` sudah diproteksi oleh:
+  - validasi add-on
+  - validasi token
+  - scope client/site/employee
+  - usage log
+  - rate limit dasar
+
+Saat owner/global mematikan `API access`, pengaturan turunan di client tetap ada tetapi tidak efektif sampai owner mengizinkannya lagi.
+
 ## Auth
 
 - `POST /api/auth/login`
@@ -98,6 +115,7 @@ Catatan:
 - `API access` tidak otomatis aktif hanya karena bundle `Enterprise`.
 - Toggle owner/global hanya membuka ketersediaan fitur.
 - Aktivasi nyata tetap dilakukan per client.
+- Jika add-on client dimatikan, token lama tetap tersimpan tetapi request akan tetap ditolak.
 
 ## Contoh Request API Dengan Token
 
@@ -184,3 +202,14 @@ Quota harian tercapai:
 - Token per client dibatasi oleh scope client dan validasi site/employee.
 - Audit log dibuat saat token generate/revoke dan saat request API penting masuk.
 - Rate limit harian aktif untuk level token dan level client.
+
+## Ringkasan Pencapaian
+
+Pencapaian implementasi sampai titik ini:
+
+- source of truth add-on per client sudah dipindahkan ke `client_addons`
+- legacy `clients.addons` tetap dipertahankan sebagai fallback kompatibilitas
+- migration guard aman dijalankan ulang
+- dashboard subscription sudah menampilkan status, token aktif, last call, top endpoint, dan usage log
+- filter tanggal usage log sudah didukung di panel subscription
+- regression test mencakup owner toggle, client toggle, revoke token, hash token, scope enforcement, dan enterprise excluded behavior

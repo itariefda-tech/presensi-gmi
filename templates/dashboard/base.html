@@ -86,14 +86,6 @@
           <span class="nav-label">Calendar</span>
         </a>
         {% endif %}
-        {% if permissions.get("view_ai_analysis") %}
-        <a href="{{ url_for('admin.ai_analysis') }}" class="{% if active == 'ai_analysis' %}active{% endif %}" title="AI Analysis">
-          <span class="nav-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none"><path d="M12 3v3m0 12v3M4.9 4.9 7 7m10 10 2.1 2.1M3 12h3m12 0h3M4.9 19.1 7 17m10-10 2.1-2.1" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M9 10.5 12 8l3 2.5V15l-3 2-3-2v-4.5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
-          </span>
-          <span class="nav-label">AI Analysis</span>
-        </a>
-        {% endif %}
         {% if permissions.get("manage_policies") %}
         <a href="{{ url_for('admin.policies') }}" class="{% if active == 'policies' %}active{% endif %}" title="Policies" data-i18n-title="nav.policies">
           <span class="nav-icon" aria-hidden="true">
@@ -114,6 +106,22 @@
             <svg viewBox="0 0 24 24" fill="none"><path d="M7 4v3M17 4v3M4 9h16M6 6h12a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
           </span>
           <span class="nav-label" data-i18n="nav.attendance">Attendance</span>
+        </a>
+        {% endif %}
+        {% if user.role in ["hr_superadmin", "manager_operational", "supervisor", "admin_asistent"] %}
+        <a href="{{ url_for('admin.communication') }}" class="{% if active == 'communication' %}active{% endif %}" title="Communication">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M7 9h10M7 13h7M6 20l-2 1V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-3 2Z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </span>
+          <span class="nav-label">Communication</span>
+        </a>
+        {% endif %}
+        {% if permissions.get("view_ai_analysis") %}
+        <a href="{{ url_for('admin.ai_analysis') }}" class="{% if active == 'ai_analysis' %}active{% endif %}" title="AI Analysis">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M12 3v3m0 12v3M4.9 4.9 7 7m10 10 2.1 2.1M3 12h3m12 0h3M4.9 19.1 7 17m10-10 2.1-2.1" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M9 10.5 12 8l3 2.5V15l-3 2-3-2v-4.5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+          </span>
+          <span class="nav-label">AI Analysis</span>
         </a>
         {% endif %}
         {% if permissions.get("view_reports") %}

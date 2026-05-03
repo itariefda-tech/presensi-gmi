@@ -1,21 +1,27 @@
 {% extends "dashboard/base.html" %}
 {% set active = "contract" %}
 {% set heading = "Contract" %}
-{% set subtitle = "Kontrak aktif client enterprise" %}
+{% set subtitle = "Kontrak aktif per client" %}
 
 {% block body %}
 <div class="card">
   <div style="font-weight:700; margin-bottom:8px;">Contract Management</div>
   <div class="muted" style="margin-bottom:12px;">Kontrak aktif dipakai sebagai acuan SLA, payroll cycle, dan billing summary.</div>
-  <a class="btn secondary" href="{{ url_for('admin.settings', tab='subscription') }}">Subscription</a>
 </div>
 
 <div class="table-wrap" style="margin-top:12px;">
-  <table class="table" aria-label="Kontrak aktif client">
+  <table class="table contract-table" aria-label="Kontrak aktif client">
+    <colgroup>
+      <col class="contract-col-client" />
+      <col class="contract-col-number" />
+      <col class="contract-col-period" />
+      <col class="contract-col-notice" />
+      <col class="contract-col-sla" />
+      <col class="contract-col-action" />
+    </colgroup>
     <thead>
       <tr>
         <th>Client</th>
-        <th>Package</th>
         <th>Nomor Kontrak</th>
         <th>Periode</th>
         <th>Notice</th>
@@ -25,7 +31,7 @@
     </thead>
     <tbody>
       {% if not rows %}
-      <tr><td colspan="7" class="muted">Belum ada client.</td></tr>
+      <tr><td colspan="6" class="muted">Belum ada client.</td></tr>
       {% endif %}
       {% for row in rows %}
       {% set contract = row.active_contract %}
@@ -34,7 +40,6 @@
           <div style="font-weight:700;">{{ row.client.name }}</div>
           <div class="muted">{{ row.client.office_email or "-" }}</div>
         </td>
-        <td><span class="badge">{{ row.subscription.package|title }}</span></td>
         <td>{{ contract.contract_no if contract else "-" }}</td>
         <td>
           {% if contract %}

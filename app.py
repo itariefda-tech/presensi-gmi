@@ -671,6 +671,11 @@ def create_app() -> Flask:
             },
         ), 200
 
+    @app.route("/api/owner/addons/lock", methods=["POST"])
+    def owner_addons_lock():
+        session.pop("owner_addons_unlocked", None)
+        return jsonify(ok=True, message="Akses owner add-on dikunci ulang."), 200
+
     @app.route("/api/owner/addons", methods=["POST"])
     def owner_addons_update():
         if not session.get("owner_addons_unlocked"):
@@ -719,6 +724,20 @@ def create_app() -> Flask:
         assignment = _get_active_assignment(user.id) if user else None
         site = _get_site_by_id(assignment.get("site_id") if assignment else None)
         client = _get_client_by_id(site["client_id"]) if site and site["client_id"] else None
+        client_id = int(_row_get(client, "id") or 0) if client else None
+        employee_subscription = _phase15_subscription(client_id) if client_id else {"package": CLIENT_PACKAGE_PRO, "addons": []}
+        employee_communication_config = _communication_site_config(int(_row_get(site, "id") or 0) or None, client_id)
+        employee_access_summary = {
+            "package_label": _subscription_package_label(employee_subscription.get("package")),
+            "communication_scope_label": employee_communication_config.get("scope_label") or "Site aktif",
+            "chat_enabled": _communication_feature_available(user, "chat", client_id),
+            "announcement_enabled": _communication_feature_available(user, "announcement", client_id),
+            "incident_enabled": _communication_feature_available(user, "incident", client_id),
+            "guard_tour_enabled": _client_feature_enabled(user, ADDON_PATROL, client_id),
+            "patrol_ops_enabled": _client_feature_enabled(user, ADDON_PATROL_OPS, client_id),
+            "calendar_enabled": _client_feature_enabled(user, ADDON_CALENDAR, client_id),
+            "payroll_plus_enabled": _payroll_plus_enabled(user, client_id),
+        }
         return render_template(
             "dashboard/employee.html",
             user=user,
@@ -727,6 +746,7 @@ def create_app() -> Flask:
             active_assignment=assignment,
             active_site=site,
             active_client=client,
+            employee_access_summary=employee_access_summary,
             theme=_normalize_enabled_theme(_row_get(client, "client_theme", user.theme) if client else user.theme),
         )
 
@@ -735,6 +755,9 @@ def create_app() -> Flask:
         user = _current_user()
         _require_client_user(user)
         client_id, site_id, site, client = _client_site_context(user)
+        initial_pane_raw = (request.args.get("pane") or "0").strip()
+        initial_pane = int(initial_pane_raw) if initial_pane_raw.isdigit() else 0
+        initial_pane = max(0, min(6, initial_pane))
         today = _today_key()
         employees = _list_employees_by_site(site_id)
         employee_emails = {
@@ -787,18 +810,32 @@ def create_app() -> Flask:
         attendance_records = _attendance_live(limit=20, allowed_emails=employee_emails)
         policies = _policies_for_site(client_id, site_id)
         client_users = _client_users_for_site(client_id, site_id)
+        client_communication_config = _communication_site_config(site_id, client_id)
+        client_access_features = [
+            {"label": "Guard Tour", "enabled": _client_feature_enabled(user, ADDON_PATROL, client_id)},
+            {"label": "Patroli Ops", "enabled": _client_feature_enabled(user, ADDON_PATROL_OPS, client_id)},
+            {"label": "Calendar", "enabled": _client_feature_enabled(user, ADDON_CALENDAR, client_id)},
+            {"label": "Reporting Adv", "enabled": _advanced_reporting_enabled(user, client_id)},
+            {"label": "Payroll Plus", "enabled": _payroll_plus_enabled(user, client_id)},
+            {"label": "AI Analysis", "enabled": _client_feature_enabled(user, ADDON_AI, client_id)},
+            {"label": "Billing + Contract", "enabled": _phase15_global_enabled(ADDON_BILLING_ENGINE)},
+            {"label": "SLA Tracking", "enabled": _phase15_global_enabled(ADDON_SLA_TRACKING)},
+        ]
         return render_template(
             "dashboard/client.html",
             user=user,
             client=client,
             site=site,
             theme=user.theme,
+            initial_pane=initial_pane,
             today=today,
             employees=employees,
             attendance_records=attendance_records,
             absent_employees=absent_employees,
             policies=policies,
             client_users=client_users,
+            client_communication_config=client_communication_config,
+            client_access_features=client_access_features,
             total_employees=len(employees),
             present_today=present_today,
             late_today=int(site_summary.get("late_count") or 0),
@@ -2042,6 +2079,18 @@ def create_app() -> Flask:
         )
         flash("Status user diperbarui.")
         return redirect(url_for("dashboard_client", _anchor="settings"))
+
+    @app.route("/client/subscription/api-token/create", methods=["POST"])
+    def client_subscription_api_token_create():
+        _require_client_admin(_current_user())
+        flash("API access sedang ditunda dan sementara disembunyikan dari dashboard client.")
+        return redirect(url_for("dashboard_client", pane=6, _anchor="settings"))
+
+    @app.route("/client/subscription/api-token/<int:token_id>/revoke", methods=["POST"])
+    def client_subscription_api_token_revoke(token_id: int):
+        _require_client_admin(_current_user())
+        flash("API access sedang ditunda dan sementara disembunyikan dari dashboard client.")
+        return redirect(url_for("dashboard_client", pane=6, _anchor="settings"))
 
     @app.route("/dashboard/manual_attendance", methods=["GET", "POST"])
     def manual_attendance():
@@ -4241,7 +4290,7 @@ def create_app() -> Flask:
         description = (request.form.get("description") or "").strip()
         photo_file = request.files.get("photo")
         photo_path = None
-        config = _communication_client_config(_communication_client_id_for_user(user))
+        config = _communication_site_config(_communication_site_id_for_user(user), _communication_client_id_for_user(user))
         upload_limit = max(1, int(config["attachment_limit_mb"])) * 1024 * 1024
         if photo_file and photo_file.filename:
             try:
@@ -5123,7 +5172,8 @@ SEED_EMPLOYEES = [
 ADMIN_ROLE_OPTIONS = ["hr_superadmin", "manager_operational", "supervisor", "admin_asistent"]
 CLIENT_ROLE_OPTIONS = ["client_admin", "client_assistant", "client_supervisor", "client_operational"]
 ROLE_OPTIONS = ADMIN_ROLE_OPTIONS + CLIENT_ROLE_OPTIONS + ["employee"]
-USER_TIER_OPTIONS = ["basic", "pro", "enterprise"]
+USER_TIER_OPTIONS = ["basic", "pro", "pro_plus", "enterprise"]
+HR_SETTINGS_TIER_OPTIONS = ["pro", "pro_plus", "enterprise"]
 THEME_OPTIONS = ["dark", "light", "sage_calm", "silver_line", "noir_warm"]
 THEME_DEFAULT_OPTIONS = ["dark", "light"]
 THEME_SETTING_OPTIONS = ["sage_calm", "silver_line", "noir_warm"]
@@ -5222,7 +5272,6 @@ ADDON_SLA_TRACKING = "sla_tracking"
 ADDON_COMMUNICATION_CHAT = "communication_chat"
 ADDON_COMMUNICATION_ANNOUNCEMENT = "communication_announcement"
 ADDON_COMMUNICATION_INCIDENT = "communication_incident"
-ADDON_COMMUNICATION_API = "communication_api"
 ADDON_ALLOWED = {
     ADDON_PATROL,
     ADDON_CALENDAR,
@@ -5240,7 +5289,6 @@ ADDON_ALLOWED = {
     ADDON_COMMUNICATION_CHAT,
     ADDON_COMMUNICATION_ANNOUNCEMENT,
     ADDON_COMMUNICATION_INCIDENT,
-    ADDON_COMMUNICATION_API,
 }
 ADDON_OWNER_ORDER = (
     ADDON_ENTERPRISE_TIER,
@@ -5250,11 +5298,9 @@ ADDON_OWNER_ORDER = (
     ADDON_PATROL_OPS,
     ADDON_CALENDAR,
     ADDON_REPORTING_ADVANCED,
-    ADDON_API_ACCESS,
     ADDON_COMMUNICATION_CHAT,
     ADDON_COMMUNICATION_ANNOUNCEMENT,
     ADDON_COMMUNICATION_INCIDENT,
-    ADDON_COMMUNICATION_API,
     ADDON_PAYROLL_PLUS,
     ADDON_AI,
     ADDON_BILLING_ENGINE,
@@ -5308,17 +5354,21 @@ ADDON_FEATURE_ALIASES = {
     "communication_chat": ADDON_COMMUNICATION_CHAT,
     "communication_announcement": ADDON_COMMUNICATION_ANNOUNCEMENT,
     "communication_incident": ADDON_COMMUNICATION_INCIDENT,
-    "communication_api": ADDON_COMMUNICATION_API,
 }
-CLIENT_PACKAGE_BASIC = "BASIC"
 CLIENT_PACKAGE_PRO = "PRO"
+CLIENT_PACKAGE_PRO_PLUS = "PRO_PLUS"
 CLIENT_PACKAGE_ENTERPRISE = "ENTERPRISE"
-CLIENT_PACKAGE_OPTIONS = {CLIENT_PACKAGE_BASIC, CLIENT_PACKAGE_PRO, CLIENT_PACKAGE_ENTERPRISE}
+CLIENT_PACKAGE_BASIC = "BASIC"
+CLIENT_PACKAGE_OPTIONS = {
+    CLIENT_PACKAGE_BASIC,
+    CLIENT_PACKAGE_PRO,
+    CLIENT_PACKAGE_PRO_PLUS,
+    CLIENT_PACKAGE_ENTERPRISE,
+}
 CLIENT_ADDON_OPTIONS = {
     ADDON_BILLING_ENGINE: "Billing Engine",
     ADDON_CONTRACT_MANAGEMENT: "Contract Management",
     ADDON_SLA_TRACKING: "SLA Tracking",
-    ADDON_API_ACCESS: "API access",
 }
 BILLING_TYPE_PER_HEAD = "PER_HEAD"
 BILLING_TYPE_PER_SITE = "PER_SITE"
@@ -5644,8 +5694,20 @@ def _pro_required_response(feature_label: str):
 
 
 def _normalize_user_tier(value: str | None) -> str:
-    tier = (value or "basic").strip().lower()
-    return tier if tier in USER_TIER_OPTIONS else "basic"
+    tier = (value or "pro").strip().lower()
+    if tier == "basic":
+        return "pro"
+    return tier if tier in USER_TIER_OPTIONS else "pro"
+
+
+COMMUNICATION_TIER_OPTIONS = ("pro", "pro_plus", "enterprise")
+
+
+def _normalize_communication_tier(value: str | None) -> str:
+    tier = (value or "pro").strip().lower()
+    if tier == "basic":
+        return "pro"
+    return tier if tier in COMMUNICATION_TIER_OPTIONS else "pro"
 
 
 def _normalize_theme(value: str | None) -> str:
@@ -6466,7 +6528,12 @@ def _list_active_assignments(today: str) -> list[dict]:
             """,
             (today, today),
         )
-        return [dict(row) for row in cur.fetchall()]
+        users = []
+        for row in cur.fetchall():
+            item = dict(row)
+            item["tier"] = _normalize_user_tier(item.get("tier"))
+            users.append(item)
+        return users
     finally:
         conn.close()
 
@@ -7779,13 +7846,13 @@ def _communication_owner_feature_enabled(feature: str) -> bool:
 
 
 def _communication_tier_rank(value: str | None) -> int:
-    mapping = {"basic": 1, "pro": 2, "enterprise": 3}
-    return mapping.get(_normalize_user_tier(value), 1)
+    mapping = {"pro": 1, "pro_plus": 2, "enterprise": 3}
+    return mapping.get(_normalize_communication_tier(value), 1)
 
 
 def _communication_tier_cap(requested: str | None, maximum: str | None) -> str:
-    requested_tier = _normalize_user_tier(requested)
-    maximum_tier = _normalize_user_tier(maximum or "basic")
+    requested_tier = _normalize_communication_tier(requested)
+    maximum_tier = _normalize_communication_tier(maximum or "pro")
     if _communication_tier_rank(requested_tier) <= _communication_tier_rank(maximum_tier):
         return requested_tier
     return maximum_tier
@@ -7795,20 +7862,10 @@ def _communication_owner_policy() -> dict:
     chat_enabled = _communication_owner_feature_enabled(ADDON_COMMUNICATION_CHAT)
     announcement_enabled = chat_enabled and _communication_owner_feature_enabled(ADDON_COMMUNICATION_ANNOUNCEMENT)
     incident_enabled = announcement_enabled and _communication_owner_feature_enabled(ADDON_COMMUNICATION_INCIDENT)
-    if incident_enabled:
-        max_tier = "enterprise"
-    elif announcement_enabled:
-        max_tier = "pro"
-    elif chat_enabled:
-        max_tier = "basic"
-    else:
-        max_tier = "basic"
     return {
         "chat_enabled": chat_enabled,
         "announcement_enabled": announcement_enabled,
         "incident_enabled": incident_enabled,
-        "api_enabled": _communication_owner_feature_enabled(ADDON_COMMUNICATION_API) and _api_access_owner_enabled(),
-        "max_tier": max_tier,
     }
 
 
@@ -7816,16 +7873,14 @@ def _communication_client_config(client_id: int | None) -> dict:
     owner_policy = _communication_owner_policy()
     config = {
         "enabled": False,
-        "tier": "basic",
+        "tier": "pro",
         "message_limit_per_day": COMMUNICATION_DEFAULT_MESSAGE_LIMIT_PER_DAY,
         "attachment_limit_mb": COMMUNICATION_DEFAULT_ATTACHMENT_LIMIT_MB,
         "raw_enabled": False,
-        "raw_tier": "basic",
+        "raw_tier": "pro",
         "owner_chat_enabled": owner_policy["chat_enabled"],
         "owner_announcement_enabled": owner_policy["announcement_enabled"],
         "owner_incident_enabled": owner_policy["incident_enabled"],
-        "owner_api_enabled": owner_policy["api_enabled"],
-        "owner_max_tier": owner_policy["max_tier"],
     }
     if not client_id:
         return config
@@ -7833,7 +7888,7 @@ def _communication_client_config(client_id: int | None) -> dict:
     if not client:
         return config
     config["raw_enabled"] = bool(int(_row_get(client, "communication_enabled", 0) or 0))
-    config["raw_tier"] = _normalize_user_tier(str(_row_get(client, "communication_tier", "basic") or "basic"))
+    config["raw_tier"] = _normalize_communication_tier(str(_row_get(client, "communication_tier", "pro") or "pro"))
     try:
         config["message_limit_per_day"] = max(1, int(_row_get(client, "communication_message_limit_per_day", COMMUNICATION_DEFAULT_MESSAGE_LIMIT_PER_DAY) or COMMUNICATION_DEFAULT_MESSAGE_LIMIT_PER_DAY))
     except (TypeError, ValueError):
@@ -7843,8 +7898,89 @@ def _communication_client_config(client_id: int | None) -> dict:
     except (TypeError, ValueError):
         config["attachment_limit_mb"] = COMMUNICATION_DEFAULT_ATTACHMENT_LIMIT_MB
     config["enabled"] = bool(config["raw_enabled"] and owner_policy["chat_enabled"])
-    config["tier"] = _communication_tier_cap(config["raw_tier"], owner_policy["max_tier"]) if config["enabled"] else "basic"
+    config["tier"] = "enterprise" if config["enabled"] and owner_policy["incident_enabled"] else ("pro_plus" if config["enabled"] and owner_policy["announcement_enabled"] else "pro")
     return config
+
+
+def _communication_site_config(site_id: int | None, client_id: int | None = None) -> dict:
+    owner_policy = _communication_owner_policy()
+    config = {
+        "enabled": False,
+        "message_limit_per_day": COMMUNICATION_DEFAULT_MESSAGE_LIMIT_PER_DAY,
+        "attachment_limit_mb": COMMUNICATION_DEFAULT_ATTACHMENT_LIMIT_MB,
+        "raw_enabled": False,
+        "owner_chat_enabled": owner_policy["chat_enabled"],
+        "owner_announcement_enabled": owner_policy["announcement_enabled"],
+        "owner_incident_enabled": owner_policy["incident_enabled"],
+        "scope_label": "Site aktif",
+    }
+    if not site_id:
+        if client_id:
+            legacy = _communication_client_config(client_id)
+            config["enabled"] = legacy["enabled"]
+            config["raw_enabled"] = legacy["raw_enabled"]
+            config["message_limit_per_day"] = legacy["message_limit_per_day"]
+            config["attachment_limit_mb"] = legacy["attachment_limit_mb"]
+        return config
+    site = _get_site_by_id(site_id)
+    if not site:
+        return config
+    config["scope_label"] = _row_get(site, "name", f"Site {site_id}")
+    site_configured = bool(int(_row_get(site, "communication_configured", 0) or 0))
+    config["raw_enabled"] = bool(int(_row_get(site, "communication_enabled", 0) or 0))
+    try:
+        config["message_limit_per_day"] = max(1, int(_row_get(site, "communication_message_limit_per_day", 0) or 0))
+    except (TypeError, ValueError):
+        config["message_limit_per_day"] = 0
+    try:
+        config["attachment_limit_mb"] = max(1, int(_row_get(site, "communication_attachment_limit_mb", 0) or 0))
+    except (TypeError, ValueError):
+        config["attachment_limit_mb"] = 0
+    if not site_configured:
+        legacy = _communication_client_config(int(_row_get(site, "client_id") or client_id or 0) or None)
+        config["raw_enabled"] = legacy["raw_enabled"]
+        config["message_limit_per_day"] = legacy["message_limit_per_day"]
+        config["attachment_limit_mb"] = legacy["attachment_limit_mb"]
+    elif config["message_limit_per_day"] < 1 or config["attachment_limit_mb"] < 1:
+        legacy = _communication_client_config(int(_row_get(site, "client_id") or client_id or 0) or None)
+        if config["message_limit_per_day"] < 1:
+            config["message_limit_per_day"] = legacy["message_limit_per_day"]
+        if config["attachment_limit_mb"] < 1:
+            config["attachment_limit_mb"] = legacy["attachment_limit_mb"]
+    config["enabled"] = bool(config["raw_enabled"] and owner_policy["chat_enabled"])
+    return config
+
+
+def _set_communication_site_config(
+    site_id: int,
+    *,
+    enabled: bool,
+    message_limit_per_day: int,
+    attachment_limit_mb: int,
+) -> dict:
+    owner_policy = _communication_owner_policy()
+    limit_day = max(1, int(message_limit_per_day or COMMUNICATION_DEFAULT_MESSAGE_LIMIT_PER_DAY))
+    limit_attachment = max(1, int(attachment_limit_mb or COMMUNICATION_DEFAULT_ATTACHMENT_LIMIT_MB))
+    effective_enabled = bool(enabled and owner_policy["chat_enabled"])
+    conn = _db_connect()
+    try:
+        conn.execute(
+            """
+            UPDATE sites
+            SET communication_configured = 1,
+                communication_enabled = ?,
+                communication_message_limit_per_day = ?,
+                communication_attachment_limit_mb = ?,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (1 if effective_enabled else 0, limit_day, limit_attachment, _now_ts(), site_id),
+        )
+    finally:
+        conn.commit()
+        conn.close()
+    site = _get_site_by_id(site_id)
+    return _communication_site_config(site_id, int(_row_get(site, "client_id") or 0) or None)
 
 
 def _set_communication_client_config(
@@ -7856,7 +7992,7 @@ def _set_communication_client_config(
     attachment_limit_mb: int,
 ) -> dict:
     owner_policy = _communication_owner_policy()
-    clean_tier = _communication_tier_cap(tier, owner_policy["max_tier"])
+    clean_tier = _normalize_communication_tier(tier)
     limit_day = max(1, int(message_limit_per_day or COMMUNICATION_DEFAULT_MESSAGE_LIMIT_PER_DAY))
     limit_attachment = max(1, int(attachment_limit_mb or COMMUNICATION_DEFAULT_ATTACHMENT_LIMIT_MB))
     effective_enabled = bool(enabled and owner_policy["chat_enabled"])
@@ -7891,35 +8027,28 @@ def _communication_feature_available(user: User | None, feature: str, client_id:
         "announcement": ADDON_COMMUNICATION_ANNOUNCEMENT,
         "incident": ADDON_COMMUNICATION_INCIDENT,
         "thread": ADDON_COMMUNICATION_INCIDENT,
-        "api": ADDON_COMMUNICATION_API,
     }
     owner_key = owner_map.get(feature_key)
     if owner_key and not _communication_owner_feature_enabled(owner_key):
         return False
     resolved_client_id = client_id or _communication_client_id_for_user(user)
-    if user.role in {"manager_operational", "admin_asistent"} and not resolved_client_id:
+    resolved_site_id = _communication_site_id_for_user(user)
+    if user.role in {"manager_operational", "admin_asistent"} and not resolved_client_id and not resolved_site_id:
         return True
-    config = _communication_client_config(resolved_client_id)
+    config = _communication_site_config(resolved_site_id, resolved_client_id)
     if not config["enabled"]:
         return False
-    tier = config["tier"]
     if feature_key == "chat":
         return True
     if feature_key == "announcement":
-        return tier in {"pro", "enterprise"}
+        return _communication_owner_feature_enabled(ADDON_COMMUNICATION_ANNOUNCEMENT)
     if feature_key in {"incident", "thread"}:
-        return tier == "enterprise"
-    if feature_key == "api":
-        return (
-            _api_access_owner_enabled()
-            and resolved_client_id is not None
-            and ADDON_API_ACCESS in _list_client_addons(resolved_client_id)
-        )
+        return _communication_owner_feature_enabled(ADDON_COMMUNICATION_INCIDENT)
     return False
 
 
 def _communication_feature_forbidden_response(feature_label: str):
-    return jsonify(ok=False, message=f"{feature_label} belum aktif untuk client atau tier komunikasi saat ini."), 403
+    return jsonify(ok=False, message=f"{feature_label} belum aktif untuk site atau owner communication saat ini."), 403
 
 
 def _require_communication_feature(user: User | None, feature: str, feature_label: str, client_id: int | None = None):
@@ -7931,15 +8060,10 @@ def _require_communication_feature(user: User | None, feature: str, feature_labe
 
 
 def _communication_request_user() -> User | None:
-    user = _current_user()
-    if user:
-        return user
-    return _api_v1_user()
+    return _current_user()
 
 
 def _communication_api_auth_failed_response():
-    if _api_v1_token_supplied():
-        return jsonify(ok=False, message="Token API komunikasi tidak valid."), 401
     return _json_forbidden()
 
 
@@ -7952,19 +8076,7 @@ def _communication_api_scope_client_id(user: User | None, client_id: int | None 
 
 
 def _log_communication_api_request(user: User | None, status_code: int, client_id: int | None = None) -> None:
-    auth_context = getattr(g, "api_access_auth", {}) if isinstance(getattr(g, "api_access_auth", None), dict) else {}
-    if auth_context.get("auth_type") not in {"token", "legacy_token"}:
-        return
-    scoped_client_id = _communication_api_scope_client_id(user, client_id)
-    _log_api_access_request(
-        scoped_client_id,
-        request.path,
-        request.method,
-        status_code,
-        token_row=auth_context.get("token_row"),
-        actor=user if user and user.id else None,
-        branch_id=user.site_id if user else None,
-    )
+    return None
 
 
 def _communication_incident_room_name(incident_id: int, title: str) -> str:
@@ -8000,7 +8112,7 @@ def _communication_message_rate_guard(user: User | None, room_id: int, clean_mes
         raise ValueError("Pengirim chat tidak valid.")
     conn = _db_connect()
     try:
-        client_config = _communication_client_config(_communication_client_id_for_user(user))
+        client_config = _communication_site_config(_communication_site_id_for_user(user), _communication_client_id_for_user(user))
         daily_total = conn.execute(
             """
             SELECT COUNT(*) AS total
@@ -13327,7 +13439,7 @@ def _init_db() -> None:
                 client_id INTEGER,
                 site_id INTEGER,
                 branch_id INTEGER,
-                tier TEXT DEFAULT 'basic',
+                tier TEXT DEFAULT 'pro',
                 theme_preference TEXT DEFAULT 'silver_line'
             )
             """
@@ -13341,14 +13453,15 @@ def _init_db() -> None:
             )
             # Add tier field if not exists and set default for existing users
             try:
-                conn.execute("ALTER TABLE users ADD COLUMN tier TEXT DEFAULT 'basic'")
-                conn.execute("UPDATE users SET tier = 'basic' WHERE tier IS NULL")
+                conn.execute("ALTER TABLE users ADD COLUMN tier TEXT DEFAULT 'pro'")
+                conn.execute("UPDATE users SET tier = 'pro' WHERE tier IS NULL")
             except sqlite3.OperationalError:
                 pass  # Column already exists
             _ensure_column(conn, "users", "theme_preference", "theme_preference TEXT DEFAULT 'silver_line'")
             conn.execute(
-                "UPDATE users SET tier = 'basic' WHERE tier IS NULL OR lower(tier) NOT IN ('basic', 'pro', 'enterprise')"
+                "UPDATE users SET tier = 'pro' WHERE tier IS NULL OR lower(tier) NOT IN ('basic', 'pro', 'pro_plus', 'enterprise')"
             )
+            conn.execute("UPDATE users SET tier = 'pro' WHERE lower(tier) = 'basic'")
             conn.execute(
                 "UPDATE users SET theme_preference = 'silver_line' WHERE theme_preference IS NULL OR lower(theme_preference) NOT IN ('dark', 'light', 'sage_calm', 'silver_line', 'noir_warm')"
             )
@@ -13372,7 +13485,7 @@ def _init_db() -> None:
                 addons TEXT DEFAULT '[]',
                 client_theme TEXT DEFAULT 'silver_line',
                 communication_enabled INTEGER DEFAULT 0,
-                communication_tier TEXT DEFAULT 'basic',
+                communication_tier TEXT DEFAULT 'pro',
                 communication_message_limit_per_day INTEGER DEFAULT 300,
                 communication_attachment_limit_mb INTEGER DEFAULT 5,
                 is_active INTEGER DEFAULT 1,
@@ -13385,14 +13498,17 @@ def _init_db() -> None:
         if _table_exists(conn, "clients"):
             _ensure_column(conn, "clients", "client_theme", "client_theme TEXT DEFAULT 'silver_line'")
             _ensure_column(conn, "clients", "communication_enabled", "communication_enabled INTEGER DEFAULT 0")
-            _ensure_column(conn, "clients", "communication_tier", "communication_tier TEXT DEFAULT 'basic'")
+            _ensure_column(conn, "clients", "communication_tier", "communication_tier TEXT DEFAULT 'pro'")
             _ensure_column(conn, "clients", "communication_message_limit_per_day", "communication_message_limit_per_day INTEGER DEFAULT 300")
             _ensure_column(conn, "clients", "communication_attachment_limit_mb", "communication_attachment_limit_mb INTEGER DEFAULT 5")
             conn.execute(
                 "UPDATE clients SET client_theme = 'silver_line' WHERE client_theme IS NULL OR lower(client_theme) NOT IN ('dark', 'light', 'sage_calm', 'silver_line', 'noir_warm')"
             )
             conn.execute(
-                "UPDATE clients SET communication_tier = 'basic' WHERE communication_tier IS NULL OR lower(communication_tier) NOT IN ('basic', 'pro', 'enterprise')"
+                "UPDATE clients SET communication_tier = 'pro' WHERE communication_tier IS NULL OR lower(communication_tier) NOT IN ('basic', 'pro', 'pro_plus', 'enterprise')"
+            )
+            conn.execute(
+                "UPDATE clients SET communication_tier = 'pro' WHERE lower(communication_tier) = 'basic'"
             )
             conn.execute(
                 "UPDATE clients SET communication_message_limit_per_day = ? WHERE communication_message_limit_per_day IS NULL OR communication_message_limit_per_day < 1",
@@ -13555,6 +13671,10 @@ def _init_db() -> None:
                 pic_email TEXT,
                 shift_mode TEXT,
                 shift_data TEXT,
+                communication_configured INTEGER DEFAULT 0,
+                communication_enabled INTEGER DEFAULT 0,
+                communication_message_limit_per_day INTEGER DEFAULT 300,
+                communication_attachment_limit_mb INTEGER DEFAULT 5,
                 is_active INTEGER DEFAULT 1,
                 created_at TEXT,
                 updated_at TEXT,
@@ -13562,6 +13682,54 @@ def _init_db() -> None:
             )
             """
         )
+        if _table_exists(conn, "sites"):
+            _ensure_column(conn, "sites", "communication_configured", "communication_configured INTEGER DEFAULT 0")
+            _ensure_column(conn, "sites", "communication_enabled", "communication_enabled INTEGER DEFAULT 0")
+            _ensure_column(conn, "sites", "communication_message_limit_per_day", "communication_message_limit_per_day INTEGER DEFAULT 300")
+            _ensure_column(conn, "sites", "communication_attachment_limit_mb", "communication_attachment_limit_mb INTEGER DEFAULT 5")
+            conn.execute(
+                """
+                UPDATE sites
+                SET communication_enabled = COALESCE(communication_enabled, (
+                    SELECT c.communication_enabled
+                    FROM clients c
+                    WHERE c.id = sites.client_id
+                ), 0)
+                WHERE communication_enabled IS NULL
+                """
+            )
+            conn.execute(
+                """
+                UPDATE sites
+                SET communication_configured = 1
+                WHERE communication_configured IS NULL
+                  AND client_id IS NOT NULL
+                """
+            )
+            conn.execute(
+                """
+                UPDATE sites
+                SET communication_message_limit_per_day = COALESCE(communication_message_limit_per_day, (
+                    SELECT c.communication_message_limit_per_day
+                    FROM clients c
+                    WHERE c.id = sites.client_id
+                ), ?)
+                WHERE communication_message_limit_per_day IS NULL OR communication_message_limit_per_day < 1
+                """,
+                (COMMUNICATION_DEFAULT_MESSAGE_LIMIT_PER_DAY,),
+            )
+            conn.execute(
+                """
+                UPDATE sites
+                SET communication_attachment_limit_mb = COALESCE(communication_attachment_limit_mb, (
+                    SELECT c.communication_attachment_limit_mb
+                    FROM clients c
+                    WHERE c.id = sites.client_id
+                ), ?)
+                WHERE communication_attachment_limit_mb IS NULL OR communication_attachment_limit_mb < 1
+                """,
+                (COMMUNICATION_DEFAULT_ATTACHMENT_LIMIT_MB,),
+            )
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS shifts (
@@ -15288,8 +15456,6 @@ def _normalize_global_addons(addons: object) -> list[str]:
         active.add(ADDON_COMMUNICATION_CHAT)
     if ADDON_COMMUNICATION_ANNOUNCEMENT in active:
         active.add(ADDON_COMMUNICATION_CHAT)
-    if ADDON_COMMUNICATION_API in active:
-        active.add(ADDON_API_ACCESS)
     mode_key = {
         OWNER_SUITE_ENTERPRISE: ADDON_ENTERPRISE_TIER,
         OWNER_SUITE_PRO_PLUS: ADDON_HRIS_PRO_PLUS,
@@ -15346,7 +15512,9 @@ def _set_global_addons(addons: object) -> list[str]:
 
 def _normalize_client_package(value: object) -> str:
     package = str(value or "").strip().upper()
-    return package if package in CLIENT_PACKAGE_OPTIONS else CLIENT_PACKAGE_BASIC
+    if package == CLIENT_PACKAGE_BASIC:
+        return CLIENT_PACKAGE_PRO
+    return package if package in CLIENT_PACKAGE_OPTIONS else CLIENT_PACKAGE_PRO
 
 
 def _normalize_billing_type(value: object) -> str:
@@ -15360,11 +15528,11 @@ def _phase15_addons_from_value(value: object) -> list[str]:
 
 def _get_client_package(client_id: int | None) -> str:
     if not client_id:
-        return CLIENT_PACKAGE_BASIC
+        return CLIENT_PACKAGE_PRO
     conn = _db_connect()
     try:
         if not _table_exists(conn, "client_packages"):
-            return CLIENT_PACKAGE_BASIC
+            return CLIENT_PACKAGE_PRO
         row = conn.execute(
             """
             SELECT package_type FROM client_packages
@@ -15452,16 +15620,38 @@ def _set_client_addons(client_id: int, addons: object) -> list[str]:
     return sorted(active)
 
 
+def _client_package_supports_custom_addons(package: str | None) -> bool:
+    return _normalize_client_package(package) in {CLIENT_PACKAGE_PRO_PLUS, CLIENT_PACKAGE_ENTERPRISE}
+
+
 def _phase15_subscription(client_id: int | None) -> dict:
     package = _get_client_package(client_id)
     addons = _list_client_addons(client_id)
     return {
         "package": package,
         "addons": addons,
-        "billing_enabled": package == CLIENT_PACKAGE_ENTERPRISE and ADDON_BILLING_ENGINE in addons,
-        "contract_enabled": package == CLIENT_PACKAGE_ENTERPRISE and ADDON_CONTRACT_MANAGEMENT in addons,
-        "sla_enabled": package == CLIENT_PACKAGE_ENTERPRISE and ADDON_SLA_TRACKING in addons,
+        "billing_enabled": _phase15_global_enabled(ADDON_BILLING_ENGINE),
+        "contract_enabled": _phase15_global_enabled(ADDON_CONTRACT_MANAGEMENT),
+        "sla_enabled": _phase15_global_enabled(ADDON_SLA_TRACKING),
     }
+
+
+def _subscription_package_label(package: str | None) -> str:
+    value = _normalize_client_package(package)
+    if value == CLIENT_PACKAGE_PRO_PLUS:
+        return "Pro Plus"
+    if value == CLIENT_PACKAGE_ENTERPRISE:
+        return "Enterprise"
+    return "Pro"
+
+
+def _subscription_package_description(package: str | None) -> str:
+    value = _normalize_client_package(package)
+    if value == CLIENT_PACKAGE_ENTERPRISE:
+        return "Paket penuh untuk operasi lanjutan, add-on lengkap, dan integrasi enterprise."
+    if value == CLIENT_PACKAGE_PRO_PLUS:
+        return "Paket pro dengan add-on custom sesuai kebutuhan client."
+    return "Paket inti operasional untuk workflow HRIS harian."
 
 
 def _phase15_global_enabled(addon_key: str) -> bool:
@@ -15481,27 +15671,13 @@ def _phase15_user_client_id(user: User | None) -> int | None:
 def _billing_feature_enabled(user: User | None) -> bool:
     if not user or user.role not in ADMIN_ROLES:
         return False
-    if not _phase15_global_enabled(ADDON_BILLING_ENGINE):
-        return False
-    if user.role == "hr_superadmin":
-        return True
-    client_id = _phase15_user_client_id(user)
-    if client_id:
-        return bool(_phase15_subscription(client_id).get("billing_enabled"))
-    return _is_enterprise(user)
+    return _phase15_global_enabled(ADDON_BILLING_ENGINE)
 
 
 def _contract_feature_enabled(user: User | None) -> bool:
     if not user or user.role not in ADMIN_ROLES:
         return False
-    if not _phase15_global_enabled(ADDON_CONTRACT_MANAGEMENT):
-        return False
-    if user.role == "hr_superadmin":
-        return True
-    client_id = _phase15_user_client_id(user)
-    if client_id:
-        return bool(_phase15_subscription(client_id).get("contract_enabled"))
-    return _is_enterprise(user)
+    return _phase15_global_enabled(ADDON_CONTRACT_MANAGEMENT)
 
 
 def _get_active_client_contract(client_id: int | None) -> dict | None:
@@ -15637,7 +15813,7 @@ def _billing_period_bounds(period: str | None) -> tuple[str, str, str]:
 
 def _client_billing_summary(client_id: int | None, period: str | None = None) -> dict:
     period_key, start_date, end_date = _billing_period_bounds(period)
-    subscription = _phase15_subscription(client_id)
+    billing_enabled = _phase15_global_enabled(ADDON_BILLING_ENGINE)
     config = _get_active_billing_config(client_id)
     warnings: list[str] = []
     counts = {
@@ -15648,11 +15824,11 @@ def _client_billing_summary(client_id: int | None, period: str | None = None) ->
     }
     if not client_id:
         warnings.append("Client tidak valid.")
-    if not subscription["billing_enabled"]:
-        warnings.append("Billing belum aktif. Paket harus Enterprise dan add-on Billing Engine aktif.")
+    if not billing_enabled:
+        warnings.append("Billing belum aktif di owner credential.")
     if not _get_active_client_contract(client_id):
         warnings.append("Kontrak aktif belum tersedia.")
-    if subscription["billing_enabled"] and not config:
+    if billing_enabled and not config:
         warnings.append("Konfigurasi billing belum tersedia.")
 
     if client_id:
@@ -15714,14 +15890,14 @@ def _client_billing_summary(client_id: int | None, period: str | None = None) ->
         BILLING_TYPE_PER_SITE: counts["total_sites"],
         BILLING_TYPE_PER_SHIFT: counts["total_attendance"],
     }.get(billing_type, 0)
-    subtotal = unit_count * rate if subscription["billing_enabled"] and config else 0.0
+    subtotal = unit_count * rate if billing_enabled and config else 0.0
     tax_amount = subtotal * tax_percent / 100
     total = subtotal + tax_amount
     return {
         "period": period_key,
         "start_date": start_date,
         "end_date": end_date,
-        "billing_enabled": subscription["billing_enabled"],
+        "billing_enabled": billing_enabled,
         "billing_type": billing_type,
         "rate": rate,
         "tax_percent": tax_percent,
@@ -15967,7 +16143,7 @@ def _is_pro(user: User) -> bool:
         return True
     if not hasattr(user, 'tier'):
         return False
-    return _normalize_user_tier(user.tier) in {"pro", "enterprise"}
+    return _normalize_user_tier(user.tier) in {"pro", "pro_plus", "enterprise"}
 
 
 def _is_enterprise(user: User) -> bool:
@@ -24505,17 +24681,19 @@ def admin_bp() -> Blueprint:
         user = _current_user()
         if not _is_enterprise(user):
             return render_template(
-                "dashboard/upgrade_prompt.html",
+                "dashboard/iklan.html",
                 user=user,
                 feature="Guard Tour",
                 message="Guard Tour admin hanya tersedia untuk tier Enterprise.",
+                current_suite=_owner_suite_mode(),
             )
         if not _admin_enterprise_addon_enabled(user, ADDON_PATROL):
             return render_template(
-                "dashboard/upgrade_prompt.html",
+                "dashboard/iklan.html",
                 user=user,
                 feature="Guard Tour",
                 message="Aktifkan add-on Guard Tour di Settings Add-on Enterprise.",
+                current_suite=_owner_suite_mode(),
             )
         return render_template("dashboard/admin_guard_tour.html", user=user)
 
@@ -24556,16 +24734,14 @@ def admin_bp() -> Blueprint:
 
     @bp.route("/billing", methods=["GET"])
     def billing():
-        """Render the Billing admin page.
-        Requires Enterprise package with Billing Engine add-on.
-        """
+        """Render the Billing admin page."""
         user = _current_user()
         if not _billing_feature_enabled(user):
             return render_template(
                 "dashboard/upgrade_prompt.html",
                 user=user,
                 feature="Billing",
-                message="Aktifkan Billing Engine di owner credential, lalu set client ke Enterprise di Settings -> Subscription.",
+                message="Aktifkan Billing + Contract dari owner credential untuk membuka modul billing.",
             )
         period = (request.args.get("period") or _today_key()[:7]).strip()
         client_scope = _phase15_user_client_id(user)
@@ -24593,16 +24769,14 @@ def admin_bp() -> Blueprint:
 
     @bp.route("/contract", methods=["GET"])
     def contract():
-        """Render the Contract admin page.
-        Requires Enterprise package with Contract Management add-on.
-        """
+        """Render the Contract admin page."""
         user = _current_user()
         if not _contract_feature_enabled(user):
             return render_template(
                 "dashboard/upgrade_prompt.html",
                 user=user,
                 feature="Contract",
-                message="Aktifkan Contract Management di owner credential, lalu set client ke Enterprise di Settings -> Subscription.",
+                message="Aktifkan Billing + Contract dari owner credential untuk membuka modul contract.",
             )
         client_scope = _phase15_user_client_id(user)
         clients = [_get_client_by_id(client_scope)] if client_scope else _clients()
@@ -24809,7 +24983,7 @@ def admin_bp() -> Blueprint:
         theme_tab_enabled = _extra_themes_enabled()
         default_tab = "users" if user.role == "hr_superadmin" else ("theme" if theme_tab_enabled else "password")
         tab = (request.args.get("tab") or default_tab).lower()
-        if tab not in {"users", "roles", "hr", "password", "theme", "addons", "subscription", "communication"}:
+        if tab not in {"users", "roles", "hr", "password", "theme", "addons"}:
             tab = default_tab
         if tab == "theme" and not theme_tab_enabled:
             tab = default_tab
@@ -24819,7 +24993,6 @@ def admin_bp() -> Blueprint:
                 allowed_tabs.append("hr")
             if permissions.get("manage_settings_password"):
                 allowed_tabs.append("password")
-            allowed_tabs.append("communication")
             if not allowed_tabs:
                 return abort(403)
             if tab not in allowed_tabs:
@@ -24827,72 +25000,15 @@ def admin_bp() -> Blueprint:
         users = [u for u in _list_users() if u.get("role") in ADMIN_ROLES]
         sites = _list_sites()
         clients = _clients()
-        api_access_log_filters = _api_access_log_filters(
-            request.args.get("api_log_from"),
-            request.args.get("api_log_to"),
-        )
-        subscription_search = (request.args.get("subscription_search") or "").strip().lower()
-        subscription_status = (request.args.get("subscription_status") or "all").strip().lower()
-        if subscription_status not in {"all", "active", "revoked", "inactive"}:
-            subscription_status = "all"
-        subscription_plan = (request.args.get("subscription_plan") or "all").strip().lower()
-        if subscription_plan not in {"all", "basic", "pro", "enterprise"}:
-            subscription_plan = "all"
-        client_subscriptions = {
-            int(client["id"]): _phase15_subscription(int(client["id"]))
-            for client in clients
-            if client.get("id")
-        }
-        api_access_summaries = {
-            int(client["id"]): _api_access_dashboard_summary(int(client["id"]), api_access_log_filters)
-            for client in clients
-            if client.get("id")
-        }
-        filtered_clients = []
-        for client in clients:
-            client_id = int(client["id"])
-            subscription = client_subscriptions.get(client_id, {})
-            summary = api_access_summaries.get(client_id, {})
-            tokens = summary.get("tokens", [])
-            active_tokens = [token for token in tokens if not token.get("revoked_at")]
-            revoked_tokens = [token for token in tokens if token.get("revoked_at")]
-            plan_value = str(subscription.get("package") or CLIENT_PACKAGE_BASIC).lower()
-            if subscription_plan != "all" and plan_value != subscription_plan:
-                continue
-            if subscription_status == "active" and not active_tokens:
-                continue
-            if subscription_status == "revoked" and not revoked_tokens:
-                continue
-            if subscription_status == "inactive" and active_tokens:
-                continue
-            if subscription_search:
-                searchable = [
-                    str(client.get("name") or ""),
-                    str(client.get("office_email") or ""),
-                    str(summary.get("top_endpoint", {}).get("endpoint") or ""),
-                ]
-                for token in tokens:
-                    searchable.append(str(token.get("label") or ""))
-                    searchable.append(str(token.get("masked_token") or ""))
-                haystack = " ".join(searchable).lower()
-                if subscription_search not in haystack:
-                    continue
-            filtered_clients.append(client)
+        api_access_log_filters = {"date_from": "", "date_to": "", "warnings": []}
+        client_subscriptions = {}
+        api_access_summaries = {}
+        filtered_clients = clients
         subscription_overview = {
-            "total_clients": len(filtered_clients),
-            "active_clients": sum(
-                1
-                for client in filtered_clients
-                if api_access_summaries.get(int(client["id"]), {}).get("client_enabled")
-            ),
-            "active_tokens": sum(
-                len([token for token in api_access_summaries.get(int(client["id"]), {}).get("tokens", []) if not token.get("revoked_at")])
-                for client in filtered_clients
-            ),
-            "revoked_tokens": sum(
-                len([token for token in api_access_summaries.get(int(client["id"]), {}).get("tokens", []) if token.get("revoked_at")])
-                for client in filtered_clients
-            ),
+            "total_clients": 0,
+            "active_clients": 0,
+            "active_tokens": 0,
+            "revoked_tokens": 0,
         }
         supervisor_sites = _get_supervisor_sites_map()
         registration_codes = _list_employee_registration_codes()
@@ -24904,11 +25020,21 @@ def admin_bp() -> Blueprint:
         communication_recent_messages = _chat_recent_messages(30) if tab == "communication" else []
         communication_incidents = _list_incidents_for_user(user, include_all=user.role in ADMIN_ROLES) if tab == "communication" else []
         communication_recent_audit = _communication_recent_audit(40) if tab == "communication" else []
-        communication_client_configs = {
-            int(client["id"]): _communication_client_config(int(client["id"]))
-            for client in _clients()
-            if client.get("id")
-        } if tab == "communication" and user.role == "hr_superadmin" else {}
+        communication_client_filter_raw = (request.args.get("communication_client_id") or "").strip()
+        communication_site_filter_raw = (request.args.get("communication_site_id") or "").strip()
+        communication_client_filter = int(communication_client_filter_raw) if communication_client_filter_raw.isdigit() else 0
+        communication_filter_sites = _list_sites_by_client(communication_client_filter) if communication_client_filter else []
+        communication_site_filter = int(communication_site_filter_raw) if communication_site_filter_raw.isdigit() else 0
+        selected_communication_site = None
+        if communication_site_filter:
+            selected_communication_site = next((site for site in communication_filter_sites if int(site.get("id") or 0) == communication_site_filter), None)
+            if not selected_communication_site:
+                communication_site_filter = 0
+        communication_site_config = (
+            _communication_site_config(communication_site_filter, communication_client_filter or None)
+            if tab == "communication" and user.role == "hr_superadmin" and communication_site_filter
+            else {}
+        )
         communication_owner_policy = _communication_owner_policy() if tab == "communication" else {}
         return render_template(
             "dashboard/admin_settings.html",
@@ -24920,21 +25046,17 @@ def admin_bp() -> Blueprint:
             supervisor_sites=supervisor_sites,
             registration_codes=registration_codes,
             role_options=ADMIN_ROLE_OPTIONS,
-            tier_options=USER_TIER_OPTIONS,
+            tier_options=HR_SETTINGS_TIER_OPTIONS,
             role_permissions=role_permissions,
             permission_labels=ROLE_PERMISSION_LABELS,
             permission_keys=ROLE_PERMISSION_KEYS,
             theme_tab_enabled=theme_tab_enabled,
-            client_package_options=[CLIENT_PACKAGE_BASIC, CLIENT_PACKAGE_PRO, CLIENT_PACKAGE_ENTERPRISE],
+            client_package_options=[CLIENT_PACKAGE_PRO, CLIENT_PACKAGE_PRO_PLUS, CLIENT_PACKAGE_ENTERPRISE],
             client_addon_options=CLIENT_ADDON_OPTIONS,
             client_subscriptions=client_subscriptions,
             api_access_summaries=api_access_summaries,
             api_access_log_filters=api_access_log_filters,
-            subscription_filters={
-                "search": subscription_search,
-                "status": subscription_status,
-                "plan": subscription_plan,
-            },
+            subscription_filters={"search": "", "status": "all", "plan": "all"},
             subscription_overview=subscription_overview,
             generated_api_tokens=generated_api_tokens,
             owner_addons=_global_addons(),
@@ -24942,7 +25064,71 @@ def admin_bp() -> Blueprint:
             communication_recent_messages=communication_recent_messages,
             communication_incidents=communication_incidents,
             communication_recent_audit=communication_recent_audit,
-            communication_client_configs=communication_client_configs,
+            communication_filter_clients=clients,
+            communication_filter_sites=communication_filter_sites,
+            communication_filters={
+                "client_id": communication_client_filter,
+                "site_id": communication_site_filter,
+            },
+            selected_communication_site=selected_communication_site,
+            communication_site_config=communication_site_config,
+            communication_owner_policy=communication_owner_policy,
+        )
+
+    @bp.route("/communication", methods=["GET"])
+    def communication():
+        user = _current_user()
+        if not user:
+            return abort(403)
+        _require_admin(user)
+        if user.role not in {"hr_superadmin", "manager_operational", "supervisor", "admin_asistent"}:
+            return abort(403)
+        communication_announcements = _list_announcements_for_user(user, include_all=True)
+        communication_recent_messages = _chat_recent_messages(30)
+        communication_incidents = _list_incidents_for_user(user, include_all=user.role in ADMIN_ROLES)
+        communication_recent_audit = _communication_recent_audit(40)
+        communication_live_rooms = _chat_list_for_user(user, ensure_defaults=True)
+        visible_room_ids = {int(room.get("id") or 0) for room in communication_live_rooms if room.get("id")}
+        communication_live_messages = [
+            item for item in communication_recent_messages
+            if int(item.get("chat_room_id") or 0) in visible_room_ids
+        ][:16]
+        clients = _clients()
+        communication_client_filter_raw = (request.args.get("communication_client_id") or "").strip()
+        communication_site_filter_raw = (request.args.get("communication_site_id") or "").strip()
+        communication_client_filter = int(communication_client_filter_raw) if communication_client_filter_raw.isdigit() else 0
+        communication_filter_sites = _list_sites_by_client(communication_client_filter) if communication_client_filter else []
+        communication_site_filter = int(communication_site_filter_raw) if communication_site_filter_raw.isdigit() else 0
+        selected_communication_site = None
+        if communication_site_filter:
+            selected_communication_site = next((site for site in communication_filter_sites if int(site.get("id") or 0) == communication_site_filter), None)
+            if not selected_communication_site:
+                communication_site_filter = 0
+        communication_site_config = (
+            _communication_site_config(communication_site_filter, communication_client_filter or None)
+            if user.role == "hr_superadmin" and communication_site_filter
+            else {}
+        )
+        communication_owner_policy = _communication_owner_policy()
+        return render_template(
+            "dashboard/communication.html",
+            user=user,
+            announcement_role_options=ROLE_OPTIONS,
+            announcement_site_options=_list_sites(),
+            communication_announcements=communication_announcements,
+            communication_recent_messages=communication_recent_messages,
+            communication_incidents=communication_incidents,
+            communication_recent_audit=communication_recent_audit,
+            communication_live_rooms=communication_live_rooms,
+            communication_live_messages=communication_live_messages,
+            communication_filter_clients=clients,
+            communication_filter_sites=communication_filter_sites,
+            communication_filters={
+                "client_id": communication_client_filter,
+                "site_id": communication_site_filter,
+            },
+            selected_communication_site=selected_communication_site,
+            communication_site_config=communication_site_config,
             communication_owner_policy=communication_owner_policy,
         )
 
@@ -24951,153 +25137,59 @@ def admin_bp() -> Blueprint:
         user = _current_user()
         _require_hr_superadmin(user)
         client_id_raw = (request.form.get("client_id") or "").strip()
-        if not client_id_raw.isdigit():
+        site_id_raw = (request.form.get("site_id") or "").strip()
+        if not client_id_raw.isdigit() or not site_id_raw.isdigit():
             flash("Client komunikasi tidak valid.")
-            return redirect(url_for("admin.settings", tab="communication"))
+            return redirect(url_for("admin.communication"))
         client_id = int(client_id_raw)
+        site_id = int(site_id_raw)
         client = _get_client_by_id(client_id)
-        if not client:
+        site = _get_site_by_id(site_id)
+        if not client or not site or int(_row_get(site, "client_id") or 0) != client_id:
             flash("Client komunikasi tidak ditemukan.")
-            return redirect(url_for("admin.settings", tab="communication"))
+            return redirect(url_for("admin.communication"))
         enabled = request.form.get("communication_enabled") == "1"
-        tier = _normalize_user_tier(request.form.get("communication_tier"))
         try:
             message_limit_per_day = int(request.form.get("communication_message_limit_per_day") or COMMUNICATION_DEFAULT_MESSAGE_LIMIT_PER_DAY)
             attachment_limit_mb = int(request.form.get("communication_attachment_limit_mb") or COMMUNICATION_DEFAULT_ATTACHMENT_LIMIT_MB)
         except ValueError:
             flash("Limit komunikasi wajib berupa angka.")
-            return redirect(url_for("admin.settings", tab="communication"))
-        before = _communication_client_config(client_id)
-        after = _set_communication_client_config(
-            client_id,
+            return redirect(url_for("admin.communication", communication_client_id=client_id, communication_site_id=site_id))
+        before = _communication_site_config(site_id, client_id)
+        after = _set_communication_site_config(
+            site_id,
             enabled=enabled,
-            tier=tier,
             message_limit_per_day=message_limit_per_day,
             attachment_limit_mb=attachment_limit_mb,
         )
         _log_audit_event(
-            "communication_config",
-            client_id,
+            "communication_config_site",
+            site_id,
             "UPDATE",
             user,
-            "Konfigurasi komunikasi client diperbarui.",
-            {"client_id": client_id, "before_json": before, "after_json": after},
+            "Konfigurasi komunikasi site diperbarui.",
+            {"client_id": client_id, "site_id": site_id, "before_json": before, "after_json": after},
         )
-        flash("Konfigurasi komunikasi client diperbarui.")
-        return redirect(url_for("admin.settings", tab="communication"))
+        flash("Konfigurasi komunikasi site diperbarui.")
+        return redirect(url_for("admin.communication", communication_client_id=client_id, communication_site_id=site_id))
 
     @bp.route("/settings/subscription/update", methods=["POST"])
     def settings_subscription_update():
-        user = _current_user()
-        _require_hr_superadmin(user)
-        api_log_from = (request.form.get("api_log_from") or "").strip()
-        api_log_to = (request.form.get("api_log_to") or "").strip()
-        subscription_search = (request.form.get("subscription_search") or "").strip()
-        subscription_status = (request.form.get("subscription_status") or "all").strip().lower()
-        subscription_plan = (request.form.get("subscription_plan") or "all").strip().lower()
-        client_id_raw = (request.form.get("client_id") or "").strip()
-        if not client_id_raw.isdigit():
-            flash("Client tidak valid.")
-            return redirect(url_for("admin.settings", tab="subscription", api_log_from=api_log_from, api_log_to=api_log_to, subscription_search=subscription_search, subscription_status=subscription_status, subscription_plan=subscription_plan))
-        client_id = int(client_id_raw)
-        if not _get_client_by_id(client_id):
-            flash("Client tidak ditemukan.")
-            return redirect(url_for("admin.settings", tab="subscription", api_log_from=api_log_from, api_log_to=api_log_to, subscription_search=subscription_search, subscription_status=subscription_status, subscription_plan=subscription_plan))
-        before = _phase15_subscription(client_id)
-        package = _set_client_package(client_id, request.form.get("package_type"))
-        addons = request.form.getlist("addons")
-        if package != CLIENT_PACKAGE_ENTERPRISE:
-            addons = []
-        elif not _api_access_owner_enabled():
-            addons = [addon for addon in addons if addon != ADDON_API_ACCESS]
-        _set_client_addons(client_id, addons)
-        after = _phase15_subscription(client_id)
-        _log_audit_event(
-            "client_subscription",
-            client_id,
-            "UPDATE",
-            user,
-            "Subscription client diperbarui.",
-            {
-                "client_id": client_id,
-                "before_json": before,
-                "after_json": after,
-            },
-        )
-        flash("Subscription client diperbarui.")
-        return redirect(url_for("admin.settings", tab="subscription", api_log_from=api_log_from, api_log_to=api_log_to, subscription_search=subscription_search, subscription_status=subscription_status, subscription_plan=subscription_plan))
+        _require_hr_superadmin(_current_user())
+        flash("Subscription dan API access sedang ditunda dari HR Settings.")
+        return redirect(url_for("admin.settings", tab="addons"))
 
     @bp.route("/settings/subscription/<int:client_id>/api-access/token", methods=["POST"])
     def settings_subscription_api_token_create(client_id: int):
-        user = _current_user()
-        _require_hr_superadmin(user)
-        api_log_from = (request.form.get("api_log_from") or "").strip()
-        api_log_to = (request.form.get("api_log_to") or "").strip()
-        subscription_search = (request.form.get("subscription_search") or "").strip()
-        subscription_status = (request.form.get("subscription_status") or "all").strip().lower()
-        subscription_plan = (request.form.get("subscription_plan") or "all").strip().lower()
-        client = _get_client_by_id(client_id)
-        if not client:
-            flash("Client tidak ditemukan.")
-            return redirect(url_for("admin.settings", tab="subscription", api_log_from=api_log_from, api_log_to=api_log_to, subscription_search=subscription_search, subscription_status=subscription_status, subscription_plan=subscription_plan))
-        if not _api_access_owner_enabled():
-            flash("Owner/global API access masih nonaktif.")
-            return redirect(url_for("admin.settings", tab="subscription", api_log_from=api_log_from, api_log_to=api_log_to, subscription_search=subscription_search, subscription_status=subscription_status, subscription_plan=subscription_plan))
-        if ADDON_API_ACCESS not in _list_client_addons(client_id):
-            flash("Aktifkan add-on API access pada client terlebih dahulu.")
-            return redirect(url_for("admin.settings", tab="subscription", api_log_from=api_log_from, api_log_to=api_log_to, subscription_search=subscription_search, subscription_status=subscription_status, subscription_plan=subscription_plan))
-        label = (request.form.get("label") or "").strip() or "ERP Integration"
-        token_row, plain_token = _generate_client_api_token(client_id, label, user)
-        _store_api_access_flash_token(
-            client_id,
-            {
-                "label": token_row["label"],
-                "token": plain_token,
-                "created_at": token_row["created_at"],
-            },
-        )
-        _log_audit_event(
-            "api_client_token",
-            token_row["id"],
-            "GENERATE",
-            user,
-            "API token client dibuat.",
-            {
-                "client_id": client_id,
-                "label": token_row["label"],
-                "token_prefix": token_row["token_prefix"],
-            },
-        )
-        flash("API token berhasil dibuat.")
-        return redirect(url_for("admin.settings", tab="subscription", api_log_from=api_log_from, api_log_to=api_log_to, subscription_search=subscription_search, subscription_status=subscription_status, subscription_plan=subscription_plan))
+        _require_hr_superadmin(_current_user())
+        flash("API access sedang ditunda dari HR Settings.")
+        return redirect(url_for("admin.settings", tab="addons"))
 
     @bp.route("/settings/subscription/<int:client_id>/api-access/token/<int:token_id>/revoke", methods=["POST"])
     def settings_subscription_api_token_revoke(client_id: int, token_id: int):
-        user = _current_user()
-        _require_hr_superadmin(user)
-        api_log_from = (request.form.get("api_log_from") or "").strip()
-        api_log_to = (request.form.get("api_log_to") or "").strip()
-        subscription_search = (request.form.get("subscription_search") or "").strip()
-        subscription_status = (request.form.get("subscription_status") or "all").strip().lower()
-        subscription_plan = (request.form.get("subscription_plan") or "all").strip().lower()
-        revoked = _revoke_client_api_token(token_id, user, client_id=client_id)
-        if not revoked:
-            flash("Token tidak ditemukan atau sudah nonaktif.")
-            return redirect(url_for("admin.settings", tab="subscription", api_log_from=api_log_from, api_log_to=api_log_to, subscription_search=subscription_search, subscription_status=subscription_status, subscription_plan=subscription_plan))
-        _log_audit_event(
-            "api_client_token",
-            token_id,
-            "REVOKE",
-            user,
-            "API token client dinonaktifkan.",
-            {
-                "client_id": client_id,
-                "label": revoked.get("label"),
-                "token_prefix": revoked.get("token_prefix"),
-            },
-        )
-        flash("API token berhasil dinonaktifkan.")
-        return redirect(url_for("admin.settings", tab="subscription", api_log_from=api_log_from, api_log_to=api_log_to, subscription_search=subscription_search, subscription_status=subscription_status, subscription_plan=subscription_plan))
+        _require_hr_superadmin(_current_user())
+        flash("API access sedang ditunda dari HR Settings.")
+        return redirect(url_for("admin.settings", tab="addons"))
 
     @bp.route("/settings/theme/update", methods=["POST"])
     def settings_theme_update():

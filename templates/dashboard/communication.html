@@ -1,0 +1,470 @@
+{% extends "dashboard/base.html" %}
+{% set active = "communication" %}
+{% set heading = "Communication" %}
+{% set subtitle = "Announcement, live chat, monitoring, dan control operasional" %}
+
+{% block body %}
+<style>
+  .comm-shell { display:grid; gap:16px; }
+  .comm-hero { display:grid; gap:6px; }
+  .comm-hero h3 { margin:0; font-size:24px; }
+  .comm-hero p { margin:0; color:var(--muted); line-height:1.55; max-width:820px; }
+  .comm-kpis { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:12px; }
+  .comm-kpi { border:1px solid rgba(255,255,255,.14); border-radius:10px; padding:16px; background:rgba(255,255,255,.035); box-shadow:0 10px 24px rgba(0,0,0,.08); display:grid; gap:6px; min-width:0; }
+  .comm-kpi strong { font-size:22px; }
+  .comm-main { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:16px; align-items:start; }
+  .comm-card { border:1px solid rgba(255,255,255,.14); border-radius:10px; background:rgba(255,255,255,.035); box-shadow:0 10px 24px rgba(0,0,0,.08); padding:16px; display:grid; gap:14px; min-width:0; }
+  .comm-subpanel { border:1px solid rgba(255,255,255,.08); border-radius:8px; background:rgba(255,255,255,.02); padding:14px; display:grid; gap:12px; min-width:0; }
+  .comm-head { display:grid; gap:4px; }
+  .comm-head h4 { margin:0; font-size:18px; }
+  .comm-head p { margin:0; color:var(--muted); font-size:12px; line-height:1.45; }
+  .comm-two-col { display:grid; grid-template-columns:minmax(280px, .95fr) minmax(0, 1.05fr); gap:16px; align-items:start; }
+  .comm-list { display:grid; gap:10px; min-width:0; }
+  .comm-room-item,
+  .comm-feed-item,
+  .comm-audit-item { border:1px solid rgba(255,255,255,.08); border-radius:8px; background:rgba(255,255,255,.02); padding:12px; display:grid; gap:6px; min-width:0; }
+  .comm-room-top,
+  .comm-feed-top { display:flex; justify-content:space-between; gap:10px; align-items:flex-start; flex-wrap:wrap; }
+  .comm-room-title,
+  .comm-feed-title { font-weight:700; line-height:1.35; word-break:break-word; }
+  .comm-room-sub,
+  .comm-feed-sub,
+  .comm-audit-item,
+  .comm-empty,
+  .comm-note { color:var(--muted); font-size:12px; line-height:1.45; }
+  .comm-badge { display:inline-flex; align-items:center; min-height:26px; border-radius:999px; padding:0 10px; font-size:11px; font-weight:700; background:rgba(255,255,255,.08); }
+  .comm-badge.incident { background:#452615; color:#ffcb9e; }
+  .comm-badge.ok { background:#173b2a; color:#9ef0bf; }
+  .comm-badge.off { background:#3f243f; color:#f2c8ff; }
+  .comm-chat-stream { display:grid; gap:10px; min-width:0; }
+  .comm-bubble { display:grid; gap:4px; max-width:min(92%, 640px); padding:12px; border-radius:12px; background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08); }
+  .comm-bubble.self { margin-left:auto; background:rgba(59,130,246,.14); }
+  .comm-bubble-meta { display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; color:var(--muted); font-size:11px; }
+  .comm-bubble-room { font-weight:700; color:inherit; }
+  .comm-grid-2 { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; }
+  .comm-control-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:16px; }
+  .comm-status-row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .comm-table-stack { display:grid; gap:12px; }
+  .comm-empty { border:1px dashed rgba(255,255,255,.12); border-radius:8px; padding:20px; text-align:center; }
+  .comm-filter-fields { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; min-width:0; }
+  .comm-filter-fields .form-row { display:grid; gap:6px; min-width:0; }
+  .comm-filter-fields .label { font-size:12px; line-height:1.35; }
+  .comm-filter-fields .input { width:100%; min-width:0; }
+  .comm-control-stack { display:grid; gap:12px; }
+  .comm-filter-labels { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; min-width:0; }
+  .comm-filter-labels .label { margin:0; font-size:12px; line-height:1.35; }
+  .comm-setup-head { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; flex-wrap:wrap; }
+  .comm-setup-scope { display:grid; gap:2px; min-width:0; }
+  .comm-setup-scope .client-title { font-weight:700; line-height:1.35; word-break:break-word; }
+  .comm-setup-scope .site-title { color:var(--muted); font-size:12px; line-height:1.4; word-break:break-word; }
+  .comm-toggle-inline { display:inline-flex; align-items:center; gap:10px; white-space:nowrap; margin:0; }
+  .comm-toggle-inline span { white-space:nowrap; }
+  .comm-setup-fields { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; min-width:0; }
+  .comm-setup-fields .form-row { display:grid; gap:6px; min-width:0; }
+  .comm-setup-fields .label { margin:0; font-size:12px; line-height:1.35; }
+  .comm-setup-fields .input { width:100%; min-width:0; }
+  .comm-announcement-grid { display:grid; grid-template-columns:220px 220px; gap:12px; min-width:0; align-items:start; }
+  .comm-announcement-grid .form-row { display:grid; gap:6px; min-width:0; }
+  .comm-announcement-grid .label { margin:0; font-size:12px; line-height:1.35; }
+  .comm-announcement-grid .input { width:100%; min-width:0; }
+  .comm-mandatory-row { display:flex; justify-content:flex-end; align-items:flex-end; min-height:100%; }
+  .comm-mandatory-row .check { margin:0 0 10px 0; white-space:nowrap; }
+  .is-hidden { display:none !important; }
+  @media (max-width: 1100px) {
+    .comm-kpis,
+    .comm-main,
+    .comm-two-col,
+    .comm-grid-2,
+    .comm-setup-fields,
+    .comm-filter-labels,
+    .comm-filter-fields,
+    .comm-control-grid { grid-template-columns:1fr; }
+    .comm-announcement-grid { grid-template-columns:1fr; }
+  }
+  @media (max-width: 720px) {
+    .comm-kpis { grid-template-columns:1fr 1fr; }
+    .comm-hero h3 { font-size:20px; }
+  }
+  @media (max-width: 560px) {
+    .comm-kpis { grid-template-columns:1fr; }
+  }
+</style>
+
+<div class="comm-shell">
+  <section class="card comm-hero">
+    <h3>Operational Communication</h3>
+    <p>Halaman ini merangkum pengumuman, visual live chat, feed incident, monitoring percakapan, audit trail, dan control communication per site dalam satu alur yang lebih jelas.</p>
+  </section>
+
+  <section class="comm-kpis">
+    <div class="comm-kpi">
+      <span class="muted">Announcement aktif</span>
+      <strong>{{ communication_announcements|length }}</strong>
+      <span class="muted">Scope sesuai akun yang sedang login</span>
+    </div>
+    <div class="comm-kpi">
+      <span class="muted">Incident terbaru</span>
+      <strong>{{ communication_incidents|length }}</strong>
+      <span class="muted">Termasuk room chat incident</span>
+    </div>
+    <div class="comm-kpi">
+      <span class="muted">Aktivitas chat</span>
+      <strong>{{ communication_recent_messages|length }}</strong>
+      <span class="muted">Snapshot pesan terbaru</span>
+    </div>
+    <div class="comm-kpi">
+      <span class="muted">Audit trail</span>
+      <strong>{{ communication_recent_audit|length }}</strong>
+      <span class="muted">Jejak aksi komunikasi terbaru</span>
+    </div>
+  </section>
+
+  <section class="comm-main">
+    <article class="comm-card">
+      <div class="comm-head">
+        <h4>Create Announcement</h4>
+        <p>Broadcast pengumuman operasional ke target global, role, atau site tanpa keluar dari sistem.</p>
+      </div>
+      <form id="announcementCreateForm" class="stack">
+        <div class="form-row" style="margin:0;">
+          <label class="label" for="announcement-title">Judul</label>
+          <input class="input" id="announcement-title" type="text" name="title" maxlength="160" placeholder="Judul pengumuman" required />
+        </div>
+        <div class="form-row" style="margin:0;">
+          <label class="label" for="announcement-message">Pesan</label>
+          <textarea class="input" id="announcement-message" name="message" rows="5" placeholder="Isi pengumuman operasional" required></textarea>
+        </div>
+        <div class="comm-announcement-grid">
+          <div class="form-row" style="margin:0;">
+            <label class="label" for="announcement-target-type">Target</label>
+            <select class="input" id="announcement-target-type" name="target_type">
+              <option value="global">Global</option>
+              <option value="role">Role</option>
+              <option value="site">Site</option>
+            </select>
+          </div>
+          <div class="form-row is-hidden" id="announcement-target-role-wrap" style="margin:0;">
+            <select class="input" id="announcement-target-role" name="target_role">
+              <option value="">Pilih role</option>
+              {% for role in announcement_role_options %}
+              <option value="{{ role }}">{{ role|replace('_', ' ')|title }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="form-row is-hidden" id="announcement-target-site-wrap" style="margin:0;">
+            <select class="input" id="announcement-target-site" name="target_site">
+              <option value="">Pilih site</option>
+              {% for site in announcement_site_options %}
+              <option value="{{ site.id }}">{{ site.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+        <div class="comm-grid-2">
+          <div class="form-row" style="margin:0;">
+            <label class="label" for="announcement-expired-at">Expired At</label>
+            <input class="input" id="announcement-expired-at" type="date" name="expired_at" />
+          </div>
+          <div class="form-row comm-mandatory-row" style="margin:0;">
+            <label class="check">
+              <input type="checkbox" name="is_mandatory" value="1" />
+              <span>Mandatory</span>
+            </label>
+          </div>
+        </div>
+        <div class="btn-row">
+          <button class="btn primary btn-fixed-100" type="submit" id="announcementCreateSubmit">Publish</button>
+        </div>
+        <div class="alert info" id="announcementCreateAlert" style="display:none;"></div>
+      </form>
+    </article>
+
+    <article class="comm-card">
+      <div class="comm-head">
+        <h4>Live Chat</h4>
+        <p>Visual read-only untuk room aktif dan arus pesan terbaru agar komunikasi lapangan lebih terasa hidup dan mudah dipantau.</p>
+      </div>
+      <div class="comm-two-col">
+        <div class="comm-list">
+          {% if not communication_live_rooms %}
+          <div class="comm-empty">Belum ada room chat yang terlihat untuk akun ini.</div>
+          {% else %}
+            {% for room in communication_live_rooms[:8] %}
+            <div class="comm-room-item">
+              <div class="comm-room-top">
+                <div class="comm-room-title">{{ room.name }}</div>
+                <span class="comm-badge">{{ room.type|replace('_',' ')|title }}</span>
+              </div>
+              <div class="comm-room-sub">{{ room.last_message_preview or "Belum ada pesan." }}</div>
+              <div class="comm-room-sub">
+                {{ room.last_message_at|display_datetime if room.last_message_at else "-" }}
+                {% if room.unread_count %} • {{ room.unread_count }} unread{% endif %}
+              </div>
+            </div>
+            {% endfor %}
+          {% endif %}
+        </div>
+        <div class="comm-chat-stream">
+          {% if not communication_live_messages %}
+          <div class="comm-empty">Belum ada arus pesan yang bisa ditampilkan.</div>
+          {% else %}
+            {% for item in communication_live_messages %}
+            <div class="comm-bubble {% if loop.index is odd %}self{% endif %}">
+              <div class="comm-bubble-meta">
+                <span>{{ item.sender_email }}</span>
+                <span>{{ item.created_at|display_datetime or "-" }}</span>
+              </div>
+              <div class="comm-bubble-room">{{ item.room_name }}</div>
+              <div>{{ item.message }}</div>
+            </div>
+            {% endfor %}
+          {% endif %}
+        </div>
+      </div>
+    </article>
+
+    <article class="comm-card">
+      <div class="comm-head">
+        <h4>Feed, Monitor & History</h4>
+        <p>Ringkasan pengumuman, incident, monitoring chat, dan audit trail dalam satu card agar lebih mudah discan dari atas ke bawah.</p>
+      </div>
+      <div class="comm-table-stack">
+        <div class="comm-subpanel">
+          <div class="comm-head">
+            <h4>Announcement Feed</h4>
+          </div>
+          <div class="comm-list">
+            {% if not communication_announcements %}
+            <div class="comm-empty">Belum ada pengumuman aktif.</div>
+            {% else %}
+              {% for item in communication_announcements[:6] %}
+              <div class="comm-feed-item">
+                <div class="comm-feed-top">
+                  <div class="comm-feed-title">{{ item.title }}</div>
+                  {% if item.is_mandatory %}<span class="comm-badge ok">Mandatory</span>{% endif %}
+                </div>
+                <div class="comm-feed-sub">{{ item.message[:160] }}{% if item.message|length > 160 %}...{% endif %}</div>
+                <div class="comm-feed-sub">{{ item.target_type }}{% if item.target_id %}: {{ item.target_id }}{% endif %} • {{ item.created_at|display_datetime or "-" }}</div>
+              </div>
+              {% endfor %}
+            {% endif %}
+          </div>
+        </div>
+
+        <div class="comm-grid-2">
+          <div class="comm-subpanel">
+            <div class="comm-head">
+              <h4>Incident Feed</h4>
+            </div>
+            <div class="comm-list">
+              {% if not communication_incidents %}
+              <div class="comm-empty">Belum ada incident aktif.</div>
+              {% else %}
+                {% for item in communication_incidents[:6] %}
+                <div class="comm-feed-item">
+                  <div class="comm-feed-top">
+                    <div class="comm-feed-title">{{ item.title }}</div>
+                    <span class="comm-badge incident">{{ item.status|upper }}</span>
+                  </div>
+                  <div class="comm-feed-sub">{{ item.description[:140] }}{% if item.description|length > 140 %}...{% endif %}</div>
+                  <div class="comm-feed-sub">{{ item.room_name or "Tanpa room" }} • {{ item.created_at|display_datetime or "-" }}</div>
+                </div>
+                {% endfor %}
+              {% endif %}
+            </div>
+          </div>
+
+          <div class="comm-subpanel">
+            <div class="comm-head">
+              <h4>Monitor & Audit Trail</h4>
+            </div>
+            <div class="comm-list">
+              {% for item in communication_recent_messages[:4] %}
+              <div class="comm-audit-item">
+                <strong>{{ item.room_name }}</strong>
+                <span>{{ item.sender_email }} • {{ item.created_at|display_datetime or "-" }}</span>
+                <span>{{ item.message[:120] }}{% if item.message|length > 120 %}...{% endif %}</span>
+              </div>
+              {% endfor %}
+              {% for item in communication_recent_audit[:4] %}
+              <div class="comm-audit-item">
+                <strong>{{ item.entity_type }}{% if item.entity_id %} #{{ item.entity_id }}{% endif %}</strong>
+                <span>{{ item.action }} • {{ item.actor_email }} • {{ item.created_at|display_datetime or "-" }}</span>
+                <span>{{ item.summary }}</span>
+              </div>
+              {% endfor %}
+              {% if not communication_recent_messages and not communication_recent_audit %}
+              <div class="comm-empty">Belum ada history yang tampil.</div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <article class="comm-card">
+      <div class="comm-head">
+        <h4>Client Communication Control</h4>
+        <p>Setup communication per site. Filter scope dan pengaturan site dipisah agar lebih rapi dan mudah diatur.</p>
+      </div>
+      <div class="comm-subpanel comm-control-stack">
+        <div class="comm-status-row">
+          <span class="comm-badge {% if communication_owner_policy.chat_enabled %}ok{% else %}off{% endif %}">Chat: {% if communication_owner_policy.chat_enabled %}ON{% else %}OFF{% endif %}</span>
+          <span class="comm-badge {% if communication_owner_policy.announcement_enabled %}ok{% else %}off{% endif %}">Announcement: {% if communication_owner_policy.announcement_enabled %}ON{% else %}OFF{% endif %}</span>
+          <span class="comm-badge {% if communication_owner_policy.incident_enabled %}incident{% else %}off{% endif %}">Incident: {% if communication_owner_policy.incident_enabled %}ON{% else %}OFF{% endif %}</span>
+        </div>
+        <div class="comm-filter-labels">
+          <label class="label" for="communication-client-filter">Client</label>
+          <label class="label" for="communication-site-filter">Site</label>
+        </div>
+        <form method="get" action="{{ url_for('admin.communication') }}">
+          <div class="comm-filter-fields">
+            <div class="form-row" style="margin:0;">
+              <select class="input" id="communication-client-filter" name="communication_client_id" onchange="this.form.submit()">
+                <option value="">Pilih client</option>
+                {% for item in communication_filter_clients %}
+                <option value="{{ item.id }}" {% if communication_filters.client_id == item.id %}selected{% endif %}>{{ item.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="form-row" style="margin:0;">
+              <select class="input" id="communication-site-filter" name="communication_site_id" {% if not communication_filters.client_id %}disabled{% endif %} onchange="this.form.submit()">
+                <option value="">Pilih site</option>
+                {% for item in communication_filter_sites %}
+                <option value="{{ item.id }}" {% if communication_filters.site_id == item.id %}selected{% endif %}>{{ item.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+        </form>
+      </div>
+
+      {% if user.role == "hr_superadmin" %}
+      {% if selected_communication_site %}
+      <form class="comm-subpanel" method="post" action="{{ url_for('admin.settings_communication_update') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <input type="hidden" name="client_id" value="{{ communication_filters.client_id }}" />
+        <input type="hidden" name="site_id" value="{{ selected_communication_site.id }}" />
+        <div class="comm-head">
+          <h4>Site Communication Setup</h4>
+          <p>Kontrol aktif, limit pesan, dan batas lampiran untuk site yang dipilih.</p>
+        </div>
+        <div class="comm-setup-head">
+          <div class="comm-setup-scope">
+            <div class="client-title">{{ selected_communication_site.client_name or "-" }}</div>
+            <div class="site-title">{{ selected_communication_site.name }}</div>
+          </div>
+          <div>
+            <label class="check comm-toggle-inline">
+              <input type="checkbox" name="communication_enabled" value="1" {% if communication_site_config.raw_enabled %}checked{% endif %} {% if not communication_owner_policy.chat_enabled %}disabled{% endif %} />
+              <span>Communication Enabled</span>
+            </label>
+          </div>
+        </div>
+        <div class="comm-setup-fields">
+          <div class="form-row" style="margin:0;">
+            <label class="label" for="communication-message-limit-{{ selected_communication_site.id }}">Message / Day</label>
+            <input class="input" id="communication-message-limit-{{ selected_communication_site.id }}" type="number" min="1" name="communication_message_limit_per_day" value="{{ communication_site_config.message_limit_per_day or 300 }}" />
+          </div>
+          <div class="form-row" style="margin:0;">
+            <label class="label" for="communication-attachment-limit-{{ selected_communication_site.id }}">Attachment MB</label>
+            <input class="input" id="communication-attachment-limit-{{ selected_communication_site.id }}" type="number" min="1" name="communication_attachment_limit_mb" value="{{ communication_site_config.attachment_limit_mb or 5 }}" />
+          </div>
+        </div>
+        <div class="btn-row">
+          <button class="btn primary btn-fixed-100" type="submit">Simpan</button>
+        </div>
+      </form>
+      {% else %}
+      <div class="comm-empty">Pilih client lalu site untuk membuka setup communication pada site tersebut.</div>
+      {% endif %}
+      {% else %}
+      <div class="comm-empty">Client Communication Control hanya tersedia untuk HR superadmin.</div>
+      {% endif %}
+    </article>
+  </section>
+</div>
+
+<script>
+  (function () {
+    const form = document.getElementById("announcementCreateForm");
+    const alertBox = document.getElementById("announcementCreateAlert");
+    const submitButton = document.getElementById("announcementCreateSubmit");
+    const targetType = document.getElementById("announcement-target-type");
+    const targetRoleWrap = document.getElementById("announcement-target-role-wrap");
+    const targetRole = document.getElementById("announcement-target-role");
+    const targetSiteWrap = document.getElementById("announcement-target-site-wrap");
+    const targetSite = document.getElementById("announcement-target-site");
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute("content") || "";
+
+    function showMessage(message, isError) {
+      if (!alertBox) return;
+      alertBox.textContent = message;
+      alertBox.className = `alert ${isError ? "error" : "info"}`;
+      alertBox.style.display = "block";
+    }
+
+    function syncAnnouncementTargetFields() {
+      const mode = targetType?.value || "global";
+      const showRole = mode === "role";
+      const showSite = mode === "site";
+      targetRoleWrap?.classList.toggle("is-hidden", !showRole);
+      targetSiteWrap?.classList.toggle("is-hidden", !showSite);
+      if (!showRole && targetRole) targetRole.value = "";
+      if (!showSite && targetSite) targetSite.value = "";
+    }
+
+    targetType?.addEventListener("change", syncAnnouncementTargetFields);
+    syncAnnouncementTargetFields();
+
+    form?.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (!form) return;
+      if (submitButton) {
+        submitButton.disabled = true;
+        submitButton.textContent = "Publishing...";
+      }
+      const formData = new FormData(form);
+      const selectedTargetType = formData.get("target_type");
+      const computedTargetId = selectedTargetType === "role"
+        ? formData.get("target_role")
+        : selectedTargetType === "site"
+          ? formData.get("target_site")
+          : "";
+      const payload = {
+        title: formData.get("title"),
+        message: formData.get("message"),
+        target_type: selectedTargetType,
+        target_id: computedTargetId,
+        expired_at: formData.get("expired_at"),
+        is_mandatory: formData.get("is_mandatory") === "1",
+      };
+      try {
+        const response = await fetch("/api/announcement/create", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: {
+            "Content-Type": "application/json",
+            "X-CSRF-Token": csrfToken,
+          },
+          body: JSON.stringify(payload),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || data.ok === false) {
+          throw new Error(data.message || "Gagal membuat announcement.");
+        }
+        showMessage(data.message || "Announcement dibuat.", false);
+        form.reset();
+        window.setTimeout(() => window.location.reload(), 350);
+      } catch (error) {
+        showMessage(error.message || "Gagal membuat announcement.", true);
+      } finally {
+        if (submitButton) {
+          submitButton.disabled = false;
+          submitButton.textContent = "Publish";
+        }
+      }
+    });
+  })();
+</script>
+{% endblock %}

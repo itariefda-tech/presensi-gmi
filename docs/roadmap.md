@@ -5,6 +5,15 @@
 ```md
 # HRIS GMI - Development Roadmap
 
+## STATUS PRODUK SAAT INI
+- [x] Core HRIS operasional aktif
+- [x] Struktur client -> site -> assignment -> policy aktif
+- [x] Payroll, reporting, dan communication sudah hidup
+- [x] Layer versi `HRIS Pro`, `HRIS Pro Plus`, dan `HRIS Enterprise` aktif
+- [x] Owner add-on modal menjadi pengendali induk UI dan gating backend
+- [x] API access add-on sudah usable untuk integrasi attendance
+- [ ] Beberapa item enterprise lanjutan masih bertahap (AI analysis penuh, escalation communication, rollout production bertahap)
+
 ## DEMO DEPLOY NOTES (2026-01-21)
 - Client edit: konflik nama/legal hanya dicek jika field identitas berubah.
 - Flash alert global dipasang agar validasi server terlihat di dashboard.

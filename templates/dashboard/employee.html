@@ -21,6 +21,18 @@
   <title>{{ (active_client.name.split(',')[0] if active_client and active_client.name else "Pegawai") }}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/employee_mobile.css') }}" />
+  <style>
+    .employee-access-summary { display:grid; gap:12px; }
+    .employee-access-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px; }
+    .employee-access-item { border:1px solid rgba(255,255,255,.08); border-radius:12px; padding:12px; background:rgba(255,255,255,.03); display:grid; gap:4px; }
+    .employee-access-pill-row { display:flex; flex-wrap:wrap; gap:8px; }
+    .employee-access-pill { display:inline-flex; align-items:center; min-height:28px; border-radius:999px; padding:0 12px; font-size:12px; font-weight:700; }
+    .employee-access-pill.is-on { background:#173b2a; color:#9ef0bf; }
+    .employee-access-pill.is-off { background:#4a2a1a; color:#ffcfa3; }
+    @media (max-width: 520px) {
+      .employee-access-grid { grid-template-columns:1fr; }
+    }
+  </style>
 </head>
 <body class="employee-body" data-email="{{ user.email }}" data-dashboard-home="{{ url_for('dashboard_employee') }}">
   <div class="employee-shell">
@@ -371,6 +383,33 @@
             <h4 data-i18n="employee.account_security">Keamanan Akun</h4>
             <p class="muted">Ganti password secara berkala untuk keamanan.</p>
             <button class="btn primary full" id="btnOpenChangePassword" type="button" data-i18n="modal.change_password">Ganti Password</button>
+          </div>
+          <div class="card mobile-card employee-access-summary">
+            <div>
+              <h4 style="margin:0;">Akses Kerja Aktif</h4>
+              <p class="muted" style="margin:6px 0 0;">Ringkasan fitur kerja yang sedang aktif untuk client dan assignment Anda.</p>
+            </div>
+            <div class="employee-access-grid">
+              <div class="employee-access-item">
+                <span class="muted">Paket Client</span>
+                <strong>{{ employee_access_summary.package_label }}</strong>
+                <span class="muted">Komunikasi mengikuti site {{ employee_access_summary.communication_scope_label }}</span>
+              </div>
+              <div class="employee-access-item">
+                <span class="muted">Fitur Operasional</span>
+                <div class="employee-access-pill-row">
+                  <span class="employee-access-pill {{ 'is-on' if employee_access_summary.guard_tour_enabled else 'is-off' }}">Guard Tour {{ 'ON' if employee_access_summary.guard_tour_enabled else 'OFF' }}</span>
+                  <span class="employee-access-pill {{ 'is-on' if employee_access_summary.patrol_ops_enabled else 'is-off' }}">Patroli Ops {{ 'ON' if employee_access_summary.patrol_ops_enabled else 'OFF' }}</span>
+                  <span class="employee-access-pill {{ 'is-on' if employee_access_summary.calendar_enabled else 'is-off' }}">Calendar {{ 'ON' if employee_access_summary.calendar_enabled else 'OFF' }}</span>
+                  <span class="employee-access-pill {{ 'is-on' if employee_access_summary.payroll_plus_enabled else 'is-off' }}">Payroll Plus {{ 'ON' if employee_access_summary.payroll_plus_enabled else 'OFF' }}</span>
+                </div>
+              </div>
+            </div>
+            <div class="employee-access-pill-row">
+              <span class="employee-access-pill {{ 'is-on' if employee_access_summary.chat_enabled else 'is-off' }}">Live chat {{ 'ON' if employee_access_summary.chat_enabled else 'OFF' }}</span>
+              <span class="employee-access-pill {{ 'is-on' if employee_access_summary.announcement_enabled else 'is-off' }}">Announcement {{ 'ON' if employee_access_summary.announcement_enabled else 'OFF' }}</span>
+              <span class="employee-access-pill {{ 'is-on' if employee_access_summary.incident_enabled else 'is-off' }}">Incident {{ 'ON' if employee_access_summary.incident_enabled else 'OFF' }}</span>
+            </div>
           </div>
         </section>
 
