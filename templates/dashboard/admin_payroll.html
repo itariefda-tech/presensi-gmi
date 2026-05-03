@@ -74,31 +74,23 @@
         </div>
       </div>
       <div class="table-wrap">
-        <table class="table" aria-label="Payroll records">
+        <table class="table payroll-summary-table" aria-label="Payroll records">
           <thead>
             <tr>
-              <th>Employee</th>
-              <th>Period</th>
-              <th>Attendance Period</th>
-              <th>Pay Date</th>
-              <th>Schedule</th>
-              <th>Scheme</th>
-              <th>Site</th>
-              <th>Base Salary</th>
-              <th>Attendance Days</th>
-              <th>Late Days</th>
-              <th>Absent Days</th>
-              <th>Leave Days</th>
-              <th>Late Deduction</th>
-              <th>Absent Deduction</th>
-              <th>Total Salary</th>
-              <th>Status</th>
+              <th>Employee<br><span class="payroll-head-sub">Site</span></th>
+              <th>Periode<br><span class="payroll-head-sub">Pay date</span></th>
+              <th>Attendance Period<br><span class="payroll-head-sub">Schedule</span></th>
+              <th>Scheme<br><span class="payroll-head-sub">Status</span></th>
+              <th>Base Salary<br><span class="payroll-head-sub">Total Salary</span></th>
+              <th>Attendance Days<br><span class="payroll-head-sub">Leave Days</span></th>
+              <th>Late Days<br><span class="payroll-head-sub">Absent Days</span></th>
+              <th>Late Deduction<br><span class="payroll-head-sub">Absent Deduction</span></th>
               <th>Actions</th>
             </tr>
           </thead>
           <tbody id="payrollRows">
             <tr>
-              <td colspan="17" class="muted">
+              <td colspan="9" class="muted">
                 <span class="spinner" aria-hidden="true"></span>
                 Select period to load payroll data...
               </td>
@@ -288,6 +280,44 @@
   gap: 2rem;
 }
 
+.payroll-summary-table td{
+  vertical-align: top;
+}
+
+.payroll-head-sub{
+  display:block;
+  margin-top:2px;
+  color: var(--muted);
+  font-weight:600;
+}
+
+.payroll-cell-pair{
+  display:grid;
+  gap:6px;
+  min-width:0;
+}
+
+.payroll-cell-main,
+.payroll-cell-sub{
+  min-width:0;
+}
+
+.payroll-cell-main strong,
+.payroll-cell-sub strong{
+  display:block;
+  font-size:13px;
+  line-height:1.25;
+}
+
+.payroll-cell-main span,
+.payroll-cell-sub span{
+  display:block;
+  margin-top:2px;
+  color: var(--muted);
+  font-size:12px;
+  line-height:1.35;
+}
+
 .detail-section h5 {
   color: #333;
   margin-bottom: 1rem;
@@ -458,7 +488,7 @@
     }
     
     const tbody = document.getElementById('payrollRows');
-    tbody.innerHTML = '<tr><td colspan="17" class="muted"><span class="spinner"></span> Loading payroll data...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" class="muted"><span class="spinner"></span> Loading payroll data...</td></tr>';
     
   const params = new URLSearchParams({ period });
   const client = document.getElementById('clientSelect')?.value || '';
@@ -473,12 +503,12 @@
         if (response.ok) {
           renderPayrollTable(response.data);
         } else {
-          tbody.innerHTML = '<tr><td colspan="17" class="muted">Failed to load payroll data</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="9" class="muted">Failed to load payroll data</td></tr>';
           showAlert(response.message || 'Failed to load payroll data', 'error');
         }
       })
       .catch(() => {
-        tbody.innerHTML = '<tr><td colspan="17" class="muted">Error loading payroll data</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="9" class="muted">Error loading payroll data</td></tr>';
         showAlert('Error loading payroll data', 'error');
       });
   }
@@ -488,28 +518,108 @@
     const tbody = document.getElementById('payrollRows');
     
     if (!data || data.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="17" class="muted">No payroll records found for this period</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="9" class="muted">No payroll records found for this period</td></tr>';
       return;
     }
     
     tbody.innerHTML = data.map(record => `
       <tr>
-        <td>${record.employee_name || record.employee_email}</td>
-        <td>${record.period}</td>
-        <td>${record.period_start || '-'} - ${record.period_end || '-'}</td>
-        <td>${record.pay_date || '-'}</td>
-        <td>${record.payroll_schedule === 'MID_MONTH' ? 'Tengah Bulan' : 'Akhir Bulan'}</td>
-        <td>${record.payroll_scheme === 'FULL_MONTHLY_DEDUCTION' ? 'Full Monthly' : 'Prorated'}</td>
-        <td>${record.site_name || '-'}</td>
-        <td>Rp ${formatNumber(record.salary_base)}</td>
-        <td>${record.attendance_days}</td>
-        <td>${record.late_days}</td>
-        <td>${record.absent_days}</td>
-        <td>${record.leave_days}</td>
-        <td>Rp ${formatNumber(record.potongan_telat)}</td>
-        <td>Rp ${formatNumber(record.potongan_absen)}</td>
-        <td><strong>Rp ${formatNumber(record.total_gaji)}</strong></td>
-        <td><span class="badge ${record.status === 'approved' ? 'success' : 'pending'}">${record.status}</span></td>
+        <td>
+          <div class="payroll-cell-pair">
+            <div class="payroll-cell-main">
+              <strong>${record.employee_name || record.employee_email || '-'}</strong>
+              <span>${record.employee_email || '-'}</span>
+            </div>
+            <div class="payroll-cell-sub">
+              <strong>${record.site_name || '-'}</strong>
+              <span>Site</span>
+            </div>
+          </div>
+        </td>
+        <td>
+          <div class="payroll-cell-pair">
+            <div class="payroll-cell-main">
+              <strong>${record.period || '-'}</strong>
+              <span>Payroll period</span>
+            </div>
+            <div class="payroll-cell-sub">
+              <strong>${record.pay_date || '-'}</strong>
+              <span>Pay date</span>
+            </div>
+          </div>
+        </td>
+        <td>
+          <div class="payroll-cell-pair">
+            <div class="payroll-cell-main">
+              <strong>${record.period_start || '-'} - ${record.period_end || '-'}</strong>
+              <span>Attendance period</span>
+            </div>
+            <div class="payroll-cell-sub">
+              <strong>${record.payroll_schedule === 'MID_MONTH' ? 'Tengah Bulan' : 'Akhir Bulan'}</strong>
+              <span>Schedule</span>
+            </div>
+          </div>
+        </td>
+        <td>
+          <div class="payroll-cell-pair">
+            <div class="payroll-cell-main">
+              <strong>${record.payroll_scheme === 'FULL_MONTHLY_DEDUCTION' ? 'Full Monthly' : 'Prorated'}</strong>
+              <span>Scheme</span>
+            </div>
+            <div class="payroll-cell-sub">
+              <strong>${record.status || '-'}</strong>
+              <span>Status</span>
+            </div>
+          </div>
+        </td>
+        <td>
+          <div class="payroll-cell-pair">
+            <div class="payroll-cell-main">
+              <strong>Rp ${formatNumber(record.salary_base)}</strong>
+              <span>Base salary</span>
+            </div>
+            <div class="payroll-cell-sub">
+              <strong>Rp ${formatNumber(record.total_gaji)}</strong>
+              <span>Total salary</span>
+            </div>
+          </div>
+        </td>
+        <td>
+          <div class="payroll-cell-pair">
+            <div class="payroll-cell-main">
+              <strong>${record.attendance_days}</strong>
+              <span>Attendance days</span>
+            </div>
+            <div class="payroll-cell-sub">
+              <strong>${record.leave_days}</strong>
+              <span>Leave days</span>
+            </div>
+          </div>
+        </td>
+        <td>
+          <div class="payroll-cell-pair">
+            <div class="payroll-cell-main">
+              <strong>${record.late_days}</strong>
+              <span>Late days</span>
+            </div>
+            <div class="payroll-cell-sub">
+              <strong>${record.absent_days}</strong>
+              <span>Absent days</span>
+            </div>
+          </div>
+        </td>
+        <td>
+          <div class="payroll-cell-pair">
+            <div class="payroll-cell-main">
+              <strong>Rp ${formatNumber(record.potongan_telat)}</strong>
+              <span>Late deduction</span>
+            </div>
+            <div class="payroll-cell-sub">
+              <strong>Rp ${formatNumber(record.potongan_absen)}</strong>
+              <span>Absent deduction</span>
+            </div>
+          </div>
+        </td>
         <td>
           <button class="btn small primary" onclick="showPayrollDetail(${record.id})">Detail</button>
         </td>

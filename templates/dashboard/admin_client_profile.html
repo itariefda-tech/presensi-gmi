@@ -186,11 +186,11 @@
           </div>
           <div class="form-grid client-profile-contract-dates">
             <div class="form-row">
-              <label class="label" for="contract-start">Mulai\Berakhir</label>
+              <label class="label" for="contract-start">Mulai</label>
               <input class="input" id="contract-start" type="date" name="start_date" value="{{ active_contract.start_date if active_contract else client.contract_start or '' }}" />
             </div>
             <div class="form-row">
-              <div class="label client-profile-label-spacer" aria-hidden="true"></div>
+              <label class="label" for="contract-end">Berakhir</label>
               <input class="input" id="contract-end" type="date" name="end_date" value="{{ active_contract.end_date if active_contract else client.contract_end or '' }}" />
             </div>
           </div>

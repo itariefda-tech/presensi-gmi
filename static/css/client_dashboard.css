@@ -2289,6 +2289,127 @@ body.modal-open{
   width: calc(22% + 5px);
 }
 
+@media (max-width: 760px){
+  .payroll-table .panel-head{
+    align-items: stretch;
+  }
+
+  .payroll-table .panel-actions{
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .payroll-table .table-wrap{
+    overflow-x: visible;
+  }
+
+  .payroll-table .data-table,
+  .payroll-table .data-table tbody,
+  .payroll-table .data-table tr,
+  .payroll-table .data-table td{
+    display: block;
+    width: 100%;
+  }
+
+  .payroll-table .data-table{
+    table-layout: auto;
+    border-spacing: 0;
+  }
+
+  .payroll-table .data-table thead{
+    display: none;
+  }
+
+  .payroll-table .data-table tr{
+    margin-bottom: 12px;
+    padding: 12px;
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  .payroll-table .data-table tr:last-child{
+    margin-bottom: 0;
+  }
+
+  .payroll-table .data-table td{
+    border: none;
+    padding: 0;
+    margin: 0 0 10px;
+    min-width: 0;
+  }
+
+  .payroll-table .data-table td:last-child{
+    margin-bottom: 0;
+  }
+
+  .payroll-table .data-table td:nth-child(1)::before,
+  .payroll-table .data-table td:nth-child(2)::before,
+  .payroll-table .data-table td:nth-child(3)::before{
+    display: block;
+    margin-bottom: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .payroll-table .data-table td:nth-child(1)::before{
+    content: "Pegawai / Email";
+  }
+
+  .payroll-table .data-table td:nth-child(2)::before{
+    content: "Periode / Gaji Bersih";
+  }
+
+  .payroll-table .data-table td:nth-child(3)::before{
+    content: "Status / Aksi";
+  }
+
+  .payroll-table .data-table td[colspan]{
+    margin: 0;
+    padding: 6px 0;
+    text-align: left;
+  }
+
+  .payroll-table .data-table td[colspan]::before{
+    content: none;
+  }
+
+  .payroll-table .data-table th:nth-child(1),
+  .payroll-table .data-table td:nth-child(1),
+  .payroll-table .data-table th:nth-child(2),
+  .payroll-table .data-table td:nth-child(2),
+  .payroll-table .data-table th:nth-child(3),
+  .payroll-table .data-table td:nth-child(3){
+    width: auto;
+  }
+
+  .payroll-table .contact-stack{
+    gap: 4px;
+  }
+
+  .payroll-table .status-pill{
+    width: fit-content;
+    min-width: 72px;
+  }
+
+  .payroll-row-actions{
+    width: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .payroll-table .mini-btn{
+    width: auto;
+    min-width: 72px;
+    padding-inline: 10px;
+  }
+}
+
 .profile-grid{
   display: grid;
   gap: 8px;
