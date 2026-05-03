@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>HRIS PRO - Workforce Control</title>
+  <title>{{ (hris_brand_title or "HRIS PRO") }} - Workforce Control</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}?v={{ boot_id|default('') }}" />
   {% block head_extra %}{% endblock %}
 </head>

@@ -158,7 +158,6 @@ const primaryKeySelect = document.getElementById("primaryKeySelect");
 const toggleModeGpsSelfie = document.getElementById("toggleModeGpsSelfie");
 const toggleModeGps = document.getElementById("toggleModeGps");
 const toggleModeQr = document.getElementById("toggleModeQr");
-const togglePagePatroli = document.getElementById("togglePagePatroli");
 const displaySettingsSave = document.getElementById("displaySettingsSave");
 const displaySettingsStatus = document.getElementById("displaySettingsStatus");
 
@@ -285,11 +284,6 @@ async function saveDisplaySettings(){
     applyPrimaryKeyMode(primaryKeySelect.value);
   }
   handleAttendanceModeChange(null);
-  if (togglePagePatroli){
-    const enabled = togglePagePatroli.checked;
-    localStorage.setItem("gmi_page_patroli_enabled", enabled ? "1" : "0");
-    window.dispatchEvent(new CustomEvent("gmi_patroli_toggle_changed", { detail: { enabled } }));
-  }
   syncHero();
   if (ownerExtraThemesEnabled && !ownerExtraThemesEnabled.disabled){
     try {
@@ -387,21 +381,6 @@ function handleAttendanceModeChange(source){
 
 syncAttendanceModeToggles();
 
-// Handle togglePagePatroli
-if (togglePagePatroli) {
-  const patroli_key = "gmi_page_patroli_enabled";
-  const stored = localStorage.getItem(patroli_key);
-  const isEnabled = stored === null ? true : stored === "1";
-  togglePagePatroli.checked = isEnabled;
-  
-  togglePagePatroli.addEventListener("change", () => {
-    const enabled = togglePagePatroli.checked;
-    localStorage.setItem(patroli_key, enabled ? "1" : "0");
-    // Broadcast change ke halaman employee jika terbuka
-    window.dispatchEvent(new CustomEvent("gmi_patroli_toggle_changed", { detail: { enabled } }));
-  });
-}
-
 if(labelInput && heroLabel){
   labelInput.addEventListener("input", () => {
     const next = labelInput.value.trim();
@@ -449,7 +428,16 @@ const ownerAddonTogglesModal = document.getElementById("ownerAddonTogglesModal")
 const ownerAddonCloseButtons = Array.from(document.querySelectorAll("[data-owner-addon-close]"));
 const ownerAddonTogglesCloseButtons = Array.from(document.querySelectorAll("[data-owner-addon-toggles-close]"));
 const OWNER_ADDON_ENTERPRISE_KEY = "enterprise_tier";
-const OWNER_ADDON_ENTERPRISE_EXCLUDED = new Set(["api_access", "reporting_advanced"]);
+const OWNER_ADDON_PRO_KEY = "hris_pro";
+const OWNER_ADDON_PRO_PLUS_KEY = "hris_pro_plus";
+const OWNER_ADDON_BILLING_CONTRACT_KEY = "billing_engine";
+const OWNER_ADDON_CONTRACT_KEY = "contract_management";
+const OWNER_COMMUNICATION_CHAT_KEY = "communication_chat";
+const OWNER_COMMUNICATION_ANNOUNCEMENT_KEY = "communication_announcement";
+const OWNER_COMMUNICATION_INCIDENT_KEY = "communication_incident";
+const OWNER_COMMUNICATION_API_KEY = "communication_api";
+const OWNER_API_ACCESS_KEY = "api_access";
+const OWNER_MODE_KEYS = new Set([OWNER_ADDON_ENTERPRISE_KEY, OWNER_ADDON_PRO_KEY, OWNER_ADDON_PRO_PLUS_KEY]);
 
 if (heroGalleryData){
   try {
@@ -531,19 +519,112 @@ function setOwnerAddonUnlocked(unlocked){
 function setOwnerAddonValues(addons){
   const active = new Set(Array.isArray(addons) ? addons : []);
   ownerAddonToggles.forEach(toggle => {
-    toggle.checked = active.has(toggle.dataset.ownerAddon);
+    const key = toggle.dataset.ownerAddon;
+    if (key === OWNER_ADDON_BILLING_CONTRACT_KEY){
+      toggle.checked = active.has(OWNER_ADDON_BILLING_CONTRACT_KEY) && active.has(OWNER_ADDON_CONTRACT_KEY);
+      return;
+    }
+    if (key === OWNER_ADDON_CONTRACT_KEY){
+      toggle.checked = false;
+      return;
+    }
+    toggle.checked = active.has(key);
   });
-  applyOwnerEnterpriseAddons();
+  applyOwnerSuiteMode();
 }
 
-function applyOwnerEnterpriseAddons(){
-  const enterpriseToggle = ownerAddonToggles.find(toggle => toggle.dataset.ownerAddon === OWNER_ADDON_ENTERPRISE_KEY);
-  if (!enterpriseToggle?.checked) return;
-  ownerAddonToggles.forEach(toggle => {
+function ownerFeatureToggles(){
+  return ownerAddonToggles.filter(toggle => {
     const key = toggle.dataset.ownerAddon;
-    if (!key || key === OWNER_ADDON_ENTERPRISE_KEY) return;
-    toggle.checked = !OWNER_ADDON_ENTERPRISE_EXCLUDED.has(key);
+    return key && !OWNER_MODE_KEYS.has(key) && key !== OWNER_ADDON_CONTRACT_KEY;
   });
+}
+
+function ownerAnyFeatureEnabled(){
+  return ownerFeatureToggles().some(toggle => toggle.checked);
+}
+
+function applyOwnerSuiteMode(changedKey){
+  const enterpriseToggle = ownerAddonToggles.find(toggle => toggle.dataset.ownerAddon === OWNER_ADDON_ENTERPRISE_KEY);
+  const proToggle = ownerAddonToggles.find(toggle => toggle.dataset.ownerAddon === OWNER_ADDON_PRO_KEY);
+  const proPlusToggle = ownerAddonToggles.find(toggle => toggle.dataset.ownerAddon === OWNER_ADDON_PRO_PLUS_KEY);
+  const featureToggles = ownerFeatureToggles();
+  const allFeaturesEnabled = featureToggles.length > 0 && featureToggles.every(toggle => toggle.checked);
+
+  if (changedKey === OWNER_ADDON_ENTERPRISE_KEY && enterpriseToggle?.checked){
+    if (proToggle) proToggle.checked = false;
+    if (proPlusToggle) proPlusToggle.checked = false;
+    featureToggles.forEach(toggle => {
+      toggle.checked = true;
+    });
+  } else if (changedKey === OWNER_ADDON_PRO_KEY && proToggle?.checked){
+    if (enterpriseToggle) enterpriseToggle.checked = false;
+    if (proPlusToggle) proPlusToggle.checked = false;
+    featureToggles.forEach(toggle => {
+      toggle.checked = false;
+    });
+  } else if (changedKey === OWNER_ADDON_PRO_PLUS_KEY && proPlusToggle?.checked){
+    if (enterpriseToggle) enterpriseToggle.checked = false;
+    if (proToggle) proToggle.checked = false;
+  } else if (!enterpriseToggle?.checked && !proToggle?.checked && !proPlusToggle?.checked){
+    if (ownerAnyFeatureEnabled()){
+      if (proPlusToggle) proPlusToggle.checked = true;
+    } else if (proToggle) {
+      proToggle.checked = true;
+    }
+  }
+
+  if (!OWNER_MODE_KEYS.has(changedKey || "")){
+    if (enterpriseToggle?.checked && !allFeaturesEnabled){
+      enterpriseToggle.checked = false;
+      if (proPlusToggle) proPlusToggle.checked = true;
+    } else if (proToggle?.checked && ownerAnyFeatureEnabled()){
+      proToggle.checked = false;
+      if (proPlusToggle) proPlusToggle.checked = true;
+    }
+  }
+
+  if (enterpriseToggle?.checked){
+    featureToggles.forEach(toggle => {
+      toggle.checked = true;
+    });
+  }
+
+  if (OWNER_MODE_KEYS.has(changedKey || "") && !enterpriseToggle?.checked && !proToggle?.checked && !proPlusToggle?.checked){
+    if (proToggle) proToggle.checked = true;
+  }
+
+  const selectedMode = enterpriseToggle?.checked
+    ? OWNER_ADDON_ENTERPRISE_KEY
+    : proPlusToggle?.checked
+      ? OWNER_ADDON_PRO_PLUS_KEY
+      : OWNER_ADDON_PRO_KEY;
+
+  if (enterpriseToggle) enterpriseToggle.checked = selectedMode === OWNER_ADDON_ENTERPRISE_KEY;
+  if (proPlusToggle) proPlusToggle.checked = selectedMode === OWNER_ADDON_PRO_PLUS_KEY;
+  if (proToggle) proToggle.checked = selectedMode === OWNER_ADDON_PRO_KEY;
+}
+
+function applyOwnerCommunicationAddons(){
+  const chatToggle = ownerAddonToggles.find(toggle => toggle.dataset.ownerAddon === OWNER_COMMUNICATION_CHAT_KEY);
+  const announcementToggle = ownerAddonToggles.find(toggle => toggle.dataset.ownerAddon === OWNER_COMMUNICATION_ANNOUNCEMENT_KEY);
+  const incidentToggle = ownerAddonToggles.find(toggle => toggle.dataset.ownerAddon === OWNER_COMMUNICATION_INCIDENT_KEY);
+  const apiToggle = ownerAddonToggles.find(toggle => toggle.dataset.ownerAddon === OWNER_COMMUNICATION_API_KEY);
+  const apiAccessToggle = ownerAddonToggles.find(toggle => toggle.dataset.ownerAddon === OWNER_API_ACCESS_KEY);
+  if (incidentToggle?.checked){
+    if (chatToggle) chatToggle.checked = true;
+    if (announcementToggle) announcementToggle.checked = true;
+  }
+  if (announcementToggle?.checked && chatToggle){
+    chatToggle.checked = true;
+  }
+  if (!chatToggle?.checked){
+    if (announcementToggle) announcementToggle.checked = false;
+    if (incidentToggle) incidentToggle.checked = false;
+  }
+  if (apiToggle?.checked && apiAccessToggle){
+    apiAccessToggle.checked = true;
+  }
 }
 
 function setOwnerThemeValues(enabled){
@@ -551,11 +632,21 @@ function setOwnerThemeValues(enabled){
 }
 
 function selectedOwnerAddons(){
-  applyOwnerEnterpriseAddons();
-  return ownerAddonToggles
-    .filter(toggle => toggle.checked)
-    .map(toggle => toggle.dataset.ownerAddon)
-    .filter(Boolean);
+  applyOwnerSuiteMode();
+  applyOwnerCommunicationAddons();
+  const addons = [];
+  ownerAddonToggles.forEach(toggle => {
+    const key = toggle.dataset.ownerAddon;
+    if (!key || !toggle.checked || key === OWNER_ADDON_CONTRACT_KEY){
+      return;
+    }
+    if (key === OWNER_ADDON_BILLING_CONTRACT_KEY){
+      addons.push(OWNER_ADDON_BILLING_CONTRACT_KEY, OWNER_ADDON_CONTRACT_KEY);
+      return;
+    }
+    addons.push(key);
+  });
+  return addons;
 }
 
 function ownerExtraThemesSelected(){
@@ -651,9 +742,8 @@ if (ownerAddonUnlock){
 
 ownerAddonToggles.forEach(toggle => {
   toggle.addEventListener("change", () => {
-    if (toggle.dataset.ownerAddon === OWNER_ADDON_ENTERPRISE_KEY && toggle.checked){
-      applyOwnerEnterpriseAddons();
-    }
+    applyOwnerSuiteMode(toggle.dataset.ownerAddon);
+    applyOwnerCommunicationAddons();
   });
 });
 if (ownerAddonPassword){

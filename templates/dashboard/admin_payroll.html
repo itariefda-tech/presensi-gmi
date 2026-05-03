@@ -18,11 +18,6 @@
         <select id="siteSelect" class="input">
           <option value="">All Sites</option>
         </select>
-        <select id="scheduleSelect" class="input">
-          <option value="">All Schedules</option>
-          <option value="MONTH_END">Akhir Bulan</option>
-          <option value="MID_MONTH">Tengah Bulan</option>
-        </select>
         <select id="statusSelect" class="input">
           <option value="">All Status</option>
           <option value="draft">Draft</option>
@@ -468,11 +463,9 @@
   const params = new URLSearchParams({ period });
   const client = document.getElementById('clientSelect')?.value || '';
   const site = document.getElementById('siteSelect')?.value || '';
-  const schedule = document.getElementById('scheduleSelect')?.value || '';
   const status = document.getElementById('statusSelect')?.value || '';
   if (client) params.set('client_id', client);
   if (site) params.set('site_id', site);
-  if (schedule) params.set('payroll_schedule', schedule);
   if (status) params.set('status', status);
   fetch(`/api/payroll/list?${params.toString()}`)
       .then(r => r.json())
@@ -610,11 +603,9 @@
     const params = new URLSearchParams({ period });
     const client = document.getElementById('clientSelect')?.value || '';
     const site = document.getElementById('siteSelect')?.value || '';
-    const schedule = document.getElementById('scheduleSelect')?.value || '';
     const status = document.getElementById('statusSelect')?.value || '';
     if (client) params.set('client_id', client);
     if (site) params.set('site_id', site);
-    if (schedule) params.set('payroll_schedule', schedule);
     if (status) params.set('status', status);
     fetch(`/api/payroll/list?${params.toString()}`)
       .then(r => r.json())

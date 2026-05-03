@@ -93,3 +93,51 @@ def test_admin_theme_tab_hidden_when_extra_themes_disabled(theme_db, monkeypatch
 
     assert "tab=theme" not in html
     assert "name=\"theme_preference\"" not in html
+
+
+def test_owner_suite_modes_control_global_addons_and_brand(theme_db):
+    presensi._set_global_addons([presensi.ADDON_HRIS_PRO])
+    assert presensi._owner_suite_mode() == presensi.OWNER_SUITE_PRO
+    assert presensi._hris_brand_title() == "HRIS PRO"
+    assert presensi._global_addons() == [presensi.ADDON_HRIS_PRO]
+
+    presensi._set_global_addons([presensi.ADDON_HRIS_PRO_PLUS, presensi.ADDON_PATROL, presensi.ADDON_BILLING_ENGINE])
+    pro_plus_addons = set(presensi._global_addons())
+    assert presensi._owner_suite_mode() == presensi.OWNER_SUITE_PRO_PLUS
+    assert presensi._hris_brand_title() == "HRIS PRO PLUS"
+    assert presensi.ADDON_PATROL in pro_plus_addons
+    assert presensi.ADDON_BILLING_ENGINE in pro_plus_addons
+    assert presensi.ADDON_CONTRACT_MANAGEMENT in pro_plus_addons
+
+    presensi._set_global_addons([presensi.ADDON_ENTERPRISE_TIER])
+    enterprise_addons = set(presensi._global_addons())
+    assert presensi._owner_suite_mode() == presensi.OWNER_SUITE_ENTERPRISE
+    assert presensi._hris_brand_title() == "HRIS ENTERPRISE"
+    assert presensi.ADDON_API_ACCESS in enterprise_addons
+    assert presensi.ADDON_REPORTING_ADVANCED in enterprise_addons
+
+
+def test_admin_employee_page_hides_addon_nav_when_owner_mode_is_hris_pro(theme_db, monkeypatch):
+    monkeypatch.setenv("FLASK_SECRET", "test-secret-for-employee-nav")
+    presensi._set_global_addons([presensi.ADDON_HRIS_PRO])
+
+    flask_app = presensi.create_app()
+    flask_app.config.update(TESTING=True)
+    with flask_app.test_client() as client:
+        with client.session_transaction() as sess:
+            sess["user"] = {
+                "id": 0,
+                "email": "admin@test.local",
+                "role": "hr_superadmin",
+                "name": "Admin",
+                "tier": "pro",
+            }
+
+        response = client.get("/dashboard/admin/employees")
+        assert response.status_code == 200
+        html = response.get_data(as_text=True)
+
+    assert 'href="/dashboard/admin/calendar"' not in html
+    assert 'href="/dashboard/admin/ai-analysis"' not in html
+    assert 'href="/dashboard/admin/billing"' not in html
+    assert 'href="/dashboard/admin/contract"' not in html

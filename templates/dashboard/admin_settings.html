@@ -11,6 +11,7 @@
     <a class="tab-btn {% if tab == 'roles' %}active{% endif %}" href="{{ url_for('admin.settings', tab='roles') }}">Roles</a>
     <a class="tab-btn {% if tab == 'addons' %}active{% endif %}" href="{{ url_for('admin.settings', tab='addons') }}">Add-on</a>
     <a class="tab-btn {% if tab == 'subscription' %}active{% endif %}" href="{{ url_for('admin.settings', tab='subscription') }}">Subscription</a>
+    <a class="tab-btn {% if tab == 'communication' %}active{% endif %}" href="{{ url_for('admin.settings', tab='communication') }}">Communication</a>
     {% endif %}
     {% if permissions.get('manage_settings_codes') %}
     <a class="tab-btn {% if tab == 'hr' %}active{% endif %}" href="{{ url_for('admin.settings', tab='hr') }}">Kode Reg</a>
@@ -196,74 +197,730 @@
   {% endif %}
 
   {% if tab == 'subscription' and user.role == "hr_superadmin" %}
-  <div class="card" style="margin-top:12px;">
-    <div style="font-weight:700; margin-bottom:8px;">Package & Enterprise Add-on Client</div>
-    <div class="muted" style="margin-bottom:12px;">Billing, contract, dan SLA hanya aktif ketika package client adalah Enterprise.</div>
-    <div class="table-wrap">
-      <table class="table" aria-label="Client subscription">
-        <thead>
-          <tr>
-            <th>Client</th>
-            <th>Package</th>
-            <th>Add-on Enterprise</th>
-            <th>Aksi</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% if not clients %}
-          <tr><td colspan="4" class="muted">Belum ada client.</td></tr>
-          {% endif %}
-          {% for c in clients %}
-          {% set subscription = client_subscriptions.get(c.id) %}
-          <tr>
-            <td>
-              <div style="font-weight:700;">{{ c.name }}</div>
-              <div class="muted">{{ c.office_email or "-" }}</div>
-            </td>
-            <td colspan="3">
-              <form class="form-grid" style="grid-template-columns: minmax(180px, 240px) 1fr auto; align-items:end;" method="post" action="{{ url_for('admin.settings_subscription_update') }}">
+  <style>
+    .subscription-shell { display:grid; gap:16px; margin-top:12px; }
+    .subscription-hero { display:grid; gap:8px; }
+    .subscription-hero h3 { margin:0; font-size:24px; }
+    .subscription-hero p { margin:0; color:var(--muted); line-height:1.6; max-width:760px; }
+    .subscription-filter-grid { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:12px; align-items:end; }
+    .subscription-filter-actions { display:flex; gap:12px; align-items:end; }
+    .subscription-stat-grid { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:12px; }
+    .subscription-stat-card { border:1px solid rgba(255,255,255,.08); border-radius:8px; padding:16px; background:rgba(255,255,255,.02); display:grid; gap:6px; min-height:92px; }
+    .subscription-stat-value { font-size:22px; font-weight:700; }
+    .subscription-client-list { display:grid; gap:16px; }
+    .subscription-client-card { border:1px solid rgba(255,255,255,.08); border-radius:8px; background:rgba(255,255,255,.02); overflow:hidden; }
+    .subscription-client-head { display:flex; justify-content:space-between; gap:16px; flex-wrap:wrap; padding:16px; border-bottom:1px solid rgba(255,255,255,.08); }
+    .subscription-client-title { display:grid; gap:4px; }
+    .subscription-client-title h4 { margin:0; font-size:18px; }
+    .subscription-client-meta { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+    .subscription-badge-row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+    .subscription-plan-badge, .subscription-status-badge { display:inline-flex; align-items:center; min-height:28px; border-radius:999px; padding:0 12px; font-size:12px; font-weight:700; }
+    .plan-basic { background:#2f3238; color:#d7dde9; }
+    .plan-pro { background:#12344a; color:#9fd8ff; }
+    .plan-enterprise { background:#173b2a; color:#9ef0bf; }
+    .status-owner-off { background:#5b3a18; color:#ffd9a3; }
+    .status-client-active { background:#173b2a; color:#9ef0bf; }
+    .status-client-inactive { background:#3a223b; color:#f0c0ff; }
+    .subscription-client-body { display:grid; gap:16px; padding:16px; }
+    .subscription-main-grid { display:grid; grid-template-columns:minmax(0, 1.2fr) minmax(320px, .8fr); gap:16px; }
+    .subscription-section-card { border:1px solid rgba(255,255,255,.08); border-radius:8px; padding:16px; background:rgba(255,255,255,.015); display:grid; gap:12px; }
+    .subscription-section-head { display:grid; gap:4px; }
+    .subscription-section-head h5 { margin:0; font-size:16px; }
+    .subscription-section-head p { margin:0; color:var(--muted); line-height:1.5; }
+    .subscription-config-grid { display:grid; grid-template-columns:minmax(220px, 280px) minmax(0, 1fr); gap:16px; align-items:start; }
+    .subscription-addon-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; }
+    .subscription-addon-card { border:1px solid rgba(255,255,255,.08); border-radius:8px; padding:12px; background:rgba(255,255,255,.02); display:grid; gap:8px; min-height:120px; }
+    .subscription-addon-head { display:flex; justify-content:space-between; gap:10px; align-items:flex-start; }
+    .subscription-addon-head .check { display:flex; align-items:flex-start; gap:10px; }
+    .subscription-kpi-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; }
+    .subscription-kpi-card { border:1px solid rgba(255,255,255,.08); border-radius:8px; padding:12px; background:rgba(255,255,255,.02); display:grid; gap:4px; }
+    .subscription-kpi-card strong { font-size:18px; }
+    .subscription-list { display:grid; gap:10px; }
+    .subscription-row { display:grid; grid-template-columns:minmax(140px, 1fr) minmax(100px, .8fr) minmax(140px, .8fr) auto; gap:12px; align-items:center; border:1px solid rgba(255,255,255,.08); border-radius:8px; padding:12px; background:rgba(255,255,255,.02); }
+    .subscription-row--log { grid-template-columns:minmax(140px, .9fr) 88px minmax(0, 1.4fr) minmax(120px, .9fr) 72px; }
+    .subscription-row-label { font-weight:700; }
+    .subscription-row-sub { color:var(--muted); font-size:13px; }
+    .subscription-action-grid { display:grid; grid-template-columns:minmax(0, 1fr) minmax(0, 1fr); gap:16px; padding-top:16px; border-top:1px solid rgba(255,255,255,.08); }
+    .subscription-empty { border:1px dashed rgba(255,255,255,.12); border-radius:8px; padding:24px; display:grid; gap:8px; text-align:center; color:var(--muted); }
+    .subscription-filter-note { color:var(--muted); line-height:1.5; }
+    @media (max-width: 1080px) {
+      .subscription-filter-grid,
+      .subscription-stat-grid,
+      .subscription-main-grid,
+      .subscription-config-grid,
+      .subscription-addon-grid,
+      .subscription-action-grid { grid-template-columns:1fr; }
+      .subscription-kpi-grid { grid-template-columns:repeat(2, minmax(0, 1fr)); }
+      .subscription-row,
+      .subscription-row--log { grid-template-columns:1fr; }
+    }
+    @media (max-width: 720px) {
+      .subscription-kpi-grid { grid-template-columns:1fr; }
+      .subscription-client-head,
+      .subscription-client-meta,
+      .subscription-badge-row,
+      .subscription-filter-actions { align-items:flex-start; }
+      .subscription-hero h3 { font-size:20px; }
+    }
+  </style>
+  <div class="subscription-shell">
+    <div class="card subscription-hero">
+      <h3>API Access & Subscription</h3>
+      <p>Kelola paket client, status add-on, token integrasi, dan pemakaian API dalam satu alur yang jelas dari atas ke bawah. Semua kontrol ada di atas, lalu output dan action berada tepat di bawahnya.</p>
+      <div class="subscription-filter-note">Status pemakaian API menampilkan ringkasan terbaru per client dan token integrasi yang sedang dikelola.</div>
+    </div>
+
+    <div class="card">
+      <div class="subscription-section-head">
+        <h5>Filter & Control</h5>
+        <p>Gunakan filter ini untuk menyaring client, token, dan plan tanpa harus scroll ke area output terlebih dahulu.</p>
+      </div>
+      <form class="subscription-filter-grid" method="get" action="{{ url_for('admin.settings') }}">
+        <input type="hidden" name="tab" value="subscription" />
+        <div class="form-row" style="margin:0;">
+          <label class="label" for="subscription-search">Search API key / client</label>
+          <input class="input" id="subscription-search" type="text" name="subscription_search" value="{{ subscription_filters.search }}" placeholder="Client, email, label token" />
+        </div>
+        <div class="form-row" style="margin:0;">
+          <label class="label" for="subscription-status">Status</label>
+          <select class="input" id="subscription-status" name="subscription_status">
+            <option value="all" {% if subscription_filters.status == 'all' %}selected{% endif %}>All</option>
+            <option value="active" {% if subscription_filters.status == 'active' %}selected{% endif %}>Active</option>
+            <option value="revoked" {% if subscription_filters.status == 'revoked' %}selected{% endif %}>Revoked</option>
+            <option value="inactive" {% if subscription_filters.status == 'inactive' %}selected{% endif %}>Inactive</option>
+          </select>
+        </div>
+        <div class="form-row" style="margin:0;">
+          <label class="label" for="subscription-plan">Plan</label>
+          <select class="input" id="subscription-plan" name="subscription_plan">
+            <option value="all" {% if subscription_filters.plan == 'all' %}selected{% endif %}>All Plans</option>
+            <option value="basic" {% if subscription_filters.plan == 'basic' %}selected{% endif %}>Basic</option>
+            <option value="pro" {% if subscription_filters.plan == 'pro' %}selected{% endif %}>Pro</option>
+            <option value="enterprise" {% if subscription_filters.plan == 'enterprise' %}selected{% endif %}>Enterprise</option>
+          </select>
+        </div>
+        <div class="subscription-filter-actions">
+          <button class="btn secondary" type="submit">Apply Filter</button>
+          <a class="btn secondary" href="{{ url_for('admin.settings', tab='subscription') }}">Reset</a>
+        </div>
+      </form>
+    </div>
+
+    <div class="subscription-stat-grid">
+      <div class="subscription-stat-card">
+        <div class="muted">Client ditampilkan</div>
+        <div class="subscription-stat-value">{{ subscription_overview.total_clients }}</div>
+        <div class="muted">Sesuai filter aktif</div>
+      </div>
+      <div class="subscription-stat-card">
+        <div class="muted">Client API active</div>
+        <div class="subscription-stat-value">{{ subscription_overview.active_clients }}</div>
+        <div class="muted">Add-on aktif di subscription</div>
+      </div>
+      <div class="subscription-stat-card">
+        <div class="muted">Token active</div>
+        <div class="subscription-stat-value">{{ subscription_overview.active_tokens }}</div>
+        <div class="muted">Siap dipakai integrasi</div>
+      </div>
+      <div class="subscription-stat-card">
+        <div class="muted">Token revoked</div>
+        <div class="subscription-stat-value">{{ subscription_overview.revoked_tokens }}</div>
+        <div class="muted">Sudah tidak valid</div>
+      </div>
+    </div>
+
+    <div class="subscription-client-list">
+      {% if not clients %}
+      <div class="card subscription-empty">
+        <strong>Belum ada data yang cocok</strong>
+        <span>Ubah filter di atas atau tambahkan token/client baru agar data muncul di sini.</span>
+      </div>
+      {% endif %}
+
+      {% for c in clients %}
+      {% set subscription = client_subscriptions.get(c.id) %}
+      {% set api_access = api_access_summaries.get(c.id) %}
+      {% set generated_token = generated_api_tokens.get(c.id) %}
+      {% set owner_api_enabled = 'api_access' in owner_addons %}
+      {% set active_tokens = api_access.tokens|rejectattr('revoked_at')|list %}
+      {% set revoked_tokens = api_access.tokens|selectattr('revoked_at')|list %}
+      <section class="subscription-client-card">
+        <div class="subscription-client-head">
+          <div class="subscription-client-title">
+            <h4>{{ c.name }}</h4>
+            <div class="muted">{{ c.office_email or "-" }}</div>
+          </div>
+          <div class="subscription-client-meta">
+            <span class="subscription-plan-badge plan-{{ (subscription.package or 'basic')|lower }}">{{ subscription.package|title }}</span>
+            {% if not api_access.owner_enabled %}
+            <span class="subscription-status-badge status-owner-off">Owner Off</span>
+            {% elif api_access.client_enabled %}
+            <span class="subscription-status-badge status-client-active">API Active</span>
+            {% else %}
+            <span class="subscription-status-badge status-client-inactive">API Inactive</span>
+            {% endif %}
+          </div>
+        </div>
+
+        <div class="subscription-client-body">
+          <div class="subscription-main-grid">
+            <div class="subscription-section-card">
+              <div class="subscription-section-head">
+                <h5>Subscription Configuration</h5>
+                <p>Atur package dan add-on per client. Label selalu di atas field agar mudah dibaca dan tidak saling bertabrakan.</p>
+              </div>
+              <form class="api-subscription-form" method="post" action="{{ url_for('admin.settings_subscription_update') }}" data-api-access-active="{{ '1' if api_access.client_enabled else '0' }}">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                 <input type="hidden" name="client_id" value="{{ c.id }}" />
-                <div class="form-row">
-                  <label class="label" for="client-package-{{ c.id }}">Package</label>
-                  <select class="input" id="client-package-{{ c.id }}" name="package_type">
-                    {% for package in client_package_options %}
-                    <option value="{{ package }}" {% if subscription and subscription.package == package %}selected{% endif %}>{{ package|title }}</option>
-                    {% endfor %}
-                  </select>
-                </div>
-                <div class="form-row">
-                  <div class="label">Add-on</div>
-                  <div class="form-grid" style="grid-template-columns: repeat(3, minmax(150px, 1fr));">
+                <input type="hidden" name="api_log_from" value="{{ api_access_log_filters.date_from }}" />
+                <input type="hidden" name="api_log_to" value="{{ api_access_log_filters.date_to }}" />
+                <input type="hidden" name="subscription_search" value="{{ subscription_filters.search }}" />
+                <input type="hidden" name="subscription_status" value="{{ subscription_filters.status }}" />
+                <input type="hidden" name="subscription_plan" value="{{ subscription_filters.plan }}" />
+                <div class="subscription-config-grid">
+                  <div class="form-row" style="margin:0;">
+                    <label class="label" for="client-package-{{ c.id }}">Package</label>
+                    <select class="input" id="client-package-{{ c.id }}" name="package_type">
+                      {% for package in client_package_options %}
+                      <option value="{{ package }}" {% if subscription and subscription.package == package %}selected{% endif %}>{{ package|title }}</option>
+                      {% endfor %}
+                    </select>
+                  </div>
+                  <div class="subscription-addon-grid">
                     {% for addon_key, addon_label in client_addon_options.items() %}
-                    <label class="check">
-                      <input type="checkbox" name="addons" value="{{ addon_key }}" {% if subscription and addon_key in subscription.addons %}checked{% endif %} />
-                      <span>{{ addon_label }}</span>
-                    </label>
+                    {% set is_api_access = addon_key == 'api_access' %}
+                    {% set addon_active = subscription and addon_key in subscription.addons %}
+                    {% set addon_unavailable = is_api_access and not owner_api_enabled %}
+                    {% set addon_package_blocked = is_api_access and subscription and subscription.package != 'ENTERPRISE' %}
+                    <div class="subscription-addon-card">
+                      <div class="subscription-addon-head">
+                        <label class="check">
+                          <input type="checkbox" name="addons" value="{{ addon_key }}" {% if addon_active %}checked{% endif %} {% if addon_unavailable or addon_package_blocked %}disabled{% endif %} />
+                          <span>{{ addon_label }}</span>
+                        </label>
+                        {% if addon_package_blocked %}
+                        <span class="badge" style="background:#433c15; color:#f2df8f;">Enterprise Only</span>
+                        {% elif addon_unavailable %}
+                        <span class="badge" style="background:#5b3a18; color:#ffd9a3;">Unavailable</span>
+                        {% elif addon_active %}
+                        <span class="badge" style="background:#173b2a; color:#9ef0bf;">Active</span>
+                        {% else %}
+                        <span class="badge" style="background:#2a2a2a; color:#d0d0d0;">Inactive</span>
+                        {% endif %}
+                      </div>
+                      {% if is_api_access %}
+                      <div class="muted">Membuka endpoint API untuk integrasi eksternal. Token harus dijaga karena kebocoran token membuka akses integrasi.</div>
+                      {% if addon_package_blocked %}
+                      <div class="muted">Upgrade package ke Enterprise untuk menyalakan API access.</div>
+                      {% elif addon_unavailable %}
+                      <div class="muted">Owner/global API access masih off, jadi add-on ini belum tersedia untuk client.</div>
+                      {% else %}
+                      <div class="muted">Aktifkan add-on ini sebelum generate token integrasi.</div>
+                      {% endif %}
+                      {% elif addon_key == 'billing_engine' %}
+                      <div class="muted">Aktifkan engine billing per client enterprise untuk proses invoice dan perhitungan biaya.</div>
+                      {% elif addon_key == 'contract_management' %}
+                      <div class="muted">Kelola kontrak client dan jadwal pembaruan dengan kontrol per tenant.</div>
+                      {% elif addon_key == 'sla_tracking' %}
+                      <div class="muted">Pantau SLA operasional dan status pencapaian layanan per client.</div>
+                      {% endif %}
+                    </div>
                     {% endfor %}
                   </div>
                 </div>
-                <button class="btn primary btn-fixed-100" type="submit">Simpan</button>
+                <div class="btn-row" style="margin-top:16px;">
+                  <button class="btn primary btn-fixed-100" type="submit" data-subscription-save>Simpan</button>
+                </div>
               </form>
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+            </div>
+
+            <div class="subscription-section-card">
+              <div class="subscription-section-head">
+                <h5>Usage Overview</h5>
+                <p>Ringkasan ini mengikuti filter tanggal di bagian atas dan membantu scanning cepat dalam beberapa detik.</p>
+              </div>
+              <div class="subscription-kpi-grid">
+                <div class="subscription-kpi-card">
+                  <span class="muted">Token aktif</span>
+                  <strong>{{ active_tokens|length }}</strong>
+                </div>
+                <div class="subscription-kpi-card">
+                  <span class="muted">Token revoked</span>
+                  <strong>{{ revoked_tokens|length }}</strong>
+                </div>
+                <div class="subscription-kpi-card">
+                  <span class="muted">Last API call</span>
+                  <strong>{{ api_access.last_call.created_at|display_datetime if api_access.last_call else "-" }}</strong>
+                </div>
+                <div class="subscription-kpi-card">
+                  <span class="muted">Top endpoint</span>
+                  <strong>{{ api_access.top_endpoint.endpoint if api_access.top_endpoint else "-" }}</strong>
+                </div>
+              </div>
+              {% if generated_token %}
+              <div class="alert info">
+                <div style="font-weight:700; margin-bottom:4px;">Token baru: {{ generated_token.label }}</div>
+                <div style="word-break:break-all;">{{ generated_token.token }}</div>
+                <div class="muted" style="margin-top:4px;">Token hanya ditampilkan sekali. Simpan di sistem integrasi client.</div>
+              </div>
+              {% endif %}
+              {% if api_access.warnings %}
+              <div class="alert warning">
+                {% for warning in api_access.warnings %}
+                <div>{{ warning }}</div>
+                {% endfor %}
+              </div>
+              {% endif %}
+              <div class="subscription-list">
+                {% if api_access.recent_logs %}
+                  {% for item in api_access.recent_logs %}
+                  <div class="subscription-row subscription-row--log">
+                    <div>
+                      <div class="subscription-row-label">{{ item.created_at|display_datetime or "-" }}</div>
+                      <div class="subscription-row-sub">Status {{ item.status_code }}</div>
+                    </div>
+                    <div>{{ item.http_method }}</div>
+                    <div>{{ item.endpoint }}</div>
+                    <div>{{ item.token_label or "Session" }}</div>
+                    <div>{{ item.status_code }}</div>
+                  </div>
+                  {% endfor %}
+                {% else %}
+                <div class="subscription-empty">
+                  <strong>Belum ada usage log</strong>
+                  <span>Belum ada request API pada rentang tanggal ini.</span>
+                </div>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+
+          <div class="subscription-section-card">
+            <div class="subscription-section-head">
+              <h5>Action Area</h5>
+              <p>Generate token baru, revoke token lama, atau arahkan client untuk upgrade subscription bila API access belum eligible.</p>
+            </div>
+            <div class="subscription-action-grid">
+              <div class="subscription-section-card">
+                <div class="subscription-section-head">
+                  <h5>Generate API Key</h5>
+                  <p>Buat token baru untuk integrasi eksternal. Gunakan label yang menggambarkan sistem pemakai token.</p>
+                </div>
+                <form method="post" action="{{ url_for('admin.settings_subscription_api_token_create', client_id=c.id) }}">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                  <input type="hidden" name="api_log_from" value="{{ api_access_log_filters.date_from }}" />
+                  <input type="hidden" name="api_log_to" value="{{ api_access_log_filters.date_to }}" />
+                  <input type="hidden" name="subscription_search" value="{{ subscription_filters.search }}" />
+                  <input type="hidden" name="subscription_status" value="{{ subscription_filters.status }}" />
+                  <input type="hidden" name="subscription_plan" value="{{ subscription_filters.plan }}" />
+                  <div class="form-row" style="margin:0 0 12px 0;">
+                    <label class="label" for="api-token-label-{{ c.id }}">Label token</label>
+                    <input class="input" id="api-token-label-{{ c.id }}" name="label" type="text" maxlength="120" placeholder="ERP Integration" {% if not owner_api_enabled or not api_access.client_enabled %}disabled{% endif %} />
+                  </div>
+                  <div class="btn-row">
+                    <button class="btn secondary" type="submit" data-api-generate {% if not owner_api_enabled or not api_access.client_enabled %}disabled{% endif %}>Generate Token</button>
+                  </div>
+                </form>
+              </div>
+
+              <div class="subscription-section-card">
+                <div class="subscription-section-head">
+                  <h5>Manage Existing Tokens</h5>
+                  <p>Revoke token yang sudah tidak dipakai. Untuk rotate, generate token baru lalu revoke token lama setelah integrasi berpindah.</p>
+                </div>
+                <div class="subscription-list">
+                  {% if api_access.tokens %}
+                    {% for token in api_access.tokens %}
+                    <div class="subscription-row">
+                      <div>
+                        <div class="subscription-row-label">{{ token.label }}</div>
+                        <div class="subscription-row-sub">Last used {{ token.last_used_at|display_datetime or "-" }}</div>
+                      </div>
+                      <div>{{ token.masked_token }}</div>
+                      <div>
+                        {% if token.revoked_at %}
+                        <span class="badge" style="background:#5b2121; color:#ffc0c0;">Revoked</span>
+                        {% else %}
+                        <span class="badge" style="background:#173b2a; color:#9ef0bf;">Active</span>
+                        {% endif %}
+                      </div>
+                      <div>
+                        {% if not token.revoked_at %}
+                        <form method="post" action="{{ url_for('admin.settings_subscription_api_token_revoke', client_id=c.id, token_id=token.id) }}" onsubmit="return confirm('Nonaktifkan token API ini?');">
+                          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                          <input type="hidden" name="api_log_from" value="{{ api_access_log_filters.date_from }}" />
+                          <input type="hidden" name="api_log_to" value="{{ api_access_log_filters.date_to }}" />
+                          <input type="hidden" name="subscription_search" value="{{ subscription_filters.search }}" />
+                          <input type="hidden" name="subscription_status" value="{{ subscription_filters.status }}" />
+                          <input type="hidden" name="subscription_plan" value="{{ subscription_filters.plan }}" />
+                          <button class="btn secondary" type="submit" data-api-revoke>Revoke</button>
+                        </form>
+                        {% else %}
+                        <span class="muted">Tidak aktif</span>
+                        {% endif %}
+                      </div>
+                    </div>
+                    {% endfor %}
+                  {% else %}
+                  <div class="subscription-empty">
+                    <strong>Belum ada API key</strong>
+                    <span>Generate token pertama setelah API access aktif pada client dan package berada di Enterprise.</span>
+                  </div>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+      {% endfor %}
     </div>
+  </div>
+  {% endif %}
+
+  {% if tab == 'communication' and user.role in ["hr_superadmin", "manager_operational", "supervisor", "admin_asistent"] %}
+  <style>
+    .communication-shell { display:grid; gap:16px; margin-top:12px; }
+    .communication-hero { display:grid; gap:6px; }
+    .communication-hero h3 { margin:0; font-size:24px; }
+    .communication-hero p { margin:0; color:var(--muted); line-height:1.6; max-width:780px; }
+    .communication-stat-grid { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:12px; }
+    .communication-stat-card { border:1px solid rgba(255,255,255,.08); border-radius:8px; padding:16px; background:rgba(255,255,255,.02); display:grid; gap:6px; min-height:88px; }
+    .communication-stat-value { font-size:22px; font-weight:700; }
+    .communication-main-grid { display:grid; grid-template-columns:minmax(320px, 420px) minmax(0, 1fr); gap:16px; }
+    .communication-config-list { display:grid; gap:16px; }
+    .communication-config-grid { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:12px; align-items:end; }
+    .communication-panel { border:1px solid rgba(255,255,255,.08); border-radius:8px; background:rgba(255,255,255,.02); padding:16px; display:grid; gap:12px; }
+    .communication-panel-head { display:grid; gap:4px; }
+    .communication-panel-head h4 { margin:0; font-size:17px; }
+    .communication-panel-head p { margin:0; color:var(--muted); line-height:1.5; }
+    .communication-stack { display:grid; gap:16px; }
+    .communication-table-wrap { overflow:auto; }
+    .communication-badge { display:inline-flex; align-items:center; min-height:28px; border-radius:999px; padding:0 12px; font-size:12px; font-weight:700; background:rgba(255,255,255,.08); }
+    .communication-badge--incident { background:#452615; color:#ffcb9e; }
+    .communication-badge--announcement { background:#173b2a; color:#9ef0bf; }
+    .communication-empty { border:1px dashed rgba(255,255,255,.12); border-radius:8px; padding:20px; text-align:center; color:var(--muted); }
+    @media (max-width: 1100px) {
+      .communication-stat-grid,
+      .communication-main-grid,
+      .communication-config-grid { grid-template-columns:1fr; }
+    }
+    @media (max-width: 720px) {
+      .communication-stat-grid { grid-template-columns:1fr 1fr; }
+    }
+    @media (max-width: 560px) {
+      .communication-stat-grid { grid-template-columns:1fr; }
+      .communication-hero h3 { font-size:20px; }
+    }
+  </style>
+  <div class="communication-shell">
+    <section class="card communication-hero">
+      <h3>Operational Communication</h3>
+      <p>Panel ini merangkum pengumuman, incident, aktivitas chat, dan audit trail agar koordinasi lapangan tetap terstruktur dan mudah ditelusuri.</p>
+    </section>
+
+    <section class="communication-stat-grid">
+      <div class="communication-stat-card">
+        <span class="muted">Announcement aktif</span>
+        <div class="communication-stat-value">{{ communication_announcements|length }}</div>
+        <span class="muted">Scope yang terlihat oleh akun ini</span>
+      </div>
+      <div class="communication-stat-card">
+        <span class="muted">Incident terbaru</span>
+        <div class="communication-stat-value">{{ communication_incidents|length }}</div>
+        <span class="muted">Termasuk room chat incident</span>
+      </div>
+      <div class="communication-stat-card">
+        <span class="muted">Aktivitas chat</span>
+        <div class="communication-stat-value">{{ communication_recent_messages|length }}</div>
+        <span class="muted">Snapshot 30 pesan terakhir</span>
+      </div>
+      <div class="communication-stat-card">
+        <span class="muted">Audit trail</span>
+        <div class="communication-stat-value">{{ communication_recent_audit|length }}</div>
+        <span class="muted">Log aksi komunikasi terbaru</span>
+      </div>
+    </section>
+
+    {% if user.role == "hr_superadmin" %}
+    <section class="communication-panel">
+      <div class="communication-panel-head">
+        <h4>Client Communication Control</h4>
+        <p>Aktifkan komunikasi per client, tentukan tier operasional, serta batasi kuota pesan dan ukuran lampiran incident. Semua nilai di bawah ini mengikuti plafon dari Credential Owner.</p>
+      </div>
+      <div class="communication-panel" style="padding:14px;">
+        <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+          <span class="communication-badge {% if communication_owner_policy.chat_enabled %}communication-badge--announcement{% endif %}">Chat: {% if communication_owner_policy.chat_enabled %}ON{% else %}OFF{% endif %}</span>
+          <span class="communication-badge {% if communication_owner_policy.announcement_enabled %}communication-badge--announcement{% endif %}">Announcement: {% if communication_owner_policy.announcement_enabled %}ON{% else %}OFF{% endif %}</span>
+          <span class="communication-badge {% if communication_owner_policy.incident_enabled %}communication-badge--incident{% endif %}">Incident: {% if communication_owner_policy.incident_enabled %}ON{% else %}OFF{% endif %}</span>
+          <span class="communication-badge {% if communication_owner_policy.api_enabled %}communication-badge--announcement{% endif %}">API: {% if communication_owner_policy.api_enabled %}ON{% else %}OFF{% endif %}</span>
+          <span class="communication-badge">Max Tier Owner: {{ communication_owner_policy.max_tier|title }}</span>
+        </div>
+        <div class="muted" style="line-height:1.5;">Jika toggle owner mematikan komunikasi atau menahan tier di level tertentu, konfigurasi client di bawah otomatis mengikuti batas tersebut.</div>
+      </div>
+      <div class="communication-config-list">
+        {% for c in clients %}
+        {% set communication_config = communication_client_configs.get(c.id, {}) %}
+        <form class="communication-panel" method="post" action="{{ url_for('admin.settings_communication_update') }}" style="padding:14px;">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <input type="hidden" name="client_id" value="{{ c.id }}" />
+          <div style="display:flex; justify-content:space-between; gap:12px; align-items:flex-start; flex-wrap:wrap;">
+            <div>
+              <div style="font-weight:700;">{{ c.name }}</div>
+              <div class="muted">{{ c.office_email or "-" }}</div>
+            </div>
+            <label class="check" style="margin:0;">
+              <input type="checkbox" name="communication_enabled" value="1" {% if communication_config.raw_enabled %}checked{% endif %} {% if not communication_owner_policy.chat_enabled %}disabled{% endif %} />
+              <span>Communication Enabled</span>
+            </label>
+          </div>
+          <div class="communication-config-grid">
+            <div class="form-row" style="margin:0;">
+              <label class="label" for="communication-tier-{{ c.id }}">Tier</label>
+              <select class="input" id="communication-tier-{{ c.id }}" name="communication_tier" {% if not communication_owner_policy.chat_enabled %}disabled{% endif %}>
+                <option value="basic" {% if communication_config.raw_tier == 'basic' %}selected{% endif %}>Basic</option>
+                <option value="pro" {% if communication_config.raw_tier == 'pro' %}selected{% endif %}>Pro</option>
+                <option value="enterprise" {% if communication_config.raw_tier == 'enterprise' %}selected{% endif %}>Enterprise</option>
+              </select>
+            </div>
+            <div class="form-row" style="margin:0;">
+              <label class="label" for="communication-message-limit-{{ c.id }}">Message / Day</label>
+              <input class="input" id="communication-message-limit-{{ c.id }}" type="number" min="1" name="communication_message_limit_per_day" value="{{ communication_config.message_limit_per_day or 300 }}" />
+            </div>
+            <div class="form-row" style="margin:0;">
+              <label class="label" for="communication-attachment-limit-{{ c.id }}">Attachment MB</label>
+              <input class="input" id="communication-attachment-limit-{{ c.id }}" type="number" min="1" name="communication_attachment_limit_mb" value="{{ communication_config.attachment_limit_mb or 5 }}" />
+            </div>
+            <div class="form-row" style="margin:0;">
+              <label class="label">Feature Scope</label>
+              <div class="muted" style="line-height:1.5;">
+                Requested: {{ communication_config.raw_tier|title }}. Effective: {{ communication_config.tier|title }}{% if not communication_config.enabled %} (owner/client off){% endif %}.
+              </div>
+            </div>
+          </div>
+          <div class="btn-row">
+            <button class="btn primary btn-fixed-100" type="submit">Simpan</button>
+          </div>
+        </form>
+        {% endfor %}
+      </div>
+    </section>
+    {% endif %}
+
+    <section class="communication-main-grid">
+      <div class="communication-panel">
+        <div class="communication-panel-head">
+          <h4>Create Announcement</h4>
+          <p>Gunakan untuk broadcast global, role, atau site agar arahan operasional tidak tercecer di luar sistem.</p>
+        </div>
+        <form id="announcementCreateForm" class="stack">
+          <div class="form-row" style="margin:0;">
+            <label class="label" for="announcement-title">Judul</label>
+            <input class="input" id="announcement-title" type="text" name="title" maxlength="160" placeholder="Judul pengumuman" required />
+          </div>
+          <div class="form-row" style="margin:0;">
+            <label class="label" for="announcement-message">Pesan</label>
+            <textarea class="input" id="announcement-message" name="message" rows="5" placeholder="Isi pengumuman operasional" required></textarea>
+          </div>
+          <div class="form-grid" style="grid-template-columns: repeat(2, minmax(0, 1fr)); gap:12px;">
+            <div class="form-row" style="margin:0;">
+              <label class="label" for="announcement-target-type">Target</label>
+              <select class="input" id="announcement-target-type" name="target_type">
+                <option value="global">Global</option>
+                <option value="role">Role</option>
+                <option value="site">Site</option>
+              </select>
+            </div>
+            <div class="form-row" style="margin:0;">
+              <label class="label" for="announcement-target-id">Target ID</label>
+              <input class="input" id="announcement-target-id" type="text" name="target_id" placeholder="role atau site_id" />
+            </div>
+          </div>
+          <div class="form-grid" style="grid-template-columns: minmax(0, 1fr) auto; gap:12px; align-items:end;">
+            <div class="form-row" style="margin:0;">
+              <label class="label" for="announcement-expired-at">Expired At</label>
+              <input class="input" id="announcement-expired-at" type="date" name="expired_at" />
+            </div>
+            <label class="check" style="margin:0 0 10px 0;">
+              <input type="checkbox" name="is_mandatory" value="1" />
+              <span>Mandatory</span>
+            </label>
+          </div>
+          <div class="btn-row">
+            <button class="btn primary btn-fixed-100" type="submit" id="announcementCreateSubmit">Publish</button>
+          </div>
+          <div class="alert info" id="announcementCreateAlert" style="display:none;"></div>
+        </form>
+      </div>
+
+      <div class="communication-stack">
+        <div class="communication-panel">
+          <div class="communication-panel-head">
+            <h4>Announcement Feed</h4>
+            <p>Riwayat pengumuman yang masih aktif beserta target distribusinya.</p>
+          </div>
+          {% if not communication_announcements %}
+          <div class="communication-empty">Belum ada pengumuman aktif.</div>
+          {% else %}
+          <div class="communication-table-wrap">
+            <table class="table" aria-label="Announcement list">
+              <thead>
+                <tr>
+                  <th>Judul</th>
+                  <th>Target</th>
+                  <th>Status</th>
+                  <th>Dibuat</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for item in communication_announcements %}
+                <tr>
+                  <td>
+                    <div style="font-weight:700;">{{ item.title }}</div>
+                    <div class="muted">{{ item.message[:120] }}{% if item.message|length > 120 %}...{% endif %}</div>
+                  </td>
+                  <td>{{ item.target_type }}{% if item.target_id %}: {{ item.target_id }}{% endif %}</td>
+                  <td>{% if item.is_mandatory %}<span class="communication-badge communication-badge--announcement">Mandatory</span>{% else %}<span class="muted">Normal</span>{% endif %}</td>
+                  <td>{{ item.created_at|display_datetime or "-" }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% endif %}
+        </div>
+
+        <div class="communication-panel">
+          <div class="communication-panel-head">
+            <h4>Incident Feed</h4>
+            <p>Laporan kejadian yang masuk dari site beserta room chat incident yang dibuat otomatis.</p>
+          </div>
+          {% if not communication_incidents %}
+          <div class="communication-empty">Belum ada incident aktif.</div>
+          {% else %}
+          <div class="communication-table-wrap">
+            <table class="table" aria-label="Incident list">
+              <thead>
+                <tr>
+                  <th>Incident</th>
+                  <th>Scope</th>
+                  <th>Status</th>
+                  <th>Dibuat</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for item in communication_incidents %}
+                <tr>
+                  <td>
+                    <div style="font-weight:700;">{{ item.title }}</div>
+                    <div class="muted">{{ item.description[:120] }}{% if item.description|length > 120 %}...{% endif %}</div>
+                    {% if item.room_name %}<div class="muted">Room: {{ item.room_name }}</div>{% endif %}
+                  </td>
+                  <td>Site {{ item.site_id or "-" }}{% if item.client_id %} / Client {{ item.client_id }}{% endif %}</td>
+                  <td><span class="communication-badge communication-badge--incident">{{ item.status|upper }}</span></td>
+                  <td>{{ item.created_at|display_datetime or "-" }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% endif %}
+        </div>
+
+        <div class="communication-panel">
+          <div class="communication-panel-head">
+            <h4>Recent Chat Monitoring</h4>
+            <p>Ringkasan pesan terbaru untuk membantu follow-up cepat ke room yang aktif.</p>
+          </div>
+          {% if not communication_recent_messages %}
+          <div class="communication-empty">Belum ada aktivitas chat.</div>
+          {% else %}
+          <div class="communication-table-wrap">
+            <table class="table" aria-label="Recent chat monitoring">
+              <thead>
+                <tr>
+                  <th>Room</th>
+                  <th>Sender</th>
+                  <th>Pesan</th>
+                  <th>Waktu</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for item in communication_recent_messages %}
+                <tr>
+                  <td>{{ item.room_name }}</td>
+                  <td>{{ item.sender_email }}</td>
+                  <td>{{ item.message[:100] }}{% if item.message|length > 100 %}...{% endif %}</td>
+                  <td>{{ item.created_at|display_datetime or "-" }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% endif %}
+        </div>
+
+        <div class="communication-panel">
+          <div class="communication-panel-head">
+            <h4>Audit Trail</h4>
+            <p>Jejak aksi komunikasi untuk kebutuhan kontrol dan investigasi.</p>
+          </div>
+          {% if not communication_recent_audit %}
+          <div class="communication-empty">Belum ada audit komunikasi.</div>
+          {% else %}
+          <div class="communication-table-wrap">
+            <table class="table" aria-label="Communication audit trail">
+              <thead>
+                <tr>
+                  <th>Entity</th>
+                  <th>Aksi</th>
+                  <th>Aktor</th>
+                  <th>Ringkasan</th>
+                  <th>Waktu</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for item in communication_recent_audit %}
+                <tr>
+                  <td>{{ item.entity_type }}{% if item.entity_id %} #{{ item.entity_id }}{% endif %}</td>
+                  <td>{{ item.action }}</td>
+                  <td>{{ item.actor_email }}</td>
+                  <td>{{ item.summary }}</td>
+                  <td>{{ item.created_at|display_datetime or "-" }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% endif %}
+        </div>
+      </div>
+    </section>
   </div>
   {% endif %}
 
   {% if tab == 'addons' and user.role == "hr_superadmin" %}
   <div class="card" style="margin-top:12px;">
-    <div style="font-weight:700; margin-bottom:8px;">Enterprise Add-on</div>
-    <div class="muted" style="margin-bottom:12px;">Toggle ini mengaktifkan fitur add-on untuk user admin tier Enterprise.</div>
+    <div style="font-weight:700; margin-bottom:8px;">Owner Add-on Coordinator</div>
+    <div class="muted" style="margin-bottom:12px;">Mode owner menentukan versi aplikasi utama, lalu add-on mengikuti mode Enterprise, Pro, atau Pro Plus.</div>
     <div class="stack" id="ownerAddonPanel">
       <form class="inline" id="ownerAddonUnlockForm">
         <input class="input" type="password" id="ownerAddonPassword" placeholder="Password owner add-on" autocomplete="current-password" required />
         <button class="btn primary" type="submit">Unlock</button>
       </form>
       <div class="form-grid" style="grid-template-columns: repeat(2, minmax(220px, 1fr));">
+        <label class="check">
+          <input type="checkbox" data-owner-addon value="enterprise_tier" disabled />
+          <span>HRIS Enterprise</span>
+        </label>
+        <label class="check">
+          <input type="checkbox" data-owner-addon value="hris_pro" disabled />
+          <span>HRIS Pro</span>
+        </label>
+        <label class="check">
+          <input type="checkbox" data-owner-addon value="hris_pro_plus" disabled />
+          <span>HRIS Pro Plus</span>
+        </label>
         <label class="check">
           <input type="checkbox" data-owner-addon value="patrol" disabled />
           <span>Guard Tour</span>
@@ -278,36 +935,51 @@
         </label>
         <label class="check">
           <input type="checkbox" data-owner-addon value="reporting_advanced" disabled />
-          <span>Advanced Reporting</span>
+          <span>Reporting Adv</span>
         </label>
         <label class="check">
           <input type="checkbox" data-owner-addon value="payroll_plus" disabled />
           <span>Payroll Plus</span>
         </label>
-        <label class="check">
-          <input type="checkbox" data-owner-addon value="api_access" disabled />
-          <span>API Access</span>
-        </label>
+        <div style="border:1px solid rgba(255,255,255,.08); border-radius:8px; padding:10px 12px; background:rgba(255,255,255,.02);">
+          <label class="check">
+            <input type="checkbox" data-owner-addon value="api_access" disabled />
+            <span>API access</span>
+          </label>
+          <div class="muted" style="margin-top:8px; line-height:1.5;">
+            Add-on terpisah untuk integrasi eksternal. Toggle ini hanya membuka ketersediaan fitur, aktivasi tetap dilakukan per client.
+          </div>
+        </div>
         <label class="check">
           <input type="checkbox" data-owner-addon value="ai" disabled />
           <span>AI Analysis</span>
         </label>
         <label class="check">
           <input type="checkbox" data-owner-addon value="billing_engine" disabled />
-          <span>Billing Engine</span>
-        </label>
-        <label class="check">
-          <input type="checkbox" data-owner-addon value="contract_management" disabled />
-          <span>Contract Management</span>
+          <span>Billing + Contract</span>
         </label>
         <label class="check">
           <input type="checkbox" data-owner-addon value="sla_tracking" disabled />
           <span>SLA Tracking</span>
         </label>
-        <label class="check">
-          <input type="checkbox" data-owner-addon value="enterprise_tier" disabled />
-          <span>HRIS Enterprise</span>
-        </label>
+        <div style="border:1px solid rgba(255,255,255,.08); border-radius:8px; padding:10px 12px; background:rgba(255,255,255,.02); display:grid; gap:8px;">
+          <label class="check">
+            <input type="checkbox" data-owner-addon value="communication_chat" disabled />
+            <span>Live chat</span>
+          </label>
+          <label class="check">
+            <input type="checkbox" data-owner-addon value="communication_announcement" disabled />
+            <span>Annauncement</span>
+          </label>
+          <label class="check">
+            <input type="checkbox" data-owner-addon value="communication_incident" disabled />
+            <span>Incident System</span>
+          </label>
+          <label class="check">
+            <input type="checkbox" data-owner-addon value="communication_api" disabled />
+            <span>API Communication</span>
+          </label>
+        </div>
       </div>
       <div class="btn-row">
         <button class="btn primary btn-fixed-100" type="button" id="ownerAddonSave" disabled>Simpan</button>
@@ -438,7 +1110,16 @@
     const alertBox = document.getElementById("ownerAddonAlert");
     const toggles = Array.from(document.querySelectorAll("[data-owner-addon]"));
     const enterpriseAddonKey = "enterprise_tier";
-    const enterpriseExcludedAddons = new Set(["api_access", "reporting_advanced"]);
+    const proAddonKey = "hris_pro";
+    const proPlusAddonKey = "hris_pro_plus";
+    const billingContractKey = "billing_engine";
+    const contractManagementKey = "contract_management";
+    const communicationChatKey = "communication_chat";
+    const communicationAnnouncementKey = "communication_announcement";
+    const communicationIncidentKey = "communication_incident";
+    const communicationApiKey = "communication_api";
+    const apiAccessKey = "api_access";
+    const modeKeys = new Set([enterpriseAddonKey, proAddonKey, proPlusAddonKey]);
 
     function showMessage(message) {
       if (!alertBox) return;
@@ -446,33 +1127,155 @@
       alertBox.style.display = "block";
     }
 
+    function setBusy(button, busyLabel, isBusy) {
+      if (!button) return;
+      if (!button.dataset.defaultLabel) {
+        button.dataset.defaultLabel = button.textContent || "";
+      }
+      if (!button.dataset.restoreDisabled) {
+        button.dataset.restoreDisabled = button.disabled ? "1" : "0";
+      }
+      button.disabled = isBusy ? true : button.dataset.restoreDisabled === "1";
+      button.textContent = isBusy ? busyLabel : button.dataset.defaultLabel;
+      if (!isBusy && button.id === "ownerAddonSave") {
+        button.disabled = !sessionStorage.getItem("owner-addon-unlocked");
+      }
+    }
+
     function setUnlocked(unlocked) {
       toggles.forEach((toggle) => {
         toggle.disabled = !unlocked;
       });
       if (saveButton) saveButton.disabled = !unlocked;
+      if (unlocked) {
+        sessionStorage.setItem("owner-addon-unlocked", "1");
+      } else {
+        sessionStorage.removeItem("owner-addon-unlocked");
+      }
     }
 
     function applyAddons(addons) {
       const active = new Set(Array.isArray(addons) ? addons : []);
       toggles.forEach((toggle) => {
+        if (toggle.value === billingContractKey) {
+          toggle.checked = active.has(billingContractKey) && active.has(contractManagementKey);
+          return;
+        }
+        if (toggle.value === contractManagementKey) {
+          toggle.checked = false;
+          return;
+        }
         toggle.checked = active.has(toggle.value);
       });
-      applyEnterpriseAddons();
+      applyOwnerSuiteMode();
+      applyCommunicationAddons();
     }
 
-    function applyEnterpriseAddons() {
+    function ownerFeatureToggles() {
+      return toggles.filter((toggle) => toggle.value && !modeKeys.has(toggle.value) && toggle.value !== contractManagementKey);
+    }
+
+    function ownerAnyFeatureEnabled() {
+      return ownerFeatureToggles().some((toggle) => toggle.checked);
+    }
+
+    function applyOwnerSuiteMode(changedKey) {
       const enterpriseToggle = toggles.find((toggle) => toggle.value === enterpriseAddonKey);
-      if (!enterpriseToggle?.checked) return;
-      toggles.forEach((toggle) => {
-        if (!toggle.value || toggle.value === enterpriseAddonKey) return;
-        toggle.checked = !enterpriseExcludedAddons.has(toggle.value);
-      });
+      const proToggle = toggles.find((toggle) => toggle.value === proAddonKey);
+      const proPlusToggle = toggles.find((toggle) => toggle.value === proPlusAddonKey);
+      const featureToggles = ownerFeatureToggles();
+      const allFeaturesEnabled = featureToggles.length > 0 && featureToggles.every((toggle) => toggle.checked);
+
+      if (changedKey === enterpriseAddonKey && enterpriseToggle?.checked) {
+        if (proToggle) proToggle.checked = false;
+        if (proPlusToggle) proPlusToggle.checked = false;
+        featureToggles.forEach((toggle) => {
+          toggle.checked = true;
+        });
+      } else if (changedKey === proAddonKey && proToggle?.checked) {
+        if (enterpriseToggle) enterpriseToggle.checked = false;
+        if (proPlusToggle) proPlusToggle.checked = false;
+        featureToggles.forEach((toggle) => {
+          toggle.checked = false;
+        });
+      } else if (changedKey === proPlusAddonKey && proPlusToggle?.checked) {
+        if (enterpriseToggle) enterpriseToggle.checked = false;
+        if (proToggle) proToggle.checked = false;
+      } else if (!enterpriseToggle?.checked && !proToggle?.checked && !proPlusToggle?.checked) {
+        if (ownerAnyFeatureEnabled()) {
+          if (proPlusToggle) proPlusToggle.checked = true;
+        } else if (proToggle) {
+          proToggle.checked = true;
+        }
+      }
+
+      if (!modeKeys.has(changedKey || "")) {
+        if (enterpriseToggle?.checked && !allFeaturesEnabled) {
+          enterpriseToggle.checked = false;
+          if (proPlusToggle) proPlusToggle.checked = true;
+        } else if (proToggle?.checked && ownerAnyFeatureEnabled()) {
+          proToggle.checked = false;
+          if (proPlusToggle) proPlusToggle.checked = true;
+        }
+      }
+
+      if (enterpriseToggle?.checked) {
+        featureToggles.forEach((toggle) => {
+          toggle.checked = true;
+        });
+      }
+
+      if (modeKeys.has(changedKey || "") && !enterpriseToggle?.checked && !proToggle?.checked && !proPlusToggle?.checked && proToggle) {
+        proToggle.checked = true;
+      }
+
+      const selectedMode = enterpriseToggle?.checked
+        ? enterpriseAddonKey
+        : proPlusToggle?.checked
+          ? proPlusAddonKey
+          : proAddonKey;
+      if (enterpriseToggle) enterpriseToggle.checked = selectedMode === enterpriseAddonKey;
+      if (proPlusToggle) proPlusToggle.checked = selectedMode === proPlusAddonKey;
+      if (proToggle) proToggle.checked = selectedMode === proAddonKey;
+    }
+
+    function applyCommunicationAddons() {
+      const chatToggle = toggles.find((toggle) => toggle.value === communicationChatKey);
+      const announcementToggle = toggles.find((toggle) => toggle.value === communicationAnnouncementKey);
+      const incidentToggle = toggles.find((toggle) => toggle.value === communicationIncidentKey);
+      const apiToggle = toggles.find((toggle) => toggle.value === communicationApiKey);
+      const apiAccessToggle = toggles.find((toggle) => toggle.value === apiAccessKey);
+      if (incidentToggle?.checked) {
+        if (chatToggle) chatToggle.checked = true;
+        if (announcementToggle) announcementToggle.checked = true;
+      }
+      if (announcementToggle?.checked && chatToggle) {
+        chatToggle.checked = true;
+      }
+      if (!chatToggle?.checked) {
+        if (announcementToggle) announcementToggle.checked = false;
+        if (incidentToggle) incidentToggle.checked = false;
+      }
+      if (apiToggle?.checked && apiAccessToggle) {
+        apiAccessToggle.checked = true;
+      }
     }
 
     function selectedAddons() {
-      applyEnterpriseAddons();
-      return toggles.filter((toggle) => toggle.checked).map((toggle) => toggle.value);
+      applyOwnerSuiteMode();
+      applyCommunicationAddons();
+      const selected = [];
+      toggles.forEach((toggle) => {
+        if (!toggle.checked || !toggle.value || toggle.value === contractManagementKey) {
+          return;
+        }
+        if (toggle.value === billingContractKey) {
+          selected.push(billingContractKey, contractManagementKey);
+          return;
+        }
+        selected.push(toggle.value);
+      });
+      return selected;
     }
 
     async function requestJson(url, options) {
@@ -503,6 +1306,8 @@
 
     unlockForm?.addEventListener("submit", async (event) => {
       event.preventDefault();
+      const unlockButton = unlockForm.querySelector('button[type="submit"]');
+      setBusy(unlockButton, "Membuka...", true);
       try {
         const payload = await requestJson("/api/owner/addons/verify", {
           method: "POST",
@@ -514,10 +1319,13 @@
         showMessage(payload.message || "Akses owner aktif.");
       } catch (error) {
         showMessage(error.message);
+      } finally {
+        setBusy(unlockButton, "Membuka...", false);
       }
     });
 
     saveButton?.addEventListener("click", async () => {
+      setBusy(saveButton, "Menyimpan...", true);
       try {
         const payload = await requestJson("/api/owner/addons", {
           method: "POST",
@@ -527,15 +1335,114 @@
         showMessage(payload.message || "Add-on tersimpan.");
       } catch (error) {
         showMessage(error.message);
+      } finally {
+        setBusy(saveButton, "Menyimpan...", false);
       }
     });
 
     toggles.forEach((toggle) => {
       toggle.addEventListener("change", () => {
-        if (toggle.value === enterpriseAddonKey && toggle.checked) {
-          applyEnterpriseAddons();
-        }
+        applyOwnerSuiteMode(toggle.value);
+        applyCommunicationAddons();
       });
+    });
+  })();
+</script>
+{% endif %}
+{% if tab == 'subscription' and user.role == "hr_superadmin" %}
+<script>
+  (function () {
+    function setBusy(button, label) {
+      if (!button) return;
+      if (!button.dataset.defaultLabel) {
+        button.dataset.defaultLabel = button.textContent || "";
+      }
+      button.disabled = true;
+      button.textContent = label;
+    }
+
+    document.querySelectorAll(".api-subscription-form").forEach((form) => {
+      form.addEventListener("submit", (event) => {
+        const apiAccessInput = form.querySelector('input[name="addons"][value="api_access"]');
+        const wasActive = form.dataset.apiAccessActive === "1";
+        const willBeActive = Boolean(apiAccessInput && apiAccessInput.checked);
+        if (wasActive && !willBeActive) {
+          const confirmed = window.confirm("Nonaktifkan API access? Token yang masih aktif tidak bisa dipakai sampai add-on ini diaktifkan kembali.");
+          if (!confirmed) {
+            event.preventDefault();
+            return;
+          }
+        }
+        setBusy(form.querySelector("[data-subscription-save]"), "Menyimpan...");
+      });
+    });
+
+    document.querySelectorAll("[data-api-generate]").forEach((button) => {
+      button.form?.addEventListener("submit", () => setBusy(button, "Generating..."));
+    });
+
+    document.querySelectorAll("[data-api-revoke]").forEach((button) => {
+      button.form?.addEventListener("submit", () => setBusy(button, "Revoking..."));
+    });
+  })();
+</script>
+{% endif %}
+{% if tab == 'communication' and user.role in ["hr_superadmin", "manager_operational", "supervisor", "admin_asistent"] %}
+<script>
+  (function () {
+    const form = document.getElementById("announcementCreateForm");
+    const alertBox = document.getElementById("announcementCreateAlert");
+    const submitButton = document.getElementById("announcementCreateSubmit");
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute("content") || "";
+
+    function showMessage(message, isError) {
+      if (!alertBox) return;
+      alertBox.textContent = message;
+      alertBox.className = `alert ${isError ? "error" : "info"}`;
+      alertBox.style.display = "block";
+    }
+
+    form?.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (!form) return;
+      if (submitButton) {
+        submitButton.disabled = true;
+        submitButton.textContent = "Publishing...";
+      }
+      const formData = new FormData(form);
+      const payload = {
+        title: formData.get("title"),
+        message: formData.get("message"),
+        target_type: formData.get("target_type"),
+        target_id: formData.get("target_id"),
+        expired_at: formData.get("expired_at"),
+        is_mandatory: formData.get("is_mandatory") === "1",
+      };
+      try {
+        const response = await fetch("/api/announcement/create", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: {
+            "Content-Type": "application/json",
+            "X-CSRF-Token": csrfToken,
+          },
+          body: JSON.stringify(payload),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || data.ok === false) {
+          throw new Error(data.message || "Gagal membuat announcement.");
+        }
+        showMessage(data.message || "Announcement dibuat.", false);
+        form.reset();
+        window.setTimeout(() => window.location.reload(), 350);
+      } catch (error) {
+        showMessage(error.message || "Gagal membuat announcement.", true);
+      } finally {
+        if (submitButton) {
+          submitButton.disabled = false;
+          submitButton.textContent = "Publish";
+        }
+      }
     });
   })();
 </script>

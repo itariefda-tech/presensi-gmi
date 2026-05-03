@@ -10,7 +10,7 @@
       </div>
       <div>        
         <div class="headline">
-          <h2>HRIS PRO - Workforce Control</h2>
+          <h2>{{ (hris_brand_title or "HRIS PRO") }} - Workforce Control</h2>
           <p>
             HRIS PRO bukan sekadar attendance, tapi kontrol operasional lengkap dengan leave management dan approval system, memastikan setiap aspek SDM tercatat, tervalidasi, dan dapat dimonitor secara real-time — complete workforce control
           </p>
@@ -307,7 +307,7 @@
 </div>
 <!-- Owner add-on: Step 1 = Password Modal (credential check) -->
 <div class="owner-addon-modal" id="ownerAddonModal" aria-hidden="true">
-  <div class="owner-addon-card" role="dialog" aria-modal="true" aria-labelledby="ownerAddonTitle">
+  <div class="owner-addon-card owner-addon-card--password" role="dialog" aria-modal="true" aria-labelledby="ownerAddonTitle">
     <div class="owner-addon-header">
       <div class="hero-controls-title" id="ownerAddonTitle">Pengaturan Add on</div>
       <button class="owner-addon-close" type="button" data-owner-addon-close aria-label="Tutup">x</button>
@@ -330,52 +330,74 @@
       <button class="owner-addon-close" type="button" data-owner-addon-toggles-close aria-label="Tutup">x</button>
     </div>
     <div class="hero-controls-body owner-addon-body">
-      <section class="owner-addon-section" aria-label="Pengaturan add-on">
+      <section class="owner-addon-section owner-addon-section--toggles" aria-label="Pengaturan add-on">
         <div class="hero-controls-title">Add-on</div>
-        <label class="check">
-          <input type="checkbox" data-owner-addon="patrol" />
-          <span>Guard Tour</span>
-        </label>
-        <label class="check">
-          <input type="checkbox" data-owner-addon="patrol_ops" />
-          <span>Patroli Ops</span>
-        </label>
-        <label class="check">
-          <input type="checkbox" data-owner-addon="calendar" />
-          <span>Calender</span>
-        </label>
-        <label class="check">
-          <input type="checkbox" data-owner-addon="reporting_advanced" />
-          <span>Reporting advanced</span>
-        </label>
-        <label class="check">
-          <input type="checkbox" data-owner-addon="api_access" />
-          <span>API access</span>
-        </label>
-        <label class="check">
-          <input type="checkbox" data-owner-addon="payroll_plus" />
-          <span>Payroll plus</span>
-        </label>
-        <label class="check">
-          <input type="checkbox" data-owner-addon="ai" />
-          <span>AI Analysis</span>
-        </label>
-        <label class="check">
-          <input type="checkbox" data-owner-addon="billing_engine" />
-          <span>Billing Engine</span>
-        </label>
-        <label class="check">
-          <input type="checkbox" data-owner-addon="contract_management" />
-          <span>Contract Management</span>
-        </label>
-        <label class="check">
-          <input type="checkbox" data-owner-addon="sla_tracking" />
-          <span>SLA Tracking</span>
-        </label>
-        <label class="check">
-          <input type="checkbox" data-owner-addon="enterprise_tier" />
-          <span>HRIS Enterprise</span>
-        </label>
+        <div class="owner-addon-toggle-grid">
+          <label class="check">
+            <input type="checkbox" data-owner-addon="enterprise_tier" />
+            <span>HRIS Enterprise</span>
+          </label>
+          <label class="check">
+            <input type="checkbox" data-owner-addon="hris_pro" />
+            <span>HRIS Pro</span>
+          </label>
+          <label class="check">
+            <input type="checkbox" data-owner-addon="hris_pro_plus" />
+            <span>HRIS Pro Plus</span>
+          </label>
+          <label class="check">
+            <input type="checkbox" data-owner-addon="patrol" />
+            <span>Guard Tour</span>
+          </label>
+          <label class="check">
+            <input type="checkbox" data-owner-addon="patrol_ops" />
+            <span>Patroli Ops</span>
+          </label>
+          <label class="check">
+            <input type="checkbox" data-owner-addon="calendar" />
+            <span>Calender</span>
+          </label>
+          <label class="check">
+            <input type="checkbox" data-owner-addon="reporting_advanced" />
+            <span>Reporting Adv</span>
+          </label>
+          <label class="check">
+            <input type="checkbox" data-owner-addon="api_access" />
+            <span>API access</span>
+          </label>
+          <label class="check">
+            <input type="checkbox" data-owner-addon="payroll_plus" />
+            <span>Payroll plus</span>
+          </label>
+          <label class="check">
+            <input type="checkbox" data-owner-addon="ai" />
+            <span>AI Analysis</span>
+          </label>
+          <label class="check">
+            <input type="checkbox" data-owner-addon="billing_engine" />
+            <span>Billing + Contract</span>
+          </label>
+          <label class="check">
+            <input type="checkbox" data-owner-addon="sla_tracking" />
+            <span>SLA Tracking</span>
+          </label>
+          <label class="check">
+            <input type="checkbox" data-owner-addon="communication_chat" />
+            <span>Live chat</span>
+          </label>
+          <label class="check">
+            <input type="checkbox" data-owner-addon="communication_announcement" />
+            <span>Annauncement</span>
+          </label>
+          <label class="check">
+            <input type="checkbox" data-owner-addon="communication_incident" />
+            <span>Incident System</span>
+          </label>
+          <label class="check">
+            <input type="checkbox" data-owner-addon="communication_api" />
+            <span>API Communication</span>
+          </label>
+        </div>
         <button class="btn" type="button" id="ownerAddonSave">Simpan Add-on</button>
       </section>
       <section class="owner-addon-section" aria-label="Pengaturan tampilan">
@@ -387,6 +409,10 @@
         <label class="check">
           <input type="checkbox" id="toggleLabel" checked />
           <span>Label perusahaan</span>
+        </label>
+        <label class="check">
+          <input type="checkbox" id="toggleInvite" />
+          <span>Kode undangan</span>
         </label>
         <div class="hero-input" id="labelInputWrap">
           <input type="text" id="companyLabelInput" placeholder="Label perusahaan" value="GroupMitraIndonesia" />
@@ -401,7 +427,7 @@
         </label>
         <label class="check">
           <input type="checkbox" id="toggleHeroCircles" checked />
-          <span>Lingkaran hero</span>
+          <span>Circle Hero</span>
         </label>
         <label class="check">
           <input type="checkbox" id="toggleFormCircles" checked />
@@ -411,19 +437,12 @@
           <input type="checkbox" id="ownerExtraThemesEnabled" />
           <span>Tema tambahan</span>
         </label>
-        <div class="hero-row hero-row-checks">
-          <label class="check">
-            <input type="checkbox" id="toggleLockCircles" />
-            <span>Stop gerak lingkaran</span>
-          </label>
-          <label class="check">
-            <input type="checkbox" id="toggleInvite" />
-            <span>Kode undangan</span>
-          </label>
-        </div>
+        <label class="check">
+          <input type="checkbox" id="toggleLockCircles" />
+          <span>Stop gerak circle</span>
+        </label>
         <div class="hero-row">
           <div class="hero-input">
-            <label for="primaryKeySelect">Kunci utama</label>
             <select id="primaryKeySelect">
               <option value="both" selected>Email + No. Telp</option>
               <option value="email">Email</option>
@@ -442,10 +461,6 @@
         <label class="check">
           <input type="checkbox" id="toggleModeQr" />
           <span>QR</span>
-        </label>
-        <label class="check">
-          <input type="checkbox" id="togglePagePatroli" checked />
-          <span>Halaman Patroli</span>
         </label>
         <button class="btn secondary" type="button" id="displaySettingsSave">Apply Tampilan</button>
       </section>

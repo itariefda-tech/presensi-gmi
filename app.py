@@ -40,6 +40,9 @@ APP_BOOT_ID = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
 PERF_LOG = (os.environ.get("PERF_LOG") or "").lower() in {"1", "true", "yes"}
 PERF_LOGGER = logging.getLogger("perf")
 API_ACCESS_TOKEN = (os.environ.get("API_ACCESS_TOKEN") or os.environ.get("HRIS_API_TOKEN") or "").strip()
+API_ACCESS_TOKEN_BYTES = 32
+API_ACCESS_TOKEN_PREFIX_LENGTH = 12
+API_ACCESS_LIMIT_WARNING_RATIO = 0.8
 LOGIN_RATE_LIMIT_MAX = 5
 LOGIN_RATE_LIMIT_WINDOW_MINUTES = 15
 REPORT_CACHE_TTL_SECONDS = 30
@@ -54,6 +57,14 @@ try:
     PENDING_LIST_LIMIT = int(os.environ.get("PENDING_LIST_LIMIT") or 0)
 except ValueError:
     PENDING_LIST_LIMIT = 0
+try:
+    API_ACCESS_DAILY_LIMIT_PER_TOKEN = max(1, int(os.environ.get("API_ACCESS_DAILY_LIMIT_PER_TOKEN") or 1000))
+except ValueError:
+    API_ACCESS_DAILY_LIMIT_PER_TOKEN = 1000
+try:
+    API_ACCESS_DAILY_LIMIT_PER_CLIENT = max(1, int(os.environ.get("API_ACCESS_DAILY_LIMIT_PER_CLIENT") or 5000))
+except ValueError:
+    API_ACCESS_DAILY_LIMIT_PER_CLIENT = 5000
 
 
 def _perf_log(label: str, start_time: float, extra: str = "") -> None:
@@ -178,13 +189,7 @@ def create_app() -> Flask:
         user = _current_user()
         if not user:
             return {"permissions": {}}
-        permissions = _get_role_permissions(user.role)
-        permissions["view_calendar"] = bool(permissions.get("view_calendar")) and _calendar_feature_enabled(user)
-        permissions["view_ai_analysis"] = bool(permissions.get("view_ai_analysis")) and _ai_analysis_feature_enabled(user)
-        permissions["view_patrol_ops"] = bool(permissions.get("view_patrol")) and _patrol_ops_admin_enabled(user)
-        permissions["view_billing"] = bool(permissions.get("view_billing")) and _billing_feature_enabled(user)
-        permissions["view_contract"] = bool(permissions.get("view_contract")) and _contract_feature_enabled(user)
-        return {"permissions": permissions}
+        return {"permissions": _effective_permissions_for(user)}
 
     @app.context_processor
     def _inject_notifications():
@@ -205,7 +210,7 @@ def create_app() -> Flask:
     @app.context_processor
     def _inject_theme_preference():
         user = _current_user()
-        hris_brand_title = "HRIS ENTERPRISE" if _is_enterprise(user) else "HRIS PRO"
+        hris_brand_title = _hris_brand_title()
         return {
             "theme": _resolve_theme_preference(user),
             "theme_options": THEME_OPTIONS,
@@ -3929,11 +3934,16 @@ def create_app() -> Flask:
     @app.route("/api/v1/attendance", methods=["GET"])
     def api_v1_attendance():
         user = _api_v1_user()
-        if not user or user.role not in (ADMIN_ROLES | CLIENT_ROLES):
+        if not user:
+            if _api_v1_token_supplied():
+                return jsonify(ok=False, message="Token API tidak valid."), 401
+            return _json_forbidden()
+        if user.role not in (ADMIN_ROLES | CLIENT_ROLES):
             return _json_forbidden()
 
         client_id = None
         branch_id = None
+        employee_email = (request.args.get("employee_email") or "").strip().lower()
         client_id_raw = (request.args.get("client_id") or "").strip()
         branch_id_raw = (request.args.get("branch_id") or request.args.get("site_id") or "").strip()
         if user.role in CLIENT_ROLES and user.client_id:
@@ -3947,6 +3957,9 @@ def create_app() -> Flask:
                 return jsonify(ok=False, message="client_id tidak valid."), 400
         if not client_id:
             return jsonify(ok=False, message="client_id wajib untuk API access."), 400
+        client = _get_client_by_id(client_id)
+        if not client:
+            return jsonify(ok=False, message="Client tidak ditemukan."), 404
         if user.role in CLIENT_ROLES and user.site_id:
             branch_id = user.site_id
         elif branch_id_raw:
@@ -3960,6 +3973,15 @@ def create_app() -> Flask:
 
         addon_block = _require_client_addon(user, ADDON_API_ACCESS, "API access", client_id)
         if addon_block:
+            _log_api_access_request(
+                client_id,
+                request.path,
+                request.method,
+                403,
+                token_row=getattr(g, "api_access_auth", {}).get("token_row") if isinstance(getattr(g, "api_access_auth", None), dict) else None,
+                actor=user if user and user.id else None,
+                branch_id=branch_id,
+            )
             return addon_block
 
         date_from = _normalize_date_input(request.args.get("from") or request.args.get("date_from")) or _today_key()
@@ -3971,6 +3993,19 @@ def create_app() -> Flask:
         except ValueError:
             limit = 200
         limit = max(1, min(limit, 1000))
+        auth_context = getattr(g, "api_access_auth", {}) if isinstance(getattr(g, "api_access_auth", None), dict) else {}
+        rate_state = _api_access_rate_state(client_id, auth_context.get("token_id"))
+        if rate_state["client_blocked"] or rate_state["token_blocked"]:
+            _log_api_access_request(
+                client_id,
+                request.path,
+                request.method,
+                429,
+                token_row=auth_context.get("token_row"),
+                actor=user if user and user.id else None,
+                branch_id=branch_id,
+            )
+            return jsonify(ok=False, message="Limit harian API access tercapai."), 429
 
         scoped_emails = {
             (_row_get(row, "employee_email") or "").strip().lower()
@@ -3979,11 +4014,35 @@ def create_app() -> Flask:
             and (not branch_id or int(_row_get(row, "site_id") or 0) == int(branch_id))
         }
         scoped_emails = {email for email in scoped_emails if email}
+        if employee_email:
+            if employee_email not in scoped_emails:
+                _log_api_access_request(
+                    client_id,
+                    request.path,
+                    request.method,
+                    403,
+                    token_row=auth_context.get("token_row"),
+                    actor=user if user and user.id else None,
+                    branch_id=branch_id,
+                )
+                return jsonify(ok=False, message="employee_email tidak terdaftar pada client/site ini."), 403
+            scoped_emails = {employee_email}
         rows = _attendance_live(
             limit=limit,
             allowed_emails=scoped_emails,
             date_from=date_from,
             date_to=date_to,
+        )
+        if auth_context.get("token_id"):
+            _touch_api_access_token(int(auth_context["token_id"]))
+        _log_api_access_request(
+            client_id,
+            request.path,
+            request.method,
+            200,
+            token_row=auth_context.get("token_row"),
+            actor=user if user and user.id else None,
+            branch_id=branch_id,
         )
         return jsonify(
             ok=True,
@@ -3991,11 +4050,334 @@ def create_app() -> Flask:
                 "client_id": client_id,
                 "site_id": branch_id,
                 "branch_id": branch_id,
+                "employee_email": employee_email or None,
                 "date_from": date_from,
                 "date_to": date_to,
                 "records": rows,
             },
         ), 200
+
+    @app.route("/api/chat/list", methods=["GET"])
+    def api_chat_list():
+        user = _communication_request_user()
+        if not user:
+            return _communication_api_auth_failed_response()
+        feature_block = _require_communication_feature(user, "chat", "Chat")
+        if feature_block:
+            _log_communication_api_request(user, 403)
+            return feature_block
+        rooms = _chat_list_for_user(user, ensure_defaults=True)
+        _log_communication_api_request(user, 200)
+        return jsonify(ok=True, data=rooms), 200
+
+    @app.route("/api/chat/room/<int:room_id>", methods=["GET"])
+    def api_chat_room(room_id: int):
+        user = _communication_request_user()
+        if not user:
+            return _communication_api_auth_failed_response()
+        feature_block = _require_communication_feature(user, "chat", "Chat")
+        if feature_block:
+            _log_communication_api_request(user, 403)
+            return feature_block
+        messages = _chat_room_messages(room_id, user, mark_read=True)
+        if messages is None:
+            _log_communication_api_request(user, 404)
+            return jsonify(ok=False, message="Room chat tidak ditemukan."), 404
+        _log_audit_event(
+            "chat_room",
+            room_id,
+            "READ",
+            user,
+            "Room chat dibuka.",
+        )
+        _log_communication_api_request(user, 200)
+        return jsonify(ok=True, data=messages), 200
+
+    @app.route("/api/chat/send", methods=["POST"])
+    def api_chat_send():
+        user = _communication_request_user()
+        if not user:
+            return _communication_api_auth_failed_response()
+        feature_block = _require_communication_feature(user, "chat", "Chat")
+        if feature_block:
+            _log_communication_api_request(user, 403)
+            return feature_block
+        data = _get_json()
+        room_id_raw = data.get("room_id")
+        thread_id_raw = data.get("thread_id")
+        try:
+            room_id = int(room_id_raw or 0)
+        except (TypeError, ValueError):
+            return jsonify(ok=False, message="Room chat tidak valid."), 400
+        try:
+            thread_id = int(thread_id_raw or 0)
+        except (TypeError, ValueError):
+            thread_id = 0
+        try:
+            payload = _send_chat_message(user, room_id, data.get("message"), thread_id=thread_id or None)
+        except CommunicationRateLimitError as err:
+            _log_communication_api_request(user, 429)
+            return jsonify(ok=False, message=str(err)), 429
+        except ValueError as err:
+            _log_communication_api_request(user, 400)
+            return jsonify(ok=False, message=str(err)), 400
+        _log_communication_api_request(user, 200)
+        return jsonify(ok=True, data=payload, message="Pesan terkirim."), 200
+
+    @app.route("/api/chat/message/delete", methods=["POST"])
+    def api_chat_message_delete():
+        user = _communication_request_user()
+        if not user:
+            return _communication_api_auth_failed_response()
+        feature_block = _require_communication_feature(user, "chat", "Chat")
+        if feature_block:
+            _log_communication_api_request(user, 403)
+            return feature_block
+        data = _get_json()
+        try:
+            message_id = int(data.get("message_id") or 0)
+        except (TypeError, ValueError):
+            message_id = 0
+        if message_id <= 0:
+            _log_communication_api_request(user, 400)
+            return jsonify(ok=False, message="Pesan chat tidak valid."), 400
+        try:
+            _delete_chat_message(user, message_id)
+        except ValueError as err:
+            _log_communication_api_request(user, 400)
+            return jsonify(ok=False, message=str(err)), 400
+        _log_communication_api_request(user, 200)
+        return jsonify(ok=True, message="Pesan chat dihapus."), 200
+
+    @app.route("/api/announcement/list", methods=["GET"])
+    def api_announcement_list():
+        user = _communication_request_user()
+        if not user:
+            return _communication_api_auth_failed_response()
+        feature_block = _require_communication_feature(user, "announcement", "Announcement")
+        if feature_block:
+            _log_communication_api_request(user, 403)
+            return feature_block
+        include_all = user.role == "hr_superadmin" and request.args.get("all") in {"1", "true", "yes"}
+        rows = _list_announcements_for_user(user, include_all=include_all)
+        _log_communication_api_request(user, 200)
+        return jsonify(ok=True, data=rows), 200
+
+    @app.route("/api/announcement/create", methods=["POST"])
+    def api_announcement_create():
+        user = _communication_request_user()
+        if not user:
+            return _communication_api_auth_failed_response()
+        forbidden = _require_api_role(user, ADMIN_ROLES)
+        if forbidden:
+            _log_communication_api_request(user, 403)
+            return forbidden
+        feature_block = _require_communication_feature(user, "announcement", "Announcement")
+        if feature_block:
+            _log_communication_api_request(user, 403)
+            return feature_block
+        data = _get_json()
+        try:
+            announcement_id = _save_announcement(
+                title=data.get("title"),
+                message=data.get("message"),
+                target_type=data.get("target_type"),
+                target_id=data.get("target_id"),
+                actor=user,
+                expired_at=data.get("expired_at"),
+                is_mandatory=bool(data.get("is_mandatory")),
+            )
+        except ValueError as err:
+            _log_communication_api_request(user, 400)
+            return jsonify(ok=False, message=str(err)), 400
+        _log_communication_api_request(user, 200)
+        return jsonify(ok=True, message="Pengumuman dibuat.", data={"id": announcement_id}), 200
+
+    @app.route("/api/announcement/read", methods=["POST"])
+    def api_announcement_read():
+        user = _communication_request_user()
+        if not user:
+            return _communication_api_auth_failed_response()
+        feature_block = _require_communication_feature(user, "announcement", "Announcement")
+        if feature_block:
+            _log_communication_api_request(user, 403)
+            return feature_block
+        data = _get_json()
+        try:
+            announcement_id = int(data.get("announcement_id") or 0)
+        except (TypeError, ValueError):
+            announcement_id = 0
+        if announcement_id <= 0:
+            _log_communication_api_request(user, 400)
+            return jsonify(ok=False, message="Announcement tidak valid."), 400
+        _mark_announcement_read(user, announcement_id)
+        _log_communication_api_request(user, 200)
+        return jsonify(ok=True, message="Pengumuman ditandai dibaca."), 200
+
+    @app.route("/api/incident/list", methods=["GET"])
+    def api_incident_list():
+        user = _communication_request_user()
+        if not user:
+            return _communication_api_auth_failed_response()
+        feature_block = _require_communication_feature(user, "incident", "Incident")
+        if feature_block:
+            _log_communication_api_request(user, 403)
+            return feature_block
+        include_all = user.role in ADMIN_ROLES and request.args.get("all") in {"1", "true", "yes"}
+        rows = _list_incidents_for_user(user, include_all=include_all)
+        _log_communication_api_request(user, 200)
+        return jsonify(ok=True, data=rows), 200
+
+    @app.route("/api/incident/create", methods=["POST"])
+    def api_incident_create():
+        user = _communication_request_user()
+        if not user:
+            return _communication_api_auth_failed_response()
+        feature_block = _require_communication_feature(user, "incident", "Incident")
+        if feature_block:
+            _log_communication_api_request(user, 403)
+            return feature_block
+        title = (request.form.get("title") or "").strip()
+        description = (request.form.get("description") or "").strip()
+        photo_file = request.files.get("photo")
+        photo_path = None
+        config = _communication_client_config(_communication_client_id_for_user(user))
+        upload_limit = max(1, int(config["attachment_limit_mb"])) * 1024 * 1024
+        if photo_file and photo_file.filename:
+            try:
+                photo_path = _save_upload(photo_file, "uploads/incidents", upload_limit)
+            except ValueError as err:
+                _log_communication_api_request(user, 400)
+                return jsonify(ok=False, message=str(err)), 400
+        try:
+            payload = _save_incident(actor=user, title=title, description=description, photo_path=photo_path)
+        except CommunicationRateLimitError as err:
+            if photo_path:
+                _delete_uploaded_file(photo_path)
+            _log_communication_api_request(user, 429)
+            return jsonify(ok=False, message=str(err)), 429
+        except ValueError as err:
+            if photo_path:
+                _delete_uploaded_file(photo_path)
+            _log_communication_api_request(user, 400)
+            return jsonify(ok=False, message=str(err)), 400
+        _log_communication_api_request(user, 200)
+        return jsonify(ok=True, data=payload, message="Incident berhasil dilaporkan."), 200
+
+    @app.route("/api/chat/room/<int:room_id>/threads", methods=["GET"])
+    def api_chat_threads(room_id: int):
+        user = _communication_request_user()
+        if not user:
+            return _communication_api_auth_failed_response()
+        feature_block = _require_communication_feature(user, "thread", "Thread discussion")
+        if feature_block:
+            _log_communication_api_request(user, 403)
+            return feature_block
+        rows = _list_threads_for_room(room_id, user)
+        _log_communication_api_request(user, 200)
+        return jsonify(ok=True, data=rows), 200
+
+    @app.route("/api/chat/thread/create", methods=["POST"])
+    def api_chat_thread_create():
+        user = _communication_request_user()
+        if not user:
+            return _communication_api_auth_failed_response()
+        feature_block = _require_communication_feature(user, "thread", "Thread discussion")
+        if feature_block:
+            _log_communication_api_request(user, 403)
+            return feature_block
+        data = _get_json()
+        try:
+            room_id = int(data.get("room_id") or 0)
+        except (TypeError, ValueError):
+            room_id = 0
+        if room_id <= 0:
+            _log_communication_api_request(user, 400)
+            return jsonify(ok=False, message="Room thread tidak valid."), 400
+        conn = _db_connect()
+        try:
+            room = conn.execute("SELECT * FROM chat_rooms WHERE id = ?", (room_id,)).fetchone() if _table_exists(conn, "chat_rooms") else None
+        finally:
+            conn.close()
+        if not room or not _user_can_access_chat_room(user, room):
+            _log_communication_api_request(user, 404)
+            return jsonify(ok=False, message="Room chat tidak ditemukan."), 404
+        try:
+            thread_id = _create_thread(room_id=room_id, title=data.get("title"), actor=user)
+        except ValueError as err:
+            _log_communication_api_request(user, 400)
+            return jsonify(ok=False, message=str(err)), 400
+        _log_communication_api_request(user, 200)
+        return jsonify(ok=True, data={"id": thread_id}, message="Thread dibuat."), 200
+
+    @app.route("/api/chat/thread/reply", methods=["POST"])
+    def api_chat_thread_reply():
+        user = _communication_request_user()
+        if not user:
+            return _communication_api_auth_failed_response()
+        feature_block = _require_communication_feature(user, "thread", "Thread discussion")
+        if feature_block:
+            _log_communication_api_request(user, 403)
+            return feature_block
+        data = _get_json()
+        try:
+            room_id = int(data.get("room_id") or 0)
+            thread_id = int(data.get("thread_id") or 0)
+        except (TypeError, ValueError):
+            room_id = 0
+            thread_id = 0
+        if room_id <= 0 or thread_id <= 0:
+            _log_communication_api_request(user, 400)
+            return jsonify(ok=False, message="Thread reply tidak valid."), 400
+        try:
+            payload = _send_chat_message(user, room_id, data.get("message"), thread_id=thread_id)
+        except CommunicationRateLimitError as err:
+            _log_communication_api_request(user, 429)
+            return jsonify(ok=False, message=str(err)), 429
+        except ValueError as err:
+            _log_communication_api_request(user, 400)
+            return jsonify(ok=False, message=str(err)), 400
+        _log_communication_api_request(user, 200)
+        return jsonify(ok=True, data=payload, message="Balasan thread terkirim."), 200
+
+    @app.route("/api/chat/thread/lock", methods=["POST"])
+    def api_chat_thread_lock():
+        user = _communication_request_user()
+        if not user:
+            return _communication_api_auth_failed_response()
+        forbidden = _require_api_role(user, ADMIN_ROLES)
+        if forbidden:
+            _log_communication_api_request(user, 403)
+            return forbidden
+        feature_block = _require_communication_feature(user, "thread", "Thread discussion")
+        if feature_block:
+            _log_communication_api_request(user, 403)
+            return feature_block
+        data = _get_json()
+        try:
+            thread_id = int(data.get("thread_id") or 0)
+        except (TypeError, ValueError):
+            thread_id = 0
+        if thread_id <= 0:
+            _log_communication_api_request(user, 400)
+            return jsonify(ok=False, message="Thread tidak valid."), 400
+        conn = _db_connect()
+        try:
+            if not _table_exists(conn, "threads"):
+                _log_communication_api_request(user, 400)
+                return jsonify(ok=False, message="Thread belum tersedia."), 400
+            row = conn.execute("SELECT id, chat_room_id FROM threads WHERE id = ?", (thread_id,)).fetchone()
+            if not row:
+                _log_communication_api_request(user, 404)
+                return jsonify(ok=False, message="Thread tidak ditemukan."), 404
+            conn.execute("UPDATE threads SET is_locked = 1 WHERE id = ?", (thread_id,))
+            room_id = int(row["chat_room_id"])
+        finally:
+            conn.commit()
+            conn.close()
+        _log_audit_event("thread", thread_id, "LOCK", user, "Thread komunikasi dikunci.", {"chat_room_id": room_id})
+        _log_communication_api_request(user, 200)
+        return jsonify(ok=True, message="Thread dikunci."), 200
 
     @app.route("/api/patrol/start", methods=["POST"])
     def patrol_start():
@@ -4832,9 +5214,15 @@ ADDON_PAYROLL_PLUS = "payroll_plus"
 ADDON_AI = "ai"
 ADDON_PATROL_OPS = "patrol_ops"
 ADDON_ENTERPRISE_TIER = "enterprise_tier"
+ADDON_HRIS_PRO = "hris_pro"
+ADDON_HRIS_PRO_PLUS = "hris_pro_plus"
 ADDON_BILLING_ENGINE = "billing_engine"
 ADDON_CONTRACT_MANAGEMENT = "contract_management"
 ADDON_SLA_TRACKING = "sla_tracking"
+ADDON_COMMUNICATION_CHAT = "communication_chat"
+ADDON_COMMUNICATION_ANNOUNCEMENT = "communication_announcement"
+ADDON_COMMUNICATION_INCIDENT = "communication_incident"
+ADDON_COMMUNICATION_API = "communication_api"
 ADDON_ALLOWED = {
     ADDON_PATROL,
     ADDON_CALENDAR,
@@ -4844,25 +5232,49 @@ ADDON_ALLOWED = {
     ADDON_AI,
     ADDON_PATROL_OPS,
     ADDON_ENTERPRISE_TIER,
+    ADDON_HRIS_PRO,
+    ADDON_HRIS_PRO_PLUS,
     ADDON_BILLING_ENGINE,
     ADDON_CONTRACT_MANAGEMENT,
     ADDON_SLA_TRACKING,
+    ADDON_COMMUNICATION_CHAT,
+    ADDON_COMMUNICATION_ANNOUNCEMENT,
+    ADDON_COMMUNICATION_INCIDENT,
+    ADDON_COMMUNICATION_API,
 }
 ADDON_OWNER_ORDER = (
+    ADDON_ENTERPRISE_TIER,
+    ADDON_HRIS_PRO,
+    ADDON_HRIS_PRO_PLUS,
     ADDON_PATROL,
     ADDON_PATROL_OPS,
     ADDON_CALENDAR,
     ADDON_REPORTING_ADVANCED,
     ADDON_API_ACCESS,
+    ADDON_COMMUNICATION_CHAT,
+    ADDON_COMMUNICATION_ANNOUNCEMENT,
+    ADDON_COMMUNICATION_INCIDENT,
+    ADDON_COMMUNICATION_API,
     ADDON_PAYROLL_PLUS,
     ADDON_AI,
     ADDON_BILLING_ENGINE,
     ADDON_CONTRACT_MANAGEMENT,
     ADDON_SLA_TRACKING,
-    ADDON_ENTERPRISE_TIER,
 )
-ADDON_ENTERPRISE_EXCLUDED = {ADDON_REPORTING_ADVANCED, ADDON_API_ACCESS}
-ADDON_ENTERPRISE_AUTO_ENABLED = set(ADDON_OWNER_ORDER) - ADDON_ENTERPRISE_EXCLUDED
+ADDON_OWNER_MODE_KEYS = {ADDON_ENTERPRISE_TIER, ADDON_HRIS_PRO, ADDON_HRIS_PRO_PLUS}
+ADDON_ENTERPRISE_AUTO_ENABLED = {
+    addon for addon in ADDON_OWNER_ORDER if addon not in ADDON_OWNER_MODE_KEYS
+}
+ADDON_PRO_AUTO_DISABLED = ADDON_ENTERPRISE_AUTO_ENABLED.copy()
+OWNER_SUITE_PRO = "pro"
+OWNER_SUITE_PRO_PLUS = "pro_plus"
+OWNER_SUITE_ENTERPRISE = "enterprise"
+COMMUNICATION_MESSAGE_WINDOW_SECONDS = 60
+COMMUNICATION_MESSAGE_LIMIT_PER_WINDOW = 8
+COMMUNICATION_DUPLICATE_WINDOW_SECONDS = 20
+COMMUNICATION_INCIDENT_UPLOAD_LIMIT = 5 * 1024 * 1024
+COMMUNICATION_DEFAULT_MESSAGE_LIMIT_PER_DAY = 300
+COMMUNICATION_DEFAULT_ATTACHMENT_LIMIT_MB = 5
 ADDON_FEATURE_ALIASES = {
     "patrol": ADDON_PATROL,
     "guard_tour": ADDON_PATROL,
@@ -4883,12 +5295,20 @@ ADDON_FEATURE_ALIASES = {
     "ai": ADDON_AI,
     "enterprise": ADDON_ENTERPRISE_TIER,
     "enterprise_tier": ADDON_ENTERPRISE_TIER,
+    "hris_pro": ADDON_HRIS_PRO,
+    "pro": ADDON_HRIS_PRO,
+    "hris_pro_plus": ADDON_HRIS_PRO_PLUS,
+    "pro_plus": ADDON_HRIS_PRO_PLUS,
     "billing": ADDON_BILLING_ENGINE,
     "billing_engine": ADDON_BILLING_ENGINE,
     "contract": ADDON_CONTRACT_MANAGEMENT,
     "contract_management": ADDON_CONTRACT_MANAGEMENT,
     "sla": ADDON_SLA_TRACKING,
     "sla_tracking": ADDON_SLA_TRACKING,
+    "communication_chat": ADDON_COMMUNICATION_CHAT,
+    "communication_announcement": ADDON_COMMUNICATION_ANNOUNCEMENT,
+    "communication_incident": ADDON_COMMUNICATION_INCIDENT,
+    "communication_api": ADDON_COMMUNICATION_API,
 }
 CLIENT_PACKAGE_BASIC = "BASIC"
 CLIENT_PACKAGE_PRO = "PRO"
@@ -4898,6 +5318,7 @@ CLIENT_ADDON_OPTIONS = {
     ADDON_BILLING_ENGINE: "Billing Engine",
     ADDON_CONTRACT_MANAGEMENT: "Contract Management",
     ADDON_SLA_TRACKING: "SLA Tracking",
+    ADDON_API_ACCESS: "API access",
 }
 BILLING_TYPE_PER_HEAD = "PER_HEAD"
 BILLING_TYPE_PER_SITE = "PER_SITE"
@@ -4971,6 +5392,10 @@ class DuplicateSubmissionError(ValueError):
     pass
 
 
+class CommunicationRateLimitError(ValueError):
+    pass
+
+
 def _persist_user(user: User) -> None:
     session["user"] = {
         "id": user.id,
@@ -5029,28 +5454,58 @@ def _current_user() -> User | None:
 
 
 def _api_v1_user() -> User | None:
+    g.api_access_auth = None
     user = _current_user()
     if user:
+        g.api_access_auth = {"auth_type": "session", "client_id": user.client_id, "site_id": user.site_id}
         return user
-    if not API_ACCESS_TOKEN:
-        return None
     raw_token = (request.headers.get("X-API-Key") or "").strip()
     auth_header = (request.headers.get("Authorization") or "").strip()
     if not raw_token and auth_header.lower().startswith("bearer "):
         raw_token = auth_header[7:].strip()
-    if not raw_token or not hmac.compare_digest(raw_token, API_ACCESS_TOKEN):
+    if not raw_token:
+        return None
+    token_row = _api_access_token_lookup(raw_token)
+    branch_id_raw = (request.args.get("branch_id") or request.args.get("site_id") or "").strip()
+    resolved_site_id = int(branch_id_raw) if branch_id_raw.isdigit() and int(branch_id_raw) > 0 else None
+    if token_row:
+        token_client_id = int(token_row["client_id"])
+        g.api_access_auth = {
+            "auth_type": "token",
+            "token_id": int(token_row["id"]),
+            "token_row": token_row,
+            "client_id": token_client_id,
+            "site_id": resolved_site_id,
+        }
+        return User(
+            id=0,
+            email=f"api-client-{token_client_id}@system.local",
+            role="client_admin",
+            name=token_row.get("label") or "API Access",
+            tier="enterprise",
+            client_id=token_client_id,
+            site_id=None,
+        )
+    if not API_ACCESS_TOKEN or not hmac.compare_digest(raw_token, API_ACCESS_TOKEN):
         return None
     client_id_raw = (request.args.get("client_id") or "").strip()
-    branch_id_raw = (request.args.get("branch_id") or request.args.get("site_id") or "").strip()
+    legacy_client_id = int(client_id_raw) if client_id_raw.isdigit() and int(client_id_raw) > 0 else None
+    g.api_access_auth = {"auth_type": "legacy_token", "client_id": legacy_client_id, "site_id": resolved_site_id}
     return User(
         id=0,
         email="api@system.local",
         role="hr_superadmin",
         name="API Access",
         tier="enterprise",
-        client_id=int(client_id_raw) if client_id_raw.isdigit() and int(client_id_raw) > 0 else None,
-        site_id=int(branch_id_raw) if branch_id_raw.isdigit() and int(branch_id_raw) > 0 else None,
+        client_id=legacy_client_id,
+        site_id=None,
     )
+
+
+def _api_v1_token_supplied() -> bool:
+    raw_token = (request.headers.get("X-API-Key") or "").strip()
+    auth_header = (request.headers.get("Authorization") or "").strip()
+    return bool(raw_token or auth_header.lower().startswith("bearer "))
 
 
 def _require_role(user: User | None, allowed_roles: set[str]) -> None:
@@ -6927,6 +7382,1646 @@ def _hash_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
+def _api_access_owner_enabled() -> bool:
+    return ADDON_API_ACCESS in _global_addons()
+
+
+def _api_access_generate_token_value() -> str:
+    return f"gmi_{secrets.token_urlsafe(API_ACCESS_TOKEN_BYTES)}"
+
+
+def _api_access_token_prefix(token: str) -> str:
+    return token[:API_ACCESS_TOKEN_PREFIX_LENGTH]
+
+
+def _mask_token_prefix(prefix: str | None) -> str:
+    safe_prefix = (prefix or "").strip()
+    return f"{safe_prefix}..." if safe_prefix else "-"
+
+
+def _api_access_last_flash_tokens() -> dict[int, dict]:
+    payload = session.pop("api_access_generated_tokens", None) if has_request_context() else None
+    if not isinstance(payload, dict):
+        return {}
+    normalized: dict[int, dict] = {}
+    for key, value in payload.items():
+        if not str(key).isdigit() or not isinstance(value, dict):
+            continue
+        normalized[int(key)] = value
+    return normalized
+
+
+def _store_api_access_flash_token(client_id: int, token_info: dict) -> None:
+    if not has_request_context():
+        return
+    payload = session.get("api_access_generated_tokens")
+    if not isinstance(payload, dict):
+        payload = {}
+    payload[str(client_id)] = token_info
+    session["api_access_generated_tokens"] = payload
+
+
+def _list_api_client_tokens(client_id: int | None, include_revoked: bool = False) -> list[dict]:
+    if not client_id:
+        return []
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "api_client_tokens"):
+            return []
+        sql = """
+            SELECT id, client_id, label, token_prefix, created_at, updated_at,
+                   last_used_at, revoked_at, created_by_user_id, revoked_by_user_id
+            FROM api_client_tokens
+            WHERE client_id = ?
+        """
+        params: list[object] = [client_id]
+        if not include_revoked:
+            sql += " AND revoked_at IS NULL"
+        sql += " ORDER BY revoked_at IS NULL DESC, created_at DESC, id DESC"
+        rows = [dict(row) for row in conn.execute(sql, tuple(params)).fetchall()]
+        for row in rows:
+            row["masked_token"] = _mask_token_prefix(row.get("token_prefix"))
+        return rows
+    finally:
+        conn.close()
+
+
+def _generate_client_api_token(client_id: int, label: str, actor: User | None = None) -> tuple[dict, str]:
+    token = _api_access_generate_token_value()
+    token_hash = _hash_token(token)
+    now = _now_ts()
+    clean_label = (label or "").strip() or "ERP Integration"
+    token_prefix = _api_access_token_prefix(token)
+    conn = _db_connect()
+    try:
+        cur = conn.execute(
+            """
+            INSERT INTO api_client_tokens (
+                client_id, label, token_hash, token_prefix,
+                created_at, updated_at, created_by_user_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (client_id, clean_label[:120], token_hash, token_prefix, now, now, actor.id if actor else None),
+        )
+        token_id = int(cur.lastrowid or 0)
+    finally:
+        conn.commit()
+        conn.close()
+    token_row = {
+        "id": token_id,
+        "client_id": client_id,
+        "label": clean_label[:120],
+        "token_prefix": token_prefix,
+        "masked_token": _mask_token_prefix(token_prefix),
+        "created_at": now,
+        "updated_at": now,
+        "last_used_at": None,
+        "revoked_at": None,
+        "created_by_user_id": actor.id if actor else None,
+        "revoked_by_user_id": None,
+    }
+    return token_row, token
+
+
+def _revoke_client_api_token(token_id: int, actor: User | None = None, client_id: int | None = None) -> dict | None:
+    if token_id <= 0:
+        return None
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "api_client_tokens"):
+            return None
+        params: list[object] = [token_id]
+        sql = """
+            SELECT id, client_id, label, token_prefix, created_at, updated_at,
+                   last_used_at, revoked_at, created_by_user_id, revoked_by_user_id
+            FROM api_client_tokens
+            WHERE id = ?
+        """
+        if client_id:
+            sql += " AND client_id = ?"
+            params.append(client_id)
+        row = conn.execute(sql, tuple(params)).fetchone()
+        if not row or _row_get(row, "revoked_at"):
+            return None
+        now = _now_ts()
+        conn.execute(
+            """
+            UPDATE api_client_tokens
+            SET revoked_at = ?, updated_at = ?, revoked_by_user_id = ?
+            WHERE id = ?
+            """,
+            (now, now, actor.id if actor else None, token_id),
+        )
+        revoked = dict(row)
+        revoked["revoked_at"] = now
+        revoked["updated_at"] = now
+        revoked["revoked_by_user_id"] = actor.id if actor else None
+        revoked["masked_token"] = _mask_token_prefix(revoked.get("token_prefix"))
+        return revoked
+    finally:
+        conn.commit()
+        conn.close()
+
+
+def _api_access_token_lookup(raw_token: str) -> dict | None:
+    token_hash = _hash_token(raw_token)
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "api_client_tokens"):
+            return None
+        row = conn.execute(
+            """
+            SELECT id, client_id, label, token_prefix, created_at, updated_at,
+                   last_used_at, revoked_at, created_by_user_id, revoked_by_user_id
+            FROM api_client_tokens
+            WHERE token_hash = ? AND revoked_at IS NULL
+            LIMIT 1
+            """,
+            (token_hash,),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def _touch_api_access_token(token_id: int) -> None:
+    if token_id <= 0:
+        return
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "api_client_tokens"):
+            return
+        conn.execute(
+            "UPDATE api_client_tokens SET last_used_at = ?, updated_at = ? WHERE id = ?",
+            (_now_ts(), _now_ts(), token_id),
+        )
+    finally:
+        conn.commit()
+        conn.close()
+
+
+def _api_access_usage_count(client_id: int | None, token_id: int | None = None, since_at: str | None = None) -> int:
+    if not client_id:
+        return 0
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "api_access_logs"):
+            return 0
+        sql = "SELECT COUNT(*) AS total FROM api_access_logs WHERE client_id = ?"
+        params: list[object] = [client_id]
+        if token_id:
+            sql += " AND token_id = ?"
+            params.append(token_id)
+        if since_at:
+            sql += " AND created_at >= ?"
+            params.append(since_at)
+        row = conn.execute(sql, tuple(params)).fetchone()
+        return int(_row_get(row, "total", 0) or 0)
+    finally:
+        conn.close()
+
+
+def _api_access_rate_state(client_id: int | None, token_id: int | None = None) -> dict:
+    since_at = f"{_today_key()} 00:00:00"
+    client_total = _api_access_usage_count(client_id, since_at=since_at)
+    token_total = _api_access_usage_count(client_id, token_id=token_id, since_at=since_at) if token_id else 0
+    client_warning = max(1, math.ceil(API_ACCESS_DAILY_LIMIT_PER_CLIENT * API_ACCESS_LIMIT_WARNING_RATIO))
+    token_warning = max(1, math.ceil(API_ACCESS_DAILY_LIMIT_PER_TOKEN * API_ACCESS_LIMIT_WARNING_RATIO))
+    return {
+        "since_at": since_at,
+        "client_total": client_total,
+        "client_limit": API_ACCESS_DAILY_LIMIT_PER_CLIENT,
+        "client_warning": client_total >= client_warning,
+        "client_blocked": client_total >= API_ACCESS_DAILY_LIMIT_PER_CLIENT,
+        "token_total": token_total,
+        "token_limit": API_ACCESS_DAILY_LIMIT_PER_TOKEN,
+        "token_warning": bool(token_id) and token_total >= token_warning,
+        "token_blocked": bool(token_id) and token_total >= API_ACCESS_DAILY_LIMIT_PER_TOKEN,
+    }
+
+
+def _api_access_log_filters(date_from_raw: str | None, date_to_raw: str | None) -> dict:
+    date_from = _normalize_date_input(date_from_raw)
+    date_to = _normalize_date_input(date_to_raw)
+    valid = True
+    message = ""
+    if (date_from_raw and not date_from) or (date_to_raw and not date_to):
+        valid = False
+        message = "Filter tanggal API access tidak valid."
+    elif date_from and date_to and date_from > date_to:
+        valid = False
+        message = "Filter tanggal API access tidak valid. Tanggal awal harus sebelum tanggal akhir."
+    if not date_from and not date_to:
+        date_to = _today_key()
+        date_from = (datetime.strptime(date_to, "%Y-%m-%d") - timedelta(days=6)).strftime("%Y-%m-%d")
+    elif date_from and not date_to:
+        date_to = date_from
+    elif date_to and not date_from:
+        date_from = date_to
+    return {
+        "date_from_raw": (date_from_raw or "").strip(),
+        "date_to_raw": (date_to_raw or "").strip(),
+        "date_from": date_from,
+        "date_to": date_to,
+        "valid": valid,
+        "message": message,
+    }
+
+
+def _log_api_access_request(
+    client_id: int | None,
+    endpoint: str,
+    http_method: str,
+    status_code: int,
+    *,
+    token_row: dict | None = None,
+    actor: User | None = None,
+    branch_id: int | None = None,
+) -> None:
+    if not client_id:
+        return
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "api_access_logs"):
+            return
+        token_id = int(token_row.get("id") or 0) if token_row else None
+        token_label = (token_row.get("label") or "").strip() if token_row else ""
+        actor_type = "token" if token_row else ("session" if actor else "legacy_token")
+        conn.execute(
+            """
+            INSERT INTO api_access_logs (
+                client_id, token_id, token_label, endpoint, http_method,
+                status_code, actor_type, actor_email, branch_id, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                client_id,
+                token_id,
+                token_label or None,
+                endpoint,
+                http_method.upper(),
+                status_code,
+                actor_type,
+                actor.email if actor else None,
+                branch_id,
+                _now_ts(),
+            ),
+        )
+    finally:
+        conn.commit()
+        conn.close()
+
+
+def _api_access_dashboard_summary(client_id: int | None, log_filters: dict | None = None) -> dict:
+    filters = log_filters or _api_access_log_filters(None, None)
+    tokens = _list_api_client_tokens(client_id, include_revoked=True)
+    active_tokens = [token for token in tokens if not token.get("revoked_at")]
+    summary = {
+        "owner_enabled": _api_access_owner_enabled(),
+        "client_enabled": bool(client_id and ADDON_API_ACCESS in _list_client_addons(client_id)),
+        "token_count": len(active_tokens),
+        "tokens": tokens,
+        "last_call": None,
+        "top_endpoint": None,
+        "recent_logs": [],
+        "rate_limit": _api_access_rate_state(client_id),
+        "warnings": [],
+        "log_filters": filters,
+    }
+    if not client_id:
+        return summary
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "api_access_logs"):
+            return summary
+        where = ["client_id = ?"]
+        params: list[object] = [client_id]
+        if filters.get("valid") and filters.get("date_from") and filters.get("date_to"):
+            where.append("created_at >= ?")
+            where.append("created_at <= ?")
+            params.append(f"{filters['date_from']} 00:00:00")
+            params.append(f"{filters['date_to']} 23:59:59")
+        where_sql = " AND ".join(where)
+        last_row = conn.execute(
+            f"""
+            SELECT endpoint, http_method, status_code, token_label, created_at, branch_id
+            FROM api_access_logs
+            WHERE {where_sql}
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1
+            """,
+            tuple(params),
+        ).fetchone()
+        if last_row:
+            summary["last_call"] = dict(last_row)
+        top_row = conn.execute(
+            f"""
+            SELECT endpoint, COUNT(*) AS total
+            FROM api_access_logs
+            WHERE {where_sql}
+            GROUP BY endpoint
+            ORDER BY total DESC, endpoint ASC
+            LIMIT 1
+            """,
+            tuple(params),
+        ).fetchone()
+        if top_row:
+            summary["top_endpoint"] = dict(top_row)
+        summary["recent_logs"] = [
+            dict(row)
+            for row in conn.execute(
+                f"""
+                SELECT endpoint, http_method, status_code, token_label, created_at
+                FROM api_access_logs
+                WHERE {where_sql}
+                ORDER BY created_at DESC, id DESC
+                LIMIT 5
+                """,
+                tuple(params),
+            ).fetchall()
+        ]
+    finally:
+        conn.close()
+    rate = summary["rate_limit"]
+    if not summary["owner_enabled"]:
+        summary["warnings"].append("Owner/global API access masih nonaktif.")
+    if summary["owner_enabled"] and not summary["client_enabled"]:
+        summary["warnings"].append("API access belum aktif pada subscription client ini.")
+    if tokens and not summary["client_enabled"]:
+        summary["warnings"].append("Token yang masih aktif tidak bisa dipakai sampai API access pada client diaktifkan kembali.")
+    if not active_tokens:
+        summary["warnings"].append("Belum ada token aktif untuk integrasi.")
+    if rate["client_blocked"]:
+        summary["warnings"].append("Quota harian client sudah mencapai limit.")
+    elif rate["client_warning"]:
+        summary["warnings"].append("Pemakaian API client mendekati limit harian.")
+    if rate["token_blocked"]:
+        summary["warnings"].append("Salah satu token sudah mencapai limit harian.")
+    elif rate["token_warning"]:
+        summary["warnings"].append("Pemakaian token mendekati limit harian.")
+    return summary
+
+
+def _sanitize_communication_text(value: object, *, max_length: int = 1000) -> str:
+    text = re.sub(r"\s+", " ", str(value or "").strip())
+    if len(text) > max_length:
+        text = text[:max_length].rstrip()
+    return text
+
+
+def _communication_window_start(seconds: int) -> str:
+    return (datetime.now() - timedelta(seconds=max(1, seconds))).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _communication_owner_feature_enabled(feature: str) -> bool:
+    feature_key = _normalize_addon_key(feature)
+    return feature_key in _global_addons()
+
+
+def _communication_tier_rank(value: str | None) -> int:
+    mapping = {"basic": 1, "pro": 2, "enterprise": 3}
+    return mapping.get(_normalize_user_tier(value), 1)
+
+
+def _communication_tier_cap(requested: str | None, maximum: str | None) -> str:
+    requested_tier = _normalize_user_tier(requested)
+    maximum_tier = _normalize_user_tier(maximum or "basic")
+    if _communication_tier_rank(requested_tier) <= _communication_tier_rank(maximum_tier):
+        return requested_tier
+    return maximum_tier
+
+
+def _communication_owner_policy() -> dict:
+    chat_enabled = _communication_owner_feature_enabled(ADDON_COMMUNICATION_CHAT)
+    announcement_enabled = chat_enabled and _communication_owner_feature_enabled(ADDON_COMMUNICATION_ANNOUNCEMENT)
+    incident_enabled = announcement_enabled and _communication_owner_feature_enabled(ADDON_COMMUNICATION_INCIDENT)
+    if incident_enabled:
+        max_tier = "enterprise"
+    elif announcement_enabled:
+        max_tier = "pro"
+    elif chat_enabled:
+        max_tier = "basic"
+    else:
+        max_tier = "basic"
+    return {
+        "chat_enabled": chat_enabled,
+        "announcement_enabled": announcement_enabled,
+        "incident_enabled": incident_enabled,
+        "api_enabled": _communication_owner_feature_enabled(ADDON_COMMUNICATION_API) and _api_access_owner_enabled(),
+        "max_tier": max_tier,
+    }
+
+
+def _communication_client_config(client_id: int | None) -> dict:
+    owner_policy = _communication_owner_policy()
+    config = {
+        "enabled": False,
+        "tier": "basic",
+        "message_limit_per_day": COMMUNICATION_DEFAULT_MESSAGE_LIMIT_PER_DAY,
+        "attachment_limit_mb": COMMUNICATION_DEFAULT_ATTACHMENT_LIMIT_MB,
+        "raw_enabled": False,
+        "raw_tier": "basic",
+        "owner_chat_enabled": owner_policy["chat_enabled"],
+        "owner_announcement_enabled": owner_policy["announcement_enabled"],
+        "owner_incident_enabled": owner_policy["incident_enabled"],
+        "owner_api_enabled": owner_policy["api_enabled"],
+        "owner_max_tier": owner_policy["max_tier"],
+    }
+    if not client_id:
+        return config
+    client = _get_client_by_id(client_id)
+    if not client:
+        return config
+    config["raw_enabled"] = bool(int(_row_get(client, "communication_enabled", 0) or 0))
+    config["raw_tier"] = _normalize_user_tier(str(_row_get(client, "communication_tier", "basic") or "basic"))
+    try:
+        config["message_limit_per_day"] = max(1, int(_row_get(client, "communication_message_limit_per_day", COMMUNICATION_DEFAULT_MESSAGE_LIMIT_PER_DAY) or COMMUNICATION_DEFAULT_MESSAGE_LIMIT_PER_DAY))
+    except (TypeError, ValueError):
+        config["message_limit_per_day"] = COMMUNICATION_DEFAULT_MESSAGE_LIMIT_PER_DAY
+    try:
+        config["attachment_limit_mb"] = max(1, int(_row_get(client, "communication_attachment_limit_mb", COMMUNICATION_DEFAULT_ATTACHMENT_LIMIT_MB) or COMMUNICATION_DEFAULT_ATTACHMENT_LIMIT_MB))
+    except (TypeError, ValueError):
+        config["attachment_limit_mb"] = COMMUNICATION_DEFAULT_ATTACHMENT_LIMIT_MB
+    config["enabled"] = bool(config["raw_enabled"] and owner_policy["chat_enabled"])
+    config["tier"] = _communication_tier_cap(config["raw_tier"], owner_policy["max_tier"]) if config["enabled"] else "basic"
+    return config
+
+
+def _set_communication_client_config(
+    client_id: int,
+    *,
+    enabled: bool,
+    tier: str,
+    message_limit_per_day: int,
+    attachment_limit_mb: int,
+) -> dict:
+    owner_policy = _communication_owner_policy()
+    clean_tier = _communication_tier_cap(tier, owner_policy["max_tier"])
+    limit_day = max(1, int(message_limit_per_day or COMMUNICATION_DEFAULT_MESSAGE_LIMIT_PER_DAY))
+    limit_attachment = max(1, int(attachment_limit_mb or COMMUNICATION_DEFAULT_ATTACHMENT_LIMIT_MB))
+    effective_enabled = bool(enabled and owner_policy["chat_enabled"])
+    conn = _db_connect()
+    try:
+        conn.execute(
+            """
+            UPDATE clients
+            SET communication_enabled = ?,
+                communication_tier = ?,
+                communication_message_limit_per_day = ?,
+                communication_attachment_limit_mb = ?,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (1 if effective_enabled else 0, clean_tier, limit_day, limit_attachment, _now_ts(), client_id),
+        )
+    finally:
+        conn.commit()
+        conn.close()
+    return _communication_client_config(client_id)
+
+
+def _communication_feature_available(user: User | None, feature: str, client_id: int | None = None) -> bool:
+    if not user:
+        return False
+    feature_key = _normalize_addon_key(feature)
+    if user.role == "hr_superadmin":
+        return True
+    owner_map = {
+        "chat": ADDON_COMMUNICATION_CHAT,
+        "announcement": ADDON_COMMUNICATION_ANNOUNCEMENT,
+        "incident": ADDON_COMMUNICATION_INCIDENT,
+        "thread": ADDON_COMMUNICATION_INCIDENT,
+        "api": ADDON_COMMUNICATION_API,
+    }
+    owner_key = owner_map.get(feature_key)
+    if owner_key and not _communication_owner_feature_enabled(owner_key):
+        return False
+    resolved_client_id = client_id or _communication_client_id_for_user(user)
+    if user.role in {"manager_operational", "admin_asistent"} and not resolved_client_id:
+        return True
+    config = _communication_client_config(resolved_client_id)
+    if not config["enabled"]:
+        return False
+    tier = config["tier"]
+    if feature_key == "chat":
+        return True
+    if feature_key == "announcement":
+        return tier in {"pro", "enterprise"}
+    if feature_key in {"incident", "thread"}:
+        return tier == "enterprise"
+    if feature_key == "api":
+        return (
+            _api_access_owner_enabled()
+            and resolved_client_id is not None
+            and ADDON_API_ACCESS in _list_client_addons(resolved_client_id)
+        )
+    return False
+
+
+def _communication_feature_forbidden_response(feature_label: str):
+    return jsonify(ok=False, message=f"{feature_label} belum aktif untuk client atau tier komunikasi saat ini."), 403
+
+
+def _require_communication_feature(user: User | None, feature: str, feature_label: str, client_id: int | None = None):
+    if not user:
+        return _json_forbidden()
+    if not _communication_feature_available(user, feature, client_id):
+        return _communication_feature_forbidden_response(feature_label)
+    return None
+
+
+def _communication_request_user() -> User | None:
+    user = _current_user()
+    if user:
+        return user
+    return _api_v1_user()
+
+
+def _communication_api_auth_failed_response():
+    if _api_v1_token_supplied():
+        return jsonify(ok=False, message="Token API komunikasi tidak valid."), 401
+    return _json_forbidden()
+
+
+def _communication_api_scope_client_id(user: User | None, client_id: int | None = None) -> int | None:
+    if client_id:
+        return client_id
+    if user and user.client_id:
+        return int(user.client_id)
+    return _communication_client_id_for_user(user)
+
+
+def _log_communication_api_request(user: User | None, status_code: int, client_id: int | None = None) -> None:
+    auth_context = getattr(g, "api_access_auth", {}) if isinstance(getattr(g, "api_access_auth", None), dict) else {}
+    if auth_context.get("auth_type") not in {"token", "legacy_token"}:
+        return
+    scoped_client_id = _communication_api_scope_client_id(user, client_id)
+    _log_api_access_request(
+        scoped_client_id,
+        request.path,
+        request.method,
+        status_code,
+        token_row=auth_context.get("token_row"),
+        actor=user if user and user.id else None,
+        branch_id=user.site_id if user else None,
+    )
+
+
+def _communication_incident_room_name(incident_id: int, title: str) -> str:
+    return f"Incident #{incident_id}: {_sanitize_communication_text(title, max_length=80) or 'Untitled'}"
+
+
+def _communication_incident_visibility_clause(user: User | None, alias: str = "i") -> tuple[str | None, tuple]:
+    if not user:
+        return "1 = 0", ()
+    if user.role == "hr_superadmin":
+        return None, ()
+    if user.role in {"manager_operational", "admin_asistent"}:
+        return None, ()
+    email_key = (user.email or "").strip().lower()
+    site_id = _communication_site_id_for_user(user)
+    client_id = _communication_client_id_for_user(user)
+    supervisor_site_ids = sorted(_get_supervisor_site_ids(user.id))
+    if user.role in EMPLOYEE_ROLES:
+        return (f"{alias}.created_by = ?", (email_key,))
+    if user.role in CLIENT_ROLES:
+        return f"{alias}.client_id = ?", (int(client_id or 0),)
+    if supervisor_site_ids:
+        placeholders = ",".join("?" for _ in supervisor_site_ids)
+        return f"{alias}.site_id IN ({placeholders})", tuple(supervisor_site_ids)
+    if client_id:
+        return f"{alias}.client_id = ?", (int(client_id),)
+    return "1 = 0", ()
+
+
+def _communication_message_rate_guard(user: User | None, room_id: int, clean_message: str) -> None:
+    sender_email = (user.email if user else "").strip().lower()
+    if not sender_email:
+        raise ValueError("Pengirim chat tidak valid.")
+    conn = _db_connect()
+    try:
+        client_config = _communication_client_config(_communication_client_id_for_user(user))
+        daily_total = conn.execute(
+            """
+            SELECT COUNT(*) AS total
+            FROM messages
+            WHERE lower(sender_email) = ?
+              AND created_at >= ?
+            """,
+            (sender_email, f"{_today_key()} 00:00:00"),
+        ).fetchone()
+        if int(_row_get(daily_total, "total", 0) or 0) >= int(client_config["message_limit_per_day"]):
+            raise CommunicationRateLimitError("Limit pesan harian komunikasi sudah tercapai.")
+        recent_window = _communication_window_start(COMMUNICATION_MESSAGE_WINDOW_SECONDS)
+        recent_count = conn.execute(
+            """
+            SELECT COUNT(*) AS total
+            FROM messages
+            WHERE lower(sender_email) = ?
+              AND created_at >= ?
+            """,
+            (sender_email, recent_window),
+        ).fetchone()
+        if int(_row_get(recent_count, "total", 0) or 0) >= COMMUNICATION_MESSAGE_LIMIT_PER_WINDOW:
+            raise CommunicationRateLimitError("Terlalu banyak pesan dalam waktu singkat. Coba lagi sebentar.")
+        duplicate_window = _communication_window_start(COMMUNICATION_DUPLICATE_WINDOW_SECONDS)
+        duplicate_row = conn.execute(
+            """
+            SELECT id
+            FROM messages
+            WHERE chat_room_id = ?
+              AND lower(sender_email) = ?
+              AND message = ?
+              AND created_at >= ?
+            LIMIT 1
+            """,
+            (room_id, sender_email, clean_message, duplicate_window),
+        ).fetchone()
+        if duplicate_row:
+            raise CommunicationRateLimitError("Pesan yang sama baru saja dikirim. Tunggu sebentar sebelum kirim ulang.")
+    finally:
+        conn.close()
+
+
+def _communication_recent_audit(limit: int = 40) -> list[dict]:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "audit_logs"):
+            return []
+        rows = conn.execute(
+            """
+            SELECT entity_type, entity_id, action, actor_email, actor_role, summary, created_at
+            FROM audit_logs
+            WHERE entity_type IN ('chat_message', 'chat_room', 'announcement', 'incident', 'thread')
+            ORDER BY created_at DESC, id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def _communication_site_id_for_user(user: User | None) -> int | None:
+    if not user:
+        return None
+    if user.role in EMPLOYEE_ROLES:
+        assignment = _get_active_assignment(user.id)
+        return int(_row_get(assignment, "site_id") or 0) or None
+    if user.role in CLIENT_ROLES:
+        if isinstance(user.site_id, int) and user.site_id > 0:
+            return user.site_id
+        if isinstance(user.client_id, int) and user.client_id > 0:
+            return None
+        _client_id, site_id, _site, _client = _client_site_context(user)
+        return site_id or None
+    site_ids = sorted(_get_supervisor_site_ids(user.id))
+    return site_ids[0] if site_ids else None
+
+
+def _communication_client_id_for_user(user: User | None) -> int | None:
+    if not user:
+        return None
+    if user.role in EMPLOYEE_ROLES:
+        assignment = _get_active_assignment(user.id)
+        return int(_row_get(assignment, "client_id") or 0) or None
+    if user.role in CLIENT_ROLES:
+        if isinstance(user.client_id, int) and user.client_id > 0:
+            return user.client_id
+        client_id, _site_id, _site, _client = _client_site_context(user)
+        return client_id or None
+    if isinstance(user.client_id, int) and user.client_id > 0:
+        return user.client_id
+    site_id = _communication_site_id_for_user(user)
+    site = _get_site_by_id(site_id) if site_id else None
+    return int(_row_get(site, "client_id") or 0) or None
+
+
+def _communication_role_room_name(role_name: str) -> str:
+    return f"Role: {role_name.replace('_', ' ').title()}"
+
+
+def _communication_site_room_name(site_id: int | None) -> str:
+    site = _get_site_by_id(site_id) if site_id else None
+    return f"Site: {_row_get(site, 'name', f'Site {site_id}')}"
+
+
+def _communication_shift_room_name(shift_id: int | None, site_id: int | None = None) -> str:
+    shift = _get_shift_by_id(shift_id) if shift_id else None
+    site = _get_site_by_id(site_id) if site_id else None
+    shift_name = _row_get(shift, "name", f"Shift {shift_id}")
+    if site_id:
+        return f"Shift: {shift_name} - {_row_get(site, 'name', f'Site {site_id}')}"
+    return f"Shift: {shift_name}"
+
+
+def _ensure_chat_room(
+    room_type: str,
+    *,
+    name: str,
+    client_id: int | None = None,
+    site_id: int | None = None,
+    shift_id: int | None = None,
+    role_name: str | None = None,
+    participant_a: str | None = None,
+    participant_b: str | None = None,
+) -> int:
+    conn = _db_connect()
+    try:
+        if room_type == "private":
+            left = (participant_a or "").strip().lower()
+            right = (participant_b or "").strip().lower()
+            if not left or not right:
+                raise ValueError("Peserta private room tidak valid.")
+            if left > right:
+                left, right = right, left
+            row = conn.execute(
+                """
+                SELECT id FROM chat_rooms
+                WHERE type = 'private' AND participant_a = ? AND participant_b = ?
+                LIMIT 1
+                """,
+                (left, right),
+            ).fetchone()
+            if row:
+                return int(row["id"])
+            cur = conn.execute(
+                """
+                INSERT INTO chat_rooms (
+                    type, name, client_id, site_id, shift_id, role_name,
+                    participant_a, participant_b, created_at, updated_at, last_message_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                ("private", name, client_id, site_id, shift_id, role_name, left, right, _now_ts(), _now_ts(), None),
+            )
+            return int(cur.lastrowid or 0)
+        if room_type == "site":
+            row = conn.execute(
+                "SELECT id FROM chat_rooms WHERE type = 'site' AND site_id = ? LIMIT 1",
+                (site_id,),
+            ).fetchone()
+            if row:
+                return int(row["id"])
+        elif room_type == "shift":
+            row = conn.execute(
+                "SELECT id FROM chat_rooms WHERE type = 'shift' AND shift_id = ? AND COALESCE(site_id, 0) = ? LIMIT 1",
+                (shift_id, int(site_id or 0)),
+            ).fetchone()
+            if row:
+                return int(row["id"])
+        elif room_type == "role":
+            row = conn.execute(
+                "SELECT id FROM chat_rooms WHERE type = 'role' AND role_name = ? LIMIT 1",
+                ((role_name or "").strip(),),
+            ).fetchone()
+            if row:
+                return int(row["id"])
+        cur = conn.execute(
+            """
+            INSERT INTO chat_rooms (
+                type, name, client_id, site_id, shift_id, role_name,
+                participant_a, participant_b, created_at, updated_at, last_message_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                room_type,
+                name,
+                client_id,
+                site_id,
+                shift_id,
+                (role_name or "").strip() or None,
+                (participant_a or "").strip().lower() or None,
+                (participant_b or "").strip().lower() or None,
+                _now_ts(),
+                _now_ts(),
+                None,
+            ),
+        )
+        return int(cur.lastrowid or 0)
+    finally:
+        conn.commit()
+        conn.close()
+
+
+def _chat_private_supervisor_targets(user: User | None) -> list[dict]:
+    if not user or user.role not in EMPLOYEE_ROLES:
+        return []
+    site_id = _communication_site_id_for_user(user)
+    client_id = _communication_client_id_for_user(user)
+    conn = _db_connect()
+    try:
+        targets: list[dict] = []
+        seen: set[str] = set()
+        if site_id and _table_exists(conn, "supervisor_sites"):
+            rows = conn.execute(
+                """
+                SELECT u.id, u.email, u.name, u.role
+                FROM supervisor_sites ss
+                JOIN users u ON u.id = ss.supervisor_user_id
+                WHERE ss.site_id = ? AND u.is_active = 1
+                ORDER BY u.role, u.name, u.email
+                """,
+                (site_id,),
+            ).fetchall()
+            for row in rows:
+                email = (_row_get(row, "email") or "").strip().lower()
+                if email and email not in seen:
+                    seen.add(email)
+                    targets.append(dict(row))
+        if client_id:
+            rows = conn.execute(
+                """
+                SELECT id, email, name, role
+                FROM users
+                WHERE is_active = 1
+                  AND role IN ('manager_operational', 'hr_superadmin')
+                ORDER BY role, name, email
+                """
+            ).fetchall()
+            for row in rows:
+                email = (_row_get(row, "email") or "").strip().lower()
+                if email and email not in seen:
+                    seen.add(email)
+                    targets.append(dict(row))
+        return targets
+    finally:
+        conn.close()
+
+
+def _chat_private_targets_for_supervisor(user: User | None) -> list[dict]:
+    if not user or user.role != "supervisor":
+        return []
+    site_ids = _get_supervisor_site_ids(user.id)
+    conn = _db_connect()
+    try:
+        targets: list[dict] = []
+        seen: set[str] = set()
+        if site_ids and _table_exists(conn, "assignments") and _table_exists(conn, "users"):
+            placeholders = ",".join("?" for _ in site_ids)
+            rows = conn.execute(
+                f"""
+                SELECT DISTINCT u.id, u.email, u.name, u.role
+                FROM assignments a
+                JOIN users u ON u.id = a.employee_user_id
+                WHERE a.site_id IN ({placeholders})
+                  AND a.status = 'ACTIVE'
+                  AND u.is_active = 1
+                ORDER BY u.name, u.email
+                """,
+                tuple(site_ids),
+            ).fetchall()
+            for row in rows:
+                email = (_row_get(row, "email") or "").strip().lower()
+                if email and email != (user.email or "").strip().lower() and email not in seen:
+                    seen.add(email)
+                    targets.append(dict(row))
+        rows = conn.execute(
+            """
+            SELECT id, email, name, role
+            FROM users
+            WHERE is_active = 1
+              AND role IN ('manager_operational', 'hr_superadmin')
+            ORDER BY role, name, email
+            """
+        ).fetchall()
+        for row in rows:
+            email = (_row_get(row, "email") or "").strip().lower()
+            if email and email != (user.email or "").strip().lower() and email not in seen:
+                seen.add(email)
+                targets.append(dict(row))
+        return targets
+    finally:
+        conn.close()
+
+
+def _ensure_default_chat_rooms_for_user(user: User | None) -> list[int]:
+    if not user:
+        return []
+    room_ids: list[int] = []
+    site_id = _communication_site_id_for_user(user)
+    client_id = _communication_client_id_for_user(user)
+    shift_id = None
+    if user.role in EMPLOYEE_ROLES:
+        assignment = _get_active_assignment(user.id)
+        shift_id = int(_row_get(assignment, "shift_id", 0) or 0) or None
+    if site_id:
+        room_ids.append(
+            _ensure_chat_room(
+                "site",
+                name=_communication_site_room_name(site_id),
+                client_id=client_id,
+                site_id=site_id,
+            )
+        )
+    if shift_id and site_id:
+        room_ids.append(
+            _ensure_chat_room(
+                "shift",
+                name=_communication_shift_room_name(shift_id, site_id),
+                client_id=client_id,
+                site_id=site_id,
+                shift_id=shift_id,
+            )
+        )
+    role_name = (user.role or "").strip().lower()
+    if role_name:
+        room_ids.append(
+            _ensure_chat_room(
+                "role",
+                name=_communication_role_room_name(role_name),
+                client_id=client_id,
+                role_name=role_name,
+            )
+        )
+    if user.role in EMPLOYEE_ROLES:
+        for target in _chat_private_supervisor_targets(user):
+            target_email = (_row_get(target, "email") or "").strip().lower()
+            if not target_email:
+                continue
+            room_ids.append(
+                _ensure_chat_room(
+                    "private",
+                    name=f"Private: {_row_get(target, 'name', target_email) or target_email}",
+                    client_id=client_id,
+                    site_id=site_id,
+                    participant_a=user.email,
+                    participant_b=target_email,
+                )
+            )
+    if user.role == "supervisor":
+        for supervisor_shift_id, supervisor_site_id in sorted(_get_supervisor_shift_ids(user.id)):
+            room_ids.append(
+                _ensure_chat_room(
+                    "shift",
+                    name=_communication_shift_room_name(supervisor_shift_id, supervisor_site_id),
+                    client_id=client_id,
+                    site_id=supervisor_site_id,
+                    shift_id=supervisor_shift_id,
+                )
+            )
+        for target in _chat_private_targets_for_supervisor(user):
+            target_email = (_row_get(target, "email") or "").strip().lower()
+            if not target_email:
+                continue
+            room_ids.append(
+                _ensure_chat_room(
+                    "private",
+                    name=f"Private: {_row_get(target, 'name', target_email) or target_email}",
+                    client_id=client_id,
+                    site_id=site_id,
+                    participant_a=user.email,
+                    participant_b=target_email,
+                )
+            )
+    return [room_id for room_id in room_ids if room_id]
+
+
+def _user_can_access_chat_room(user: User | None, room: sqlite3.Row | dict | None) -> bool:
+    if not user or not room:
+        return False
+    if user.role == "hr_superadmin":
+        return True
+    auth_context = getattr(g, "api_access_auth", {}) if has_request_context() and isinstance(getattr(g, "api_access_auth", None), dict) else {}
+    token_scoped_client = user.role in CLIENT_ROLES and auth_context.get("auth_type") in {"token", "legacy_token"} and int(user.client_id or 0) > 0
+    room_type = (_row_get(room, "type") or "").strip().lower()
+    if room_type == "private":
+        email = (user.email or "").strip().lower()
+        return email in {
+            (_row_get(room, "participant_a") or "").strip().lower(),
+            (_row_get(room, "participant_b") or "").strip().lower(),
+        }
+    if room_type == "site":
+        room_site_id = int(_row_get(room, "site_id") or 0)
+        room_client_id = int(_row_get(room, "client_id") or 0)
+        if not room_site_id:
+            return False
+        if token_scoped_client:
+            return room_client_id == int(user.client_id or 0)
+        if user.role in EMPLOYEE_ROLES | CLIENT_ROLES:
+            return room_site_id == int(_communication_site_id_for_user(user) or 0)
+        return room_site_id in _get_supervisor_site_ids(user.id)
+    if room_type == "shift":
+        room_shift_id = int(_row_get(room, "shift_id") or 0)
+        room_site_id = int(_row_get(room, "site_id") or 0)
+        room_client_id = int(_row_get(room, "client_id") or 0)
+        if not room_shift_id:
+            return False
+        if token_scoped_client:
+            return room_client_id == int(user.client_id or 0)
+        if user.role in EMPLOYEE_ROLES:
+            assignment = _get_active_assignment(user.id)
+            return (
+                room_shift_id == int(_row_get(assignment, "shift_id", 0) or 0)
+                and room_site_id == int(_row_get(assignment, "site_id", 0) or 0)
+            )
+        if user.role in CLIENT_ROLES:
+            return room_site_id == int(_communication_site_id_for_user(user) or 0)
+        return (room_shift_id, room_site_id) in _get_supervisor_shift_ids(user.id)
+    if room_type == "role":
+        if token_scoped_client:
+            return int(_row_get(room, "client_id") or 0) == int(user.client_id or 0)
+        return (_row_get(room, "role_name") or "").strip().lower() == (user.role or "").strip().lower()
+    if room_type == "incident":
+        creator_email = (_row_get(room, "participant_a") or "").strip().lower()
+        email_key = (user.email or "").strip().lower()
+        if email_key and creator_email and email_key == creator_email:
+            return True
+        if user.role in {"manager_operational", "admin_asistent"}:
+            return True
+        room_site_id = int(_row_get(room, "site_id") or 0)
+        room_client_id = int(_row_get(room, "client_id") or 0)
+        if user.role in EMPLOYEE_ROLES:
+            return False
+        if user.role in CLIENT_ROLES:
+            return room_client_id and room_client_id == int(_communication_client_id_for_user(user) or 0)
+        supervisor_site_ids = _get_supervisor_site_ids(user.id)
+        if room_site_id and room_site_id in supervisor_site_ids:
+            return True
+        return room_client_id and room_client_id == int(_communication_client_id_for_user(user) or 0)
+    return False
+
+
+def _room_recipient_descriptor(room: sqlite3.Row | dict | None, sender_email: str | None = None) -> tuple[str, str]:
+    room_type = (_row_get(room, "type") or "").strip().lower()
+    if room_type == "site":
+        return "site", str(int(_row_get(room, "site_id") or 0))
+    if room_type == "role":
+        return "role", (_row_get(room, "role_name") or "").strip().lower()
+    if room_type == "shift":
+        return "shift", str(int(_row_get(room, "shift_id") or 0))
+    if room_type == "private":
+        sender_key = (sender_email or "").strip().lower()
+        left = (_row_get(room, "participant_a") or "").strip().lower()
+        right = (_row_get(room, "participant_b") or "").strip().lower()
+        peer = right if left == sender_key and right else left
+        return "user", peer
+    return "room", str(int(_row_get(room, "id") or 0))
+
+
+def _chat_list_for_user(user: User | None, *, ensure_defaults: bool = True) -> list[dict]:
+    if not user:
+        return []
+    if ensure_defaults:
+        _ensure_default_chat_rooms_for_user(user)
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "chat_rooms"):
+            return []
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM chat_rooms
+            ORDER BY COALESCE(last_message_at, created_at) DESC, id DESC
+            """
+        ).fetchall()
+        rooms: list[dict] = []
+        for row in rows:
+            if not _user_can_access_chat_room(user, row):
+                continue
+            room_id = int(row["id"])
+            last_message = conn.execute(
+                """
+                SELECT sender_email, message, created_at
+                FROM messages
+                WHERE chat_room_id = ?
+                ORDER BY created_at DESC, id DESC
+                LIMIT 1
+                """,
+                (room_id,),
+            ).fetchone()
+            unread_row = conn.execute(
+                """
+                SELECT COUNT(*) AS total
+                FROM messages
+                WHERE chat_room_id = ?
+                  AND lower(sender_email) != ?
+                  AND is_read = 0
+                """,
+                (room_id, (user.email or "").strip().lower()),
+            ).fetchone()
+            item = dict(row)
+            item["last_message_preview"] = _row_get(last_message, "message", "")[:90]
+            item["last_message_at"] = _row_get(last_message, "created_at") or _row_get(row, "last_message_at")
+            item["last_message_sender"] = _row_get(last_message, "sender_email")
+            item["unread_count"] = int(_row_get(unread_row, "total", 0) or 0)
+            rooms.append(item)
+        return rooms
+    finally:
+        conn.close()
+
+
+def _chat_room_messages(room_id: int, user: User | None, *, mark_read: bool = True) -> list[dict] | None:
+    conn = _db_connect()
+    try:
+        room = conn.execute("SELECT * FROM chat_rooms WHERE id = ?", (room_id,)).fetchone() if _table_exists(conn, "chat_rooms") else None
+        if not room or not _user_can_access_chat_room(user, room):
+            return None
+        rows = [
+            dict(row)
+            for row in conn.execute(
+                """
+                SELECT id, chat_room_id, sender_email, receiver_type, receiver_id,
+                       message, created_at, is_read, read_at, thread_id
+                FROM messages
+                WHERE chat_room_id = ?
+                ORDER BY created_at ASC, id ASC
+                LIMIT 300
+                """,
+                (room_id,),
+            ).fetchall()
+        ]
+        if mark_read and user:
+            conn.execute(
+                """
+                UPDATE messages
+                SET is_read = 1, read_at = ?
+                WHERE chat_room_id = ?
+                  AND lower(sender_email) != ?
+                  AND is_read = 0
+                """,
+                (_now_ts(), room_id, (user.email or "").strip().lower()),
+            )
+        return rows
+    finally:
+        conn.commit()
+        conn.close()
+
+
+def _send_chat_message(
+    user: User | None,
+    room_id: int,
+    message: str,
+    *,
+    thread_id: int | None = None,
+    skip_rate_limit: bool = False,
+) -> dict:
+    if not user:
+        raise ValueError("Akses chat tidak valid.")
+    clean_message = _sanitize_communication_text(message, max_length=1000)
+    if not clean_message:
+        raise ValueError("Pesan tidak boleh kosong.")
+    if not skip_rate_limit:
+        _communication_message_rate_guard(user, room_id, clean_message)
+    conn = _db_connect()
+    try:
+        room = conn.execute("SELECT * FROM chat_rooms WHERE id = ?", (room_id,)).fetchone() if _table_exists(conn, "chat_rooms") else None
+        if not room or not _user_can_access_chat_room(user, room):
+            raise ValueError("Room chat tidak ditemukan atau tidak bisa diakses.")
+        if thread_id:
+            if not _table_exists(conn, "threads"):
+                raise ValueError("Thread chat belum tersedia.")
+            thread_row = conn.execute(
+                "SELECT id, is_locked FROM threads WHERE id = ? AND chat_room_id = ?",
+                (thread_id, room_id),
+            ).fetchone()
+            if not thread_row:
+                raise ValueError("Thread chat tidak ditemukan.")
+            if int(_row_get(thread_row, "is_locked", 0) or 0) == 1:
+                raise ValueError("Thread ini sudah dikunci.")
+        receiver_type, receiver_id = _room_recipient_descriptor(room, user.email)
+        now = _now_ts()
+        cur = conn.execute(
+            """
+            INSERT INTO messages (
+                chat_room_id, sender_email, receiver_type, receiver_id,
+                message, created_at, is_read, read_at, thread_id
+            ) VALUES (?, ?, ?, ?, ?, ?, 0, NULL, ?)
+            """,
+            (room_id, (user.email or "").strip().lower(), receiver_type, receiver_id, clean_message, now, thread_id),
+        )
+        conn.execute(
+            "UPDATE chat_rooms SET updated_at = ?, last_message_at = ? WHERE id = ?",
+            (now, now, room_id),
+        )
+        message_id = int(cur.lastrowid or 0)
+    finally:
+        conn.commit()
+        conn.close()
+    payload = {
+        "id": message_id,
+        "chat_room_id": room_id,
+        "sender_email": (user.email or "").strip().lower(),
+        "receiver_type": receiver_type,
+        "receiver_id": receiver_id,
+        "message": clean_message,
+        "created_at": now,
+        "is_read": 0,
+        "read_at": None,
+        "thread_id": thread_id,
+    }
+    _log_audit_event(
+        "chat_message",
+        message_id,
+        "SEND",
+        user,
+        "Pesan chat dikirim.",
+        {"chat_room_id": room_id, "receiver_type": receiver_type, "receiver_id": receiver_id},
+    )
+    return payload
+
+
+def _chat_recent_messages(limit: int = 40) -> list[dict]:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "messages"):
+            return []
+        rows = conn.execute(
+            """
+            SELECT
+                m.id, m.chat_room_id, m.sender_email, m.message, m.created_at, m.is_read,
+                r.type AS room_type, r.name AS room_name
+            FROM messages m
+            JOIN chat_rooms r ON r.id = m.chat_room_id
+            ORDER BY m.created_at DESC, m.id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def _delete_chat_message(user: User | None, message_id: int) -> None:
+    if not user or message_id <= 0:
+        raise ValueError("Pesan chat tidak valid.")
+    conn = _db_connect()
+    try:
+        row = conn.execute(
+            """
+            SELECT id, chat_room_id, sender_email, created_at
+            FROM messages
+            WHERE id = ?
+            """,
+            (message_id,),
+        ).fetchone()
+        if not row:
+            raise ValueError("Pesan chat tidak ditemukan.")
+        room = conn.execute("SELECT * FROM chat_rooms WHERE id = ?", (int(row["chat_room_id"]),)).fetchone()
+        if not room or not _user_can_access_chat_room(user, room):
+            raise ValueError("Pesan chat tidak bisa diakses.")
+        sender_email = (_row_get(row, "sender_email") or "").strip().lower()
+        user_email = (user.email or "").strip().lower()
+        is_admin_scope = user.role in ADMIN_ROLES
+        if sender_email != user_email and not is_admin_scope:
+            raise ValueError("Anda hanya bisa menghapus pesan milik sendiri.")
+        conn.execute("DELETE FROM messages WHERE id = ?", (message_id,))
+        last_row = conn.execute(
+            """
+            SELECT created_at
+            FROM messages
+            WHERE chat_room_id = ?
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1
+            """,
+            (int(row["chat_room_id"]),),
+        ).fetchone()
+        conn.execute(
+            "UPDATE chat_rooms SET last_message_at = ?, updated_at = ? WHERE id = ?",
+            (_row_get(last_row, "created_at"), _now_ts(), int(row["chat_room_id"])),
+        )
+        room_id = int(row["chat_room_id"])
+    finally:
+        conn.commit()
+        conn.close()
+    _log_audit_event(
+        "chat_message",
+        message_id,
+        "DELETE",
+        user,
+        "Pesan chat dihapus.",
+        {"chat_room_id": room_id},
+    )
+
+
+def _create_thread(
+    *,
+    room_id: int,
+    title: str,
+    actor: User | None,
+    incident_id: int | None = None,
+) -> int:
+    clean_title = _sanitize_communication_text(title, max_length=160)
+    if not clean_title:
+        raise ValueError("Judul thread wajib diisi.")
+    if not actor:
+        raise ValueError("Aktor thread tidak valid.")
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "threads"):
+            raise ValueError("Thread belum tersedia.")
+        cur = conn.execute(
+            """
+            INSERT INTO threads (chat_room_id, incident_id, title, created_by, created_at, is_locked)
+            VALUES (?, ?, ?, ?, ?, 0)
+            """,
+            (room_id, incident_id, clean_title, (actor.email or "").strip().lower(), _now_ts()),
+        )
+        thread_id = int(cur.lastrowid or 0)
+    finally:
+        conn.commit()
+        conn.close()
+    _log_audit_event(
+        "thread",
+        thread_id,
+        "CREATE",
+        actor,
+        "Thread komunikasi dibuat.",
+        {"chat_room_id": room_id, "incident_id": incident_id},
+    )
+    return thread_id
+
+
+def _list_threads_for_room(room_id: int, user: User | None) -> list[dict]:
+    if room_id <= 0:
+        return []
+    conn = _db_connect()
+    try:
+        room = conn.execute("SELECT * FROM chat_rooms WHERE id = ?", (room_id,)).fetchone() if _table_exists(conn, "chat_rooms") else None
+        if not room or not _user_can_access_chat_room(user, room) or not _table_exists(conn, "threads"):
+            return []
+        rows = conn.execute(
+            """
+            SELECT t.*,
+                   COUNT(m.id) AS reply_count,
+                   MAX(m.created_at) AS last_reply_at
+            FROM threads t
+            LEFT JOIN messages m ON m.thread_id = t.id
+            WHERE t.chat_room_id = ?
+            GROUP BY t.id
+            ORDER BY COALESCE(MAX(m.created_at), t.created_at) DESC, t.id DESC
+            """,
+            (room_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def _save_announcement(
+    *,
+    title: str,
+    message: str,
+    target_type: str,
+    target_id: str | None,
+    actor: User | None,
+    expired_at: str | None,
+    is_mandatory: bool,
+) -> int:
+    clean_title = _sanitize_communication_text(title, max_length=160)
+    clean_message = _sanitize_communication_text(message, max_length=3000)
+    if not clean_title or not clean_message:
+        raise ValueError("Judul dan pesan pengumuman wajib diisi.")
+    target_type = (target_type or "").strip().lower()
+    if target_type not in {"global", "role", "site"}:
+        raise ValueError("Target pengumuman tidak valid.")
+    normalized_target_id = (target_id or "").strip()
+    if target_type == "role" and not normalized_target_id:
+        raise ValueError("Role target wajib diisi.")
+    if target_type == "site":
+        if not normalized_target_id.isdigit():
+            raise ValueError("Site target tidak valid.")
+        normalized_target_id = str(int(normalized_target_id))
+    expires_value = _normalize_date_input(expired_at) if expired_at else None
+    expires_ts = f"{expires_value} 23:59:59" if expires_value else None
+    conn = _db_connect()
+    try:
+        cur = conn.execute(
+            """
+            INSERT INTO announcements (
+                title, message, target_type, target_id,
+                created_by, created_at, expired_at, is_mandatory
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                clean_title,
+                clean_message,
+                target_type,
+                normalized_target_id or None,
+                actor.email if actor else "system",
+                _now_ts(),
+                expires_ts,
+                1 if is_mandatory else 0,
+            ),
+        )
+        announcement_id = int(cur.lastrowid or 0)
+    finally:
+        conn.commit()
+        conn.close()
+    if actor:
+        _log_audit_event(
+            "announcement",
+            announcement_id,
+            "CREATE",
+            actor,
+            "Pengumuman dibuat.",
+            {"target_type": target_type, "target_id": normalized_target_id or None},
+        )
+    return announcement_id
+
+
+def _list_announcements_for_user(user: User | None, *, include_all: bool = False) -> list[dict]:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "announcements"):
+            return []
+        now_ts = _now_ts()
+        rows = conn.execute(
+            """
+            SELECT a.*, ar.read_at
+            FROM announcements a
+            LEFT JOIN announcement_reads ar
+              ON ar.announcement_id = a.id AND lower(ar.user_email) = ?
+            WHERE a.expired_at IS NULL OR a.expired_at >= ?
+            ORDER BY a.created_at DESC, a.id DESC
+            """,
+            (((user.email if user else "") or "").strip().lower(), now_ts),
+        ).fetchall()
+        site_id = _communication_site_id_for_user(user)
+        role_name = (user.role or "").strip().lower() if user else ""
+        items: list[dict] = []
+        for row in rows:
+            target_type = (_row_get(row, "target_type") or "").strip().lower()
+            target_id = (_row_get(row, "target_id") or "").strip()
+            if not include_all:
+                visible = target_type == "global"
+                if target_type == "role":
+                    visible = target_id == role_name
+                elif target_type == "site":
+                    visible = target_id.isdigit() and int(target_id) == int(site_id or 0)
+                if not visible:
+                    continue
+            items.append(dict(row))
+        return items
+    finally:
+        conn.close()
+
+
+def _mark_announcement_read(user: User | None, announcement_id: int) -> None:
+    if not user or announcement_id <= 0:
+        return
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "announcement_reads"):
+            return
+        conn.execute(
+            """
+            INSERT INTO announcement_reads (user_email, announcement_id, read_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(user_email, announcement_id) DO UPDATE SET
+                read_at = excluded.read_at
+            """,
+            ((user.email or "").strip().lower(), announcement_id, _now_ts()),
+        )
+    finally:
+        conn.commit()
+        conn.close()
+    _log_audit_event(
+        "announcement",
+        announcement_id,
+        "READ",
+        user,
+        "Pengumuman ditandai sudah dibaca.",
+    )
+
+
+def _save_incident(
+    *,
+    actor: User | None,
+    title: str,
+    description: str,
+    photo_path: str | None = None,
+) -> dict:
+    if not actor:
+        raise ValueError("Akses incident tidak valid.")
+    clean_title = _sanitize_communication_text(title, max_length=160)
+    clean_description = _sanitize_communication_text(description, max_length=3000)
+    if not clean_title or not clean_description:
+        raise ValueError("Judul dan deskripsi incident wajib diisi.")
+    site_id = _communication_site_id_for_user(actor)
+    client_id = _communication_client_id_for_user(actor)
+    if not site_id:
+        raise ValueError("Incident membutuhkan site assignment aktif.")
+    incident_window = _communication_window_start(COMMUNICATION_MESSAGE_WINDOW_SECONDS)
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "incidents"):
+            raise ValueError("Fitur incident belum tersedia.")
+        recent_count = conn.execute(
+            """
+            SELECT COUNT(*) AS total
+            FROM incidents
+            WHERE lower(created_by) = ?
+              AND created_at >= ?
+            """,
+            (((actor.email or "").strip().lower()), incident_window),
+        ).fetchone()
+        if int(_row_get(recent_count, "total", 0) or 0) >= 3:
+            raise CommunicationRateLimitError("Terlalu banyak laporan dalam waktu singkat. Coba lagi sebentar.")
+        created_at = _now_ts()
+        cur = conn.execute(
+            """
+            INSERT INTO incidents (
+                title, description, photo_path, client_id, site_id,
+                created_by, created_at, status, chat_room_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'open', NULL)
+            """,
+            (
+                clean_title,
+                clean_description,
+                photo_path or None,
+                client_id,
+                site_id,
+                (actor.email or "").strip().lower(),
+                created_at,
+            ),
+        )
+        incident_id = int(cur.lastrowid or 0)
+    finally:
+        conn.commit()
+        conn.close()
+    room_id = _ensure_chat_room(
+        "incident",
+        name=_communication_incident_room_name(incident_id, clean_title),
+        client_id=client_id,
+        site_id=site_id,
+        participant_a=actor.email,
+    )
+    conn = _db_connect()
+    try:
+        conn.execute("UPDATE incidents SET chat_room_id = ? WHERE id = ?", (room_id, incident_id))
+    finally:
+        conn.commit()
+        conn.close()
+    thread_id = _create_thread(room_id=room_id, title=clean_title, actor=actor, incident_id=incident_id)
+    incident_message = _send_chat_message(
+        actor,
+        room_id,
+        f"[Incident] {clean_title} - {clean_description}",
+        thread_id=thread_id,
+        skip_rate_limit=True,
+    )
+    payload = {
+        "id": incident_id,
+        "title": clean_title,
+        "description": clean_description,
+        "photo_path": photo_path or "",
+        "client_id": client_id,
+        "site_id": site_id,
+        "created_by": (actor.email or "").strip().lower(),
+        "created_at": created_at,
+        "status": "open",
+        "chat_room_id": room_id,
+        "thread_id": thread_id,
+        "initial_message_id": incident_message["id"],
+    }
+    _log_audit_event(
+        "incident",
+        incident_id,
+        "CREATE",
+        actor,
+        "Incident operasional dibuat.",
+        {"client_id": client_id, "site_id": site_id, "chat_room_id": room_id},
+    )
+    return payload
+
+
+def _list_incidents_for_user(user: User | None, *, include_all: bool = False, limit: int = 80) -> list[dict]:
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "incidents"):
+            return []
+        where_parts: list[str] = []
+        params: list[object] = []
+        if not include_all:
+            visibility_sql, visibility_params = _communication_incident_visibility_clause(user)
+            if visibility_sql:
+                where_parts.append(visibility_sql)
+                params.extend(visibility_params)
+        where_sql = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
+        rows = conn.execute(
+            f"""
+            SELECT i.*, r.name AS room_name
+            FROM incidents i
+            LEFT JOIN chat_rooms r ON r.id = i.chat_room_id
+            {where_sql}
+            ORDER BY i.created_at DESC, i.id DESC
+            LIMIT ?
+            """,
+            tuple(params + [limit]),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+    _log_audit_event(
+        "announcement",
+        announcement_id,
+        "READ",
+        user,
+        "Pengumuman dibaca.",
+    )
+
 def _generate_otp_token() -> str:
     return f"{secrets.randbelow(1000000):06d}"
 
@@ -6972,11 +9067,11 @@ def _send_password_reset_delivery(
         if not _smtp_reset_configured():
             return False, "SMTP reset password belum dikonfigurasi."
         message = EmailMessage()
-        message["Subject"] = "Reset password HRIS PRO"
+        message["Subject"] = f"Reset password {_hris_brand_title()}"
         message["From"] = RESET_SMTP_FROM
         message["To"] = email
         message.set_content(
-            "Gunakan link berikut untuk reset password HRIS PRO:\n"
+            f"Gunakan link berikut untuk reset password {_hris_brand_title()}:\n"
             f"{reset_url}\n\n"
             "Link ini memiliki masa berlaku terbatas."
         )
@@ -7000,7 +9095,7 @@ def _send_password_reset_delivery(
             "token": token,
             "reset_url": reset_url,
             "message": (
-                "Kode reset password HRIS PRO: "
+                f"Kode reset password {_hris_brand_title()}: "
                 f"{token}. Link reset: {reset_url}"
             ),
         }
@@ -11276,6 +13371,10 @@ def _init_db() -> None:
                 pic_phone TEXT NOT NULL,
                 addons TEXT DEFAULT '[]',
                 client_theme TEXT DEFAULT 'silver_line',
+                communication_enabled INTEGER DEFAULT 0,
+                communication_tier TEXT DEFAULT 'basic',
+                communication_message_limit_per_day INTEGER DEFAULT 300,
+                communication_attachment_limit_mb INTEGER DEFAULT 5,
                 is_active INTEGER DEFAULT 1,
                 notes TEXT,
                 created_at TEXT,
@@ -11285,8 +13384,23 @@ def _init_db() -> None:
         )
         if _table_exists(conn, "clients"):
             _ensure_column(conn, "clients", "client_theme", "client_theme TEXT DEFAULT 'silver_line'")
+            _ensure_column(conn, "clients", "communication_enabled", "communication_enabled INTEGER DEFAULT 0")
+            _ensure_column(conn, "clients", "communication_tier", "communication_tier TEXT DEFAULT 'basic'")
+            _ensure_column(conn, "clients", "communication_message_limit_per_day", "communication_message_limit_per_day INTEGER DEFAULT 300")
+            _ensure_column(conn, "clients", "communication_attachment_limit_mb", "communication_attachment_limit_mb INTEGER DEFAULT 5")
             conn.execute(
                 "UPDATE clients SET client_theme = 'silver_line' WHERE client_theme IS NULL OR lower(client_theme) NOT IN ('dark', 'light', 'sage_calm', 'silver_line', 'noir_warm')"
+            )
+            conn.execute(
+                "UPDATE clients SET communication_tier = 'basic' WHERE communication_tier IS NULL OR lower(communication_tier) NOT IN ('basic', 'pro', 'enterprise')"
+            )
+            conn.execute(
+                "UPDATE clients SET communication_message_limit_per_day = ? WHERE communication_message_limit_per_day IS NULL OR communication_message_limit_per_day < 1",
+                (COMMUNICATION_DEFAULT_MESSAGE_LIMIT_PER_DAY,),
+            )
+            conn.execute(
+                "UPDATE clients SET communication_attachment_limit_mb = ? WHERE communication_attachment_limit_mb IS NULL OR communication_attachment_limit_mb < 1",
+                (COMMUNICATION_DEFAULT_ATTACHMENT_LIMIT_MB,),
             )
         conn.execute(
             """
@@ -11614,6 +13728,174 @@ def _init_db() -> None:
         )
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user ON password_reset_tokens(user_id)"
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS chat_rooms (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                type TEXT NOT NULL,
+                name TEXT NOT NULL,
+                client_id INTEGER,
+                site_id INTEGER,
+                shift_id INTEGER,
+                role_name TEXT,
+                participant_a TEXT,
+                participant_b TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                last_message_at TEXT,
+                FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE SET NULL,
+                FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE SET NULL
+            )
+            """
+        )
+        _ensure_column(conn, "chat_rooms", "shift_id", "shift_id INTEGER")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_chat_rooms_type_site_role ON chat_rooms(type, site_id, role_name, last_message_at)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_chat_rooms_shift ON chat_rooms(type, shift_id, site_id, last_message_at)"
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_room_id INTEGER NOT NULL,
+                sender_email TEXT NOT NULL,
+                receiver_type TEXT NOT NULL,
+                receiver_id TEXT,
+                message TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                is_read INTEGER NOT NULL DEFAULT 0,
+                read_at TEXT,
+                thread_id INTEGER,
+                FOREIGN KEY (chat_room_id) REFERENCES chat_rooms(id) ON DELETE CASCADE
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_messages_room_created ON messages(chat_room_id, created_at)"
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS announcements (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                message TEXT NOT NULL,
+                target_type TEXT NOT NULL,
+                target_id TEXT,
+                created_by TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                expired_at TEXT,
+                is_mandatory INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_announcements_target_created ON announcements(target_type, target_id, created_at)"
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS announcement_reads (
+                user_email TEXT NOT NULL,
+                announcement_id INTEGER NOT NULL,
+                read_at TEXT NOT NULL,
+                PRIMARY KEY (user_email, announcement_id),
+                FOREIGN KEY (announcement_id) REFERENCES announcements(id) ON DELETE CASCADE
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_announcement_reads_user ON announcement_reads(user_email, read_at)"
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS incidents (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                description TEXT NOT NULL,
+                photo_path TEXT,
+                client_id INTEGER,
+                site_id INTEGER,
+                created_by TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'open',
+                chat_room_id INTEGER,
+                FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE SET NULL,
+                FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE SET NULL,
+                FOREIGN KEY (chat_room_id) REFERENCES chat_rooms(id) ON DELETE SET NULL
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_incidents_scope_created ON incidents(site_id, status, created_at)"
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS threads (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_room_id INTEGER NOT NULL,
+                incident_id INTEGER,
+                title TEXT NOT NULL,
+                created_by TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                is_locked INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY (chat_room_id) REFERENCES chat_rooms(id) ON DELETE CASCADE,
+                FOREIGN KEY (incident_id) REFERENCES incidents(id) ON DELETE SET NULL
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_threads_room_created ON threads(chat_room_id, created_at)"
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS api_client_tokens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                client_id INTEGER NOT NULL,
+                label TEXT NOT NULL,
+                token_hash TEXT NOT NULL UNIQUE,
+                token_prefix TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                last_used_at TEXT,
+                revoked_at TEXT,
+                created_by_user_id INTEGER,
+                revoked_by_user_id INTEGER,
+                FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+                FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+                FOREIGN KEY (revoked_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_api_client_tokens_client ON api_client_tokens(client_id, revoked_at, created_at)"
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS api_access_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                client_id INTEGER NOT NULL,
+                token_id INTEGER,
+                token_label TEXT,
+                endpoint TEXT NOT NULL,
+                http_method TEXT NOT NULL,
+                status_code INTEGER NOT NULL,
+                actor_type TEXT NOT NULL,
+                actor_email TEXT,
+                branch_id INTEGER,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+                FOREIGN KEY (token_id) REFERENCES api_client_tokens(id) ON DELETE SET NULL,
+                FOREIGN KEY (branch_id) REFERENCES sites(id) ON DELETE SET NULL
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_api_access_logs_client_created ON api_access_logs(client_id, created_at)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_api_access_logs_token_created ON api_access_logs(token_id, created_at)"
         )
         conn.execute(
             """
@@ -12541,6 +14823,19 @@ def _init_db() -> None:
                 )
             except sqlite3.IntegrityError:
                 pass
+        if _table_exists(conn, "clients") and _table_exists(conn, "client_addons"):
+            now = _now_ts()
+            for row in conn.execute("SELECT id, addons FROM clients WHERE COALESCE(addons, '') <> ''").fetchall():
+                client_id = int(row["id"])
+                for addon_key in _phase15_addons_from_value(row["addons"]):
+                    conn.execute(
+                        """
+                        INSERT INTO client_addons (client_id, addon_key, is_enabled, created_at, updated_at)
+                        VALUES (?, ?, 1, ?, ?)
+                        ON CONFLICT(client_id, addon_key) DO NOTHING
+                        """,
+                        (client_id, addon_key, now, now),
+                    )
         if _table_exists(conn, "employees"):
             _ensure_column(conn, "employees", "nik", "nik TEXT")
             _ensure_column(conn, "employees", "name", "name TEXT")
@@ -12962,6 +15257,49 @@ def _addons_json(value: object) -> str:
     return json.dumps(_addons_from_value(value), ensure_ascii=True)
 
 
+def _owner_suite_mode_from_addons(addons: object) -> str:
+    normalized = _addons_from_value(addons)
+    active = set(normalized)
+    if ADDON_ENTERPRISE_TIER in active:
+        return OWNER_SUITE_ENTERPRISE
+    if ADDON_HRIS_PRO_PLUS in active:
+        return OWNER_SUITE_PRO_PLUS
+    if ADDON_HRIS_PRO in active:
+        return OWNER_SUITE_PRO
+    if any(addon in active for addon in ADDON_ENTERPRISE_AUTO_ENABLED):
+        return OWNER_SUITE_PRO_PLUS
+    return OWNER_SUITE_PRO
+
+
+def _normalize_global_addons(addons: object) -> list[str]:
+    normalized = _addons_from_value(addons)
+    active = set(normalized)
+    mode = _owner_suite_mode_from_addons(normalized)
+    active -= ADDON_OWNER_MODE_KEYS
+    if ADDON_BILLING_ENGINE in active or ADDON_CONTRACT_MANAGEMENT in active:
+        active.add(ADDON_BILLING_ENGINE)
+        active.add(ADDON_CONTRACT_MANAGEMENT)
+    if mode == OWNER_SUITE_ENTERPRISE:
+        active |= ADDON_ENTERPRISE_AUTO_ENABLED
+    elif mode == OWNER_SUITE_PRO:
+        active -= ADDON_PRO_AUTO_DISABLED
+    if ADDON_COMMUNICATION_INCIDENT in active:
+        active.add(ADDON_COMMUNICATION_ANNOUNCEMENT)
+        active.add(ADDON_COMMUNICATION_CHAT)
+    if ADDON_COMMUNICATION_ANNOUNCEMENT in active:
+        active.add(ADDON_COMMUNICATION_CHAT)
+    if ADDON_COMMUNICATION_API in active:
+        active.add(ADDON_API_ACCESS)
+    mode_key = {
+        OWNER_SUITE_ENTERPRISE: ADDON_ENTERPRISE_TIER,
+        OWNER_SUITE_PRO_PLUS: ADDON_HRIS_PRO_PLUS,
+        OWNER_SUITE_PRO: ADDON_HRIS_PRO,
+    }[mode]
+    ordered = [mode_key]
+    ordered.extend(addon for addon in ADDON_OWNER_ORDER if addon in active and addon not in ADDON_OWNER_MODE_KEYS)
+    return ordered
+
+
 def _get_app_setting(key: str, default: object = None) -> object:
     conn = _db_connect()
     try:
@@ -12997,14 +15335,11 @@ def _set_app_setting(key: str, value: object) -> None:
 
 
 def _global_addons() -> list[str]:
-    return _addons_from_value(_get_app_setting("global_addons", []))
+    return _normalize_global_addons(_get_app_setting("global_addons", []))
 
 
 def _set_global_addons(addons: object) -> list[str]:
-    normalized = _addons_from_value(addons)
-    if ADDON_ENTERPRISE_TIER in normalized:
-        active = (set(normalized) - ADDON_ENTERPRISE_EXCLUDED) | ADDON_ENTERPRISE_AUTO_ENABLED
-        normalized = [addon for addon in ADDON_OWNER_ORDER if addon in active]
+    normalized = _normalize_global_addons(addons)
     _set_app_setting("global_addons", normalized)
     return normalized
 
@@ -13072,16 +15407,20 @@ def _list_client_addons(client_id: int | None) -> list[str]:
     conn = _db_connect()
     try:
         if not _table_exists(conn, "client_addons"):
-            return []
+            client = _get_client_by_id(client_id)
+            return _phase15_addons_from_value(_row_get(client, "addons", "[]") if client else [])
         rows = conn.execute(
             """
-            SELECT addon_key FROM client_addons
-            WHERE client_id = ? AND is_enabled = 1
+            SELECT addon_key, is_enabled FROM client_addons
+            WHERE client_id = ?
             ORDER BY addon_key
             """,
             (client_id,),
         ).fetchall()
-        return _phase15_addons_from_value([row["addon_key"] for row in rows])
+        if rows:
+            return _phase15_addons_from_value([row["addon_key"] for row in rows if row["is_enabled"]])
+        client = conn.execute("SELECT addons FROM clients WHERE id = ?", (client_id,)).fetchone() if _table_exists(conn, "clients") else None
+        return _phase15_addons_from_value(_row_get(client, "addons", "[]") if client else [])
     finally:
         conn.close()
 
@@ -13101,6 +15440,11 @@ def _set_client_addons(client_id: int, addons: object) -> list[str]:
                     updated_at = excluded.updated_at
                 """,
                 (client_id, addon_key, 1 if addon_key in active else 0, now, now),
+            )
+        if _table_exists(conn, "clients"):
+            conn.execute(
+                "UPDATE clients SET addons = ?, updated_at = ? WHERE id = ?",
+                (_addons_json(sorted(active)), now, client_id),
             )
     finally:
         conn.commit()
@@ -13395,12 +15739,17 @@ def has_addon(client: sqlite3.Row | dict | None, feature: str) -> bool:
     if not feature_key:
         return False
     active_global = _global_addons()
-    if feature_key in active_global:
+    if feature_key == ADDON_API_ACCESS and feature_key not in active_global:
+        return False
+    if feature_key in active_global and feature_key != ADDON_API_ACCESS:
         return True
     if ADDON_ENTERPRISE_TIER in active_global and feature_key in {ADDON_PATROL, ADDON_CALENDAR, ADDON_PATROL_OPS}:
         return True
     if not client:
         return False
+    client_id = _row_get(client, "id")
+    if client_id:
+        return feature_key in _list_client_addons(int(client_id))
     addons = _addons_from_value(_row_get(client, "addons", "[]"))
     return feature_key in addons
 
@@ -13608,6 +15957,8 @@ def _can_approve_manual(user: User) -> bool:
 
 def _is_pro(user: User) -> bool:
     """Check if user has PRO tier access"""
+    if _owner_suite_mode() in {OWNER_SUITE_PRO, OWNER_SUITE_PRO_PLUS, OWNER_SUITE_ENTERPRISE}:
+        return True
     if not user:
         return False
     if user.role == "hr_superadmin":
@@ -13621,11 +15972,38 @@ def _is_pro(user: User) -> bool:
 
 def _is_enterprise(user: User) -> bool:
     """Check if user has ENTERPRISE tier access"""
+    if _owner_suite_mode() == OWNER_SUITE_ENTERPRISE:
+        return True
     if not user or not hasattr(user, 'tier'):
         return False
     if user.role in ADMIN_ROLES and ADDON_ENTERPRISE_TIER in _global_addons():
         return True
     return _normalize_user_tier(user.tier) == "enterprise"
+
+
+def _owner_suite_mode() -> str:
+    return _owner_suite_mode_from_addons(_global_addons())
+
+
+def _hris_brand_title() -> str:
+    mode = _owner_suite_mode()
+    if mode == OWNER_SUITE_ENTERPRISE:
+        return "HRIS ENTERPRISE"
+    if mode == OWNER_SUITE_PRO_PLUS:
+        return "HRIS PRO PLUS"
+    return "HRIS PRO"
+
+
+def _effective_permissions_for(user: User | None) -> dict[str, bool]:
+    if not user:
+        return {}
+    permissions = _get_role_permissions(user.role)
+    permissions["view_calendar"] = bool(permissions.get("view_calendar")) and _calendar_feature_enabled(user)
+    permissions["view_ai_analysis"] = bool(permissions.get("view_ai_analysis")) and _ai_analysis_feature_enabled(user)
+    permissions["view_patrol_ops"] = bool(permissions.get("view_patrol")) and _patrol_ops_admin_enabled(user)
+    permissions["view_billing"] = bool(permissions.get("view_billing")) and _billing_feature_enabled(user)
+    permissions["view_contract"] = bool(permissions.get("view_contract")) and _contract_feature_enabled(user)
+    return permissions
 
 
 def _leave_request_overlaps(
@@ -13697,6 +16075,34 @@ def _get_supervisor_site_ids(user_id: int) -> set[int]:
             (user_id,),
         )
         return {int(row["site_id"]) for row in cur.fetchall()}
+    finally:
+        conn.close()
+
+
+def _get_supervisor_shift_ids(user_id: int) -> set[tuple[int, int]]:
+    site_ids = sorted(_get_supervisor_site_ids(user_id))
+    if not site_ids:
+        return set()
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "assignments"):
+            return set()
+        placeholders = ",".join("?" for _ in site_ids)
+        rows = conn.execute(
+            f"""
+            SELECT DISTINCT shift_id, site_id
+            FROM assignments
+            WHERE status = 'ACTIVE'
+              AND shift_id IS NOT NULL
+              AND site_id IN ({placeholders})
+            """,
+            tuple(site_ids),
+        ).fetchall()
+        return {
+            (int(_row_get(row, "shift_id", 0) or 0), int(_row_get(row, "site_id", 0) or 0))
+            for row in rows
+            if int(_row_get(row, "shift_id", 0) or 0) > 0 and int(_row_get(row, "site_id", 0) or 0) > 0
+        }
     finally:
         conn.close()
 
@@ -20947,7 +23353,7 @@ def admin_bp() -> Blueprint:
     @bp.route("/clients", methods=["GET"])
     def clients():
         user = _current_user()
-        permissions = _get_role_permissions(user.role)
+        permissions = _effective_permissions_for(user)
         client_scope = _client_admin_client_id(user)
         if client_scope:
             client_row = _get_client_by_id(client_scope)
@@ -21834,7 +24240,7 @@ def admin_bp() -> Blueprint:
     @bp.route("/employees", methods=["GET"])
     def employees():
         user = _current_user()
-        permissions = _get_role_permissions(user.role)
+        permissions = _effective_permissions_for(user)
         employees = _employees()
         client_scope = _client_admin_client_id(user)
         if client_scope:
@@ -22065,7 +24471,9 @@ def admin_bp() -> Blueprint:
         return render_template(
             "dashboard/admin_reports.html",
             user=user,
+            calendar_reports_enabled=_calendar_feature_enabled(user),
             advanced_reporting_enabled=_advanced_reporting_enabled(user),
+            show_reports_plus_sections=_owner_suite_mode() != OWNER_SUITE_PRO,
             clients=_clients(),
             sites=_list_sites(),
             employees=_list_employee_users(),
@@ -22397,11 +24805,11 @@ def admin_bp() -> Blueprint:
         if not user:
             return abort(403)
         _require_admin(user)
-        permissions = _get_role_permissions(user.role)
+        permissions = _effective_permissions_for(user)
         theme_tab_enabled = _extra_themes_enabled()
         default_tab = "users" if user.role == "hr_superadmin" else ("theme" if theme_tab_enabled else "password")
         tab = (request.args.get("tab") or default_tab).lower()
-        if tab not in {"users", "roles", "hr", "password", "theme", "addons", "subscription"}:
+        if tab not in {"users", "roles", "hr", "password", "theme", "addons", "subscription", "communication"}:
             tab = default_tab
         if tab == "theme" and not theme_tab_enabled:
             tab = default_tab
@@ -22411,6 +24819,7 @@ def admin_bp() -> Blueprint:
                 allowed_tabs.append("hr")
             if permissions.get("manage_settings_password"):
                 allowed_tabs.append("password")
+            allowed_tabs.append("communication")
             if not allowed_tabs:
                 return abort(403)
             if tab not in allowed_tabs:
@@ -22418,23 +24827,96 @@ def admin_bp() -> Blueprint:
         users = [u for u in _list_users() if u.get("role") in ADMIN_ROLES]
         sites = _list_sites()
         clients = _clients()
+        api_access_log_filters = _api_access_log_filters(
+            request.args.get("api_log_from"),
+            request.args.get("api_log_to"),
+        )
+        subscription_search = (request.args.get("subscription_search") or "").strip().lower()
+        subscription_status = (request.args.get("subscription_status") or "all").strip().lower()
+        if subscription_status not in {"all", "active", "revoked", "inactive"}:
+            subscription_status = "all"
+        subscription_plan = (request.args.get("subscription_plan") or "all").strip().lower()
+        if subscription_plan not in {"all", "basic", "pro", "enterprise"}:
+            subscription_plan = "all"
         client_subscriptions = {
             int(client["id"]): _phase15_subscription(int(client["id"]))
             for client in clients
             if client.get("id")
+        }
+        api_access_summaries = {
+            int(client["id"]): _api_access_dashboard_summary(int(client["id"]), api_access_log_filters)
+            for client in clients
+            if client.get("id")
+        }
+        filtered_clients = []
+        for client in clients:
+            client_id = int(client["id"])
+            subscription = client_subscriptions.get(client_id, {})
+            summary = api_access_summaries.get(client_id, {})
+            tokens = summary.get("tokens", [])
+            active_tokens = [token for token in tokens if not token.get("revoked_at")]
+            revoked_tokens = [token for token in tokens if token.get("revoked_at")]
+            plan_value = str(subscription.get("package") or CLIENT_PACKAGE_BASIC).lower()
+            if subscription_plan != "all" and plan_value != subscription_plan:
+                continue
+            if subscription_status == "active" and not active_tokens:
+                continue
+            if subscription_status == "revoked" and not revoked_tokens:
+                continue
+            if subscription_status == "inactive" and active_tokens:
+                continue
+            if subscription_search:
+                searchable = [
+                    str(client.get("name") or ""),
+                    str(client.get("office_email") or ""),
+                    str(summary.get("top_endpoint", {}).get("endpoint") or ""),
+                ]
+                for token in tokens:
+                    searchable.append(str(token.get("label") or ""))
+                    searchable.append(str(token.get("masked_token") or ""))
+                haystack = " ".join(searchable).lower()
+                if subscription_search not in haystack:
+                    continue
+            filtered_clients.append(client)
+        subscription_overview = {
+            "total_clients": len(filtered_clients),
+            "active_clients": sum(
+                1
+                for client in filtered_clients
+                if api_access_summaries.get(int(client["id"]), {}).get("client_enabled")
+            ),
+            "active_tokens": sum(
+                len([token for token in api_access_summaries.get(int(client["id"]), {}).get("tokens", []) if not token.get("revoked_at")])
+                for client in filtered_clients
+            ),
+            "revoked_tokens": sum(
+                len([token for token in api_access_summaries.get(int(client["id"]), {}).get("tokens", []) if token.get("revoked_at")])
+                for client in filtered_clients
+            ),
         }
         supervisor_sites = _get_supervisor_sites_map()
         registration_codes = _list_employee_registration_codes()
         role_permissions = {
             role: _get_role_permissions(role) for role in ADMIN_ROLE_OPTIONS
         }
+        generated_api_tokens = _api_access_last_flash_tokens()
+        communication_announcements = _list_announcements_for_user(user, include_all=True) if tab == "communication" else []
+        communication_recent_messages = _chat_recent_messages(30) if tab == "communication" else []
+        communication_incidents = _list_incidents_for_user(user, include_all=user.role in ADMIN_ROLES) if tab == "communication" else []
+        communication_recent_audit = _communication_recent_audit(40) if tab == "communication" else []
+        communication_client_configs = {
+            int(client["id"]): _communication_client_config(int(client["id"]))
+            for client in _clients()
+            if client.get("id")
+        } if tab == "communication" and user.role == "hr_superadmin" else {}
+        communication_owner_policy = _communication_owner_policy() if tab == "communication" else {}
         return render_template(
             "dashboard/admin_settings.html",
             user=user,
             tab=tab,
             users=users,
             sites=sites,
-            clients=clients,
+            clients=filtered_clients,
             supervisor_sites=supervisor_sites,
             registration_codes=registration_codes,
             role_options=ADMIN_ROLE_OPTIONS,
@@ -22446,27 +24928,176 @@ def admin_bp() -> Blueprint:
             client_package_options=[CLIENT_PACKAGE_BASIC, CLIENT_PACKAGE_PRO, CLIENT_PACKAGE_ENTERPRISE],
             client_addon_options=CLIENT_ADDON_OPTIONS,
             client_subscriptions=client_subscriptions,
+            api_access_summaries=api_access_summaries,
+            api_access_log_filters=api_access_log_filters,
+            subscription_filters={
+                "search": subscription_search,
+                "status": subscription_status,
+                "plan": subscription_plan,
+            },
+            subscription_overview=subscription_overview,
+            generated_api_tokens=generated_api_tokens,
+            owner_addons=_global_addons(),
+            communication_announcements=communication_announcements,
+            communication_recent_messages=communication_recent_messages,
+            communication_incidents=communication_incidents,
+            communication_recent_audit=communication_recent_audit,
+            communication_client_configs=communication_client_configs,
+            communication_owner_policy=communication_owner_policy,
         )
+
+    @bp.route("/settings/communication/update", methods=["POST"])
+    def settings_communication_update():
+        user = _current_user()
+        _require_hr_superadmin(user)
+        client_id_raw = (request.form.get("client_id") or "").strip()
+        if not client_id_raw.isdigit():
+            flash("Client komunikasi tidak valid.")
+            return redirect(url_for("admin.settings", tab="communication"))
+        client_id = int(client_id_raw)
+        client = _get_client_by_id(client_id)
+        if not client:
+            flash("Client komunikasi tidak ditemukan.")
+            return redirect(url_for("admin.settings", tab="communication"))
+        enabled = request.form.get("communication_enabled") == "1"
+        tier = _normalize_user_tier(request.form.get("communication_tier"))
+        try:
+            message_limit_per_day = int(request.form.get("communication_message_limit_per_day") or COMMUNICATION_DEFAULT_MESSAGE_LIMIT_PER_DAY)
+            attachment_limit_mb = int(request.form.get("communication_attachment_limit_mb") or COMMUNICATION_DEFAULT_ATTACHMENT_LIMIT_MB)
+        except ValueError:
+            flash("Limit komunikasi wajib berupa angka.")
+            return redirect(url_for("admin.settings", tab="communication"))
+        before = _communication_client_config(client_id)
+        after = _set_communication_client_config(
+            client_id,
+            enabled=enabled,
+            tier=tier,
+            message_limit_per_day=message_limit_per_day,
+            attachment_limit_mb=attachment_limit_mb,
+        )
+        _log_audit_event(
+            "communication_config",
+            client_id,
+            "UPDATE",
+            user,
+            "Konfigurasi komunikasi client diperbarui.",
+            {"client_id": client_id, "before_json": before, "after_json": after},
+        )
+        flash("Konfigurasi komunikasi client diperbarui.")
+        return redirect(url_for("admin.settings", tab="communication"))
 
     @bp.route("/settings/subscription/update", methods=["POST"])
     def settings_subscription_update():
         user = _current_user()
         _require_hr_superadmin(user)
+        api_log_from = (request.form.get("api_log_from") or "").strip()
+        api_log_to = (request.form.get("api_log_to") or "").strip()
+        subscription_search = (request.form.get("subscription_search") or "").strip()
+        subscription_status = (request.form.get("subscription_status") or "all").strip().lower()
+        subscription_plan = (request.form.get("subscription_plan") or "all").strip().lower()
         client_id_raw = (request.form.get("client_id") or "").strip()
         if not client_id_raw.isdigit():
             flash("Client tidak valid.")
-            return redirect(url_for("admin.settings", tab="subscription"))
+            return redirect(url_for("admin.settings", tab="subscription", api_log_from=api_log_from, api_log_to=api_log_to, subscription_search=subscription_search, subscription_status=subscription_status, subscription_plan=subscription_plan))
         client_id = int(client_id_raw)
         if not _get_client_by_id(client_id):
             flash("Client tidak ditemukan.")
-            return redirect(url_for("admin.settings", tab="subscription"))
+            return redirect(url_for("admin.settings", tab="subscription", api_log_from=api_log_from, api_log_to=api_log_to, subscription_search=subscription_search, subscription_status=subscription_status, subscription_plan=subscription_plan))
+        before = _phase15_subscription(client_id)
         package = _set_client_package(client_id, request.form.get("package_type"))
         addons = request.form.getlist("addons")
         if package != CLIENT_PACKAGE_ENTERPRISE:
             addons = []
+        elif not _api_access_owner_enabled():
+            addons = [addon for addon in addons if addon != ADDON_API_ACCESS]
         _set_client_addons(client_id, addons)
+        after = _phase15_subscription(client_id)
+        _log_audit_event(
+            "client_subscription",
+            client_id,
+            "UPDATE",
+            user,
+            "Subscription client diperbarui.",
+            {
+                "client_id": client_id,
+                "before_json": before,
+                "after_json": after,
+            },
+        )
         flash("Subscription client diperbarui.")
-        return redirect(url_for("admin.settings", tab="subscription"))
+        return redirect(url_for("admin.settings", tab="subscription", api_log_from=api_log_from, api_log_to=api_log_to, subscription_search=subscription_search, subscription_status=subscription_status, subscription_plan=subscription_plan))
+
+    @bp.route("/settings/subscription/<int:client_id>/api-access/token", methods=["POST"])
+    def settings_subscription_api_token_create(client_id: int):
+        user = _current_user()
+        _require_hr_superadmin(user)
+        api_log_from = (request.form.get("api_log_from") or "").strip()
+        api_log_to = (request.form.get("api_log_to") or "").strip()
+        subscription_search = (request.form.get("subscription_search") or "").strip()
+        subscription_status = (request.form.get("subscription_status") or "all").strip().lower()
+        subscription_plan = (request.form.get("subscription_plan") or "all").strip().lower()
+        client = _get_client_by_id(client_id)
+        if not client:
+            flash("Client tidak ditemukan.")
+            return redirect(url_for("admin.settings", tab="subscription", api_log_from=api_log_from, api_log_to=api_log_to, subscription_search=subscription_search, subscription_status=subscription_status, subscription_plan=subscription_plan))
+        if not _api_access_owner_enabled():
+            flash("Owner/global API access masih nonaktif.")
+            return redirect(url_for("admin.settings", tab="subscription", api_log_from=api_log_from, api_log_to=api_log_to, subscription_search=subscription_search, subscription_status=subscription_status, subscription_plan=subscription_plan))
+        if ADDON_API_ACCESS not in _list_client_addons(client_id):
+            flash("Aktifkan add-on API access pada client terlebih dahulu.")
+            return redirect(url_for("admin.settings", tab="subscription", api_log_from=api_log_from, api_log_to=api_log_to, subscription_search=subscription_search, subscription_status=subscription_status, subscription_plan=subscription_plan))
+        label = (request.form.get("label") or "").strip() or "ERP Integration"
+        token_row, plain_token = _generate_client_api_token(client_id, label, user)
+        _store_api_access_flash_token(
+            client_id,
+            {
+                "label": token_row["label"],
+                "token": plain_token,
+                "created_at": token_row["created_at"],
+            },
+        )
+        _log_audit_event(
+            "api_client_token",
+            token_row["id"],
+            "GENERATE",
+            user,
+            "API token client dibuat.",
+            {
+                "client_id": client_id,
+                "label": token_row["label"],
+                "token_prefix": token_row["token_prefix"],
+            },
+        )
+        flash("API token berhasil dibuat.")
+        return redirect(url_for("admin.settings", tab="subscription", api_log_from=api_log_from, api_log_to=api_log_to, subscription_search=subscription_search, subscription_status=subscription_status, subscription_plan=subscription_plan))
+
+    @bp.route("/settings/subscription/<int:client_id>/api-access/token/<int:token_id>/revoke", methods=["POST"])
+    def settings_subscription_api_token_revoke(client_id: int, token_id: int):
+        user = _current_user()
+        _require_hr_superadmin(user)
+        api_log_from = (request.form.get("api_log_from") or "").strip()
+        api_log_to = (request.form.get("api_log_to") or "").strip()
+        subscription_search = (request.form.get("subscription_search") or "").strip()
+        subscription_status = (request.form.get("subscription_status") or "all").strip().lower()
+        subscription_plan = (request.form.get("subscription_plan") or "all").strip().lower()
+        revoked = _revoke_client_api_token(token_id, user, client_id=client_id)
+        if not revoked:
+            flash("Token tidak ditemukan atau sudah nonaktif.")
+            return redirect(url_for("admin.settings", tab="subscription", api_log_from=api_log_from, api_log_to=api_log_to, subscription_search=subscription_search, subscription_status=subscription_status, subscription_plan=subscription_plan))
+        _log_audit_event(
+            "api_client_token",
+            token_id,
+            "REVOKE",
+            user,
+            "API token client dinonaktifkan.",
+            {
+                "client_id": client_id,
+                "label": revoked.get("label"),
+                "token_prefix": revoked.get("token_prefix"),
+            },
+        )
+        flash("API token berhasil dinonaktifkan.")
+        return redirect(url_for("admin.settings", tab="subscription", api_log_from=api_log_from, api_log_to=api_log_to, subscription_search=subscription_search, subscription_status=subscription_status, subscription_plan=subscription_plan))
 
     @bp.route("/settings/theme/update", methods=["POST"])
     def settings_theme_update():

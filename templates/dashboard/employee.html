@@ -563,6 +563,94 @@
             </div>
           </div>
         </section>
+
+        <section class="swipe-pane" data-pane="5" aria-label="Komunikasi Operasional">
+          <div class="card mobile-card">
+            <div class="panel-head">
+              <div>
+                <div style="font-weight:700;">Komunikasi</div>
+                <div class="panel-sub">Chat site, room role, private supervisor, incident, dan pengumuman operasional.</div>
+              </div>
+              <span class="panel-badge" id="employeeChatUnreadBadge">0 unread</span>
+            </div>
+            <div class="stack" style="gap:12px;">
+              <div class="card" style="margin:0;">
+                <div style="display:flex; justify-content:space-between; gap:12px; align-items:flex-start; margin-bottom:8px;">
+                  <div style="font-weight:700;">Chat Rooms</div>
+                  <div class="mode-chips" id="employeeChatRoomTabs" role="tablist" aria-label="Kategori room chat" style="flex-wrap:wrap;">
+                    <button class="chip active" type="button" data-room-filter="all" aria-pressed="true">Semua</button>
+                    <button class="chip" type="button" data-room-filter="private" aria-pressed="false">Private</button>
+                    <button class="chip" type="button" data-room-filter="site" aria-pressed="false">Site</button>
+                    <button class="chip" type="button" data-room-filter="shift" aria-pressed="false">Shift</button>
+                    <button class="chip" type="button" data-room-filter="role" aria-pressed="false">Role</button>
+                    <button class="chip" type="button" data-room-filter="incident" aria-pressed="false">Incident</button>
+                  </div>
+                </div>
+                <div class="story-list" id="employeeChatRoomList">
+                  <div class="muted">Memuat room chat...</div>
+                </div>
+              </div>
+              <div class="card" style="margin:0;">
+                <div style="font-weight:700; margin-bottom:8px;" id="employeeChatRoomTitle">Percakapan</div>
+                <div class="card" style="margin:0 0 12px 0; background:rgba(255,255,255,.02);">
+                  <div style="display:flex; justify-content:space-between; gap:12px; align-items:flex-start; margin-bottom:8px;">
+                    <div style="font-weight:700;">Thread Diskusi</div>
+                    <span class="panel-badge" id="employeeThreadBadge">0 topic</span>
+                  </div>
+                  <div class="story-list" id="employeeThreadList" style="max-height:220px; overflow:auto;">
+                    <div class="muted">Pilih room untuk melihat topik diskusi.</div>
+                  </div>
+                  <form id="employeeThreadCreateForm" class="stack" style="margin-top:12px;">
+                    <input class="input" id="employeeThreadTitleInput" type="text" maxlength="160" placeholder="Buat topik baru untuk room ini" />
+                    <button class="btn secondary full" id="employeeThreadCreateButton" type="submit">Buat Thread</button>
+                  </form>
+                </div>
+                <div class="story-list" id="employeeChatMessageList" style="max-height:320px; overflow:auto;">
+                  <div class="muted">Pilih room untuk melihat percakapan.</div>
+                </div>
+                <form id="employeeChatSendForm" class="stack" style="margin-top:12px;">
+                  <textarea class="input" id="employeeChatMessageInput" rows="3" placeholder="Tulis pesan operasional"></textarea>
+                  <button class="btn primary full" id="employeeChatSendButton" type="submit">Kirim Pesan</button>
+                </form>
+                <div class="presence-toast" id="employeeChatToast" role="status" aria-live="polite"></div>
+              </div>
+              <div class="card" style="margin:0;">
+                <div style="display:flex; justify-content:space-between; gap:12px; align-items:flex-start; margin-bottom:8px;">
+                  <div style="font-weight:700;">Pengumuman</div>
+                  <span class="panel-badge" id="employeeAnnouncementBadge">0 unread</span>
+                </div>
+                <div class="story-list" id="employeeAnnouncementList">
+                  <div class="muted">Memuat pengumuman...</div>
+                </div>
+              </div>
+              <div class="card" style="margin:0;">
+                <div style="font-weight:700; margin-bottom:8px;">Laporkan Kejadian</div>
+                <form id="employeeIncidentForm" class="stack">
+                  <div class="form-row" style="margin:0;">
+                    <label class="label" for="employee-incident-title">Judul</label>
+                    <input class="input" id="employee-incident-title" type="text" name="title" maxlength="160" placeholder="Contoh: Alarm gate sisi timur aktif" required />
+                  </div>
+                  <div class="form-row" style="margin:0;">
+                    <label class="label" for="employee-incident-description">Deskripsi</label>
+                    <textarea class="input" id="employee-incident-description" name="description" rows="4" placeholder="Jelaskan kondisi di lapangan, dampak, dan tindakan awal" required></textarea>
+                  </div>
+                  <div class="form-row" style="margin:0;">
+                    <label class="label" for="employee-incident-photo">Foto (opsional)</label>
+                    <input class="input" id="employee-incident-photo" type="file" name="photo" accept="image/*" capture="environment" />
+                  </div>
+                  <button class="btn primary full" id="employeeIncidentSubmit" type="submit">Laporkan Kejadian</button>
+                </form>
+                <div class="muted" id="employeeIncidentStatus" style="margin-top:8px;">Laporan otomatis membuat room incident agar supervisor bisa follow-up cepat.</div>
+              </div>
+              <div class="card" style="margin:0;">
+                <div style="font-weight:700; margin-bottom:8px;">Incident Aktif</div>
+                <div class="story-list" id="employeeIncidentList">
+                  <div class="muted">Memuat incident...</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
       </div>
     </div>
 
@@ -610,6 +698,15 @@
             </svg>
           </span>
           <span class="nav-label">Ops</span>
+        </button>
+        <button class="nav-btn" data-tab="5" type="button">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none">
+              <path d="M5 5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H9l-4 3v-3H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+              <path d="M8 9h8M8 13h5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+          </span>
+          <span class="nav-label">Chat</span>
         </button>
         <form method="post" action="{{ url_for('logout') }}">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
@@ -741,6 +838,537 @@
   </script>
   {% endif %}
 
+  <script>
+    (function () {
+      const roomList = document.getElementById("employeeChatRoomList");
+      const messageList = document.getElementById("employeeChatMessageList");
+      const roomTitle = document.getElementById("employeeChatRoomTitle");
+      const roomTabs = document.getElementById("employeeChatRoomTabs");
+      const threadList = document.getElementById("employeeThreadList");
+      const threadBadge = document.getElementById("employeeThreadBadge");
+      const threadCreateForm = document.getElementById("employeeThreadCreateForm");
+      const threadCreateButton = document.getElementById("employeeThreadCreateButton");
+      const threadTitleInput = document.getElementById("employeeThreadTitleInput");
+      const sendForm = document.getElementById("employeeChatSendForm");
+      const sendButton = document.getElementById("employeeChatSendButton");
+      const messageInput = document.getElementById("employeeChatMessageInput");
+      const toast = document.getElementById("employeeChatToast");
+      const announcementList = document.getElementById("employeeAnnouncementList");
+      const announcementBadge = document.getElementById("employeeAnnouncementBadge");
+      const unreadBadge = document.getElementById("employeeChatUnreadBadge");
+      const incidentList = document.getElementById("employeeIncidentList");
+      const incidentForm = document.getElementById("employeeIncidentForm");
+      const incidentSubmit = document.getElementById("employeeIncidentSubmit");
+      const incidentStatus = document.getElementById("employeeIncidentStatus");
+      const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute("content") || "";
+      let selectedRoomId = 0;
+      let selectedRoomFilter = "all";
+      let selectedThreadId = 0;
+      let roomsCache = [];
+      let threadsCache = [];
+      let incidentsCache = [];
+      let unreadAnnouncementCount = 0;
+      let unreadRoomCount = 0;
+
+      function showToast(message) {
+        if (!toast) return;
+        toast.textContent = message;
+        toast.style.display = "block";
+        window.setTimeout(() => {
+          toast.style.display = "none";
+        }, 2200);
+      }
+
+      function escapeHtml(value) {
+        return String(value || "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+      }
+
+      function notifyActivity(message) {
+        showToast(message);
+        try {
+          const AudioCtx = window.AudioContext || window.webkitAudioContext;
+          if (AudioCtx) {
+            const audioContext = new AudioCtx();
+            const oscillator = audioContext.createOscillator();
+            const gain = audioContext.createGain();
+            oscillator.type = "sine";
+            oscillator.frequency.setValueAtTime(880, audioContext.currentTime);
+            gain.gain.setValueAtTime(0.03, audioContext.currentTime);
+            oscillator.connect(gain);
+            gain.connect(audioContext.destination);
+            oscillator.start();
+            oscillator.stop(audioContext.currentTime + 0.08);
+          }
+        } catch (error) {
+          // Ignore audio notification failures on restricted browsers.
+        }
+        if (navigator.vibrate) {
+          navigator.vibrate(140);
+        }
+      }
+
+      async function requestJson(url, options) {
+        const response = await fetch(url, {
+          credentials: "same-origin",
+          ...options,
+          headers: {
+            "Content-Type": "application/json",
+            "X-CSRF-Token": csrfToken,
+            ...(options && options.headers ? options.headers : {}),
+          },
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || payload.ok === false) {
+          throw new Error(payload.message || "Request komunikasi gagal.");
+        }
+        return payload;
+      }
+
+      async function requestForm(url, formData) {
+        formData.set("csrf_token", csrfToken);
+        const response = await fetch(url, {
+          method: "POST",
+          credentials: "same-origin",
+          headers: {
+            "X-CSRF-Token": csrfToken,
+          },
+          body: formData,
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || payload.ok === false) {
+          throw new Error(payload.message || "Request komunikasi gagal.");
+        }
+        return payload;
+      }
+
+      function filteredRooms() {
+        if (selectedRoomFilter === "all") return roomsCache;
+        return roomsCache.filter((room) => String(room.type || "").toLowerCase() === selectedRoomFilter);
+      }
+
+      function renderRooms(rooms) {
+        if (!roomList) return;
+        if (!rooms.length) {
+          roomList.innerHTML = '<div class="muted">Belum ada room chat yang tersedia.</div>';
+          return;
+        }
+        roomList.innerHTML = rooms.map((room) => `
+          <button type="button" class="story-item" data-room-id="${room.id}" style="width:100%; text-align:left; border:1px solid rgba(255,255,255,.08); background:${selectedRoomId === room.id ? 'rgba(255,255,255,.08)' : 'rgba(255,255,255,.03)'};">
+            <div style="display:flex; justify-content:space-between; gap:12px; align-items:flex-start;">
+              <div style="font-weight:700;">${escapeHtml(room.name)}</div>
+              <span class="panel-badge">${escapeHtml(room.type || "room")}</span>
+            </div>
+            <div class="muted">${escapeHtml(room.last_message_preview || 'Belum ada pesan.')}</div>
+            <div class="muted">${Number(room.unread_count || 0)} unread</div>
+          </button>
+        `).join("");
+        roomList.querySelectorAll("[data-room-id]").forEach((button) => {
+          button.addEventListener("click", async () => {
+            selectedRoomId = Number(button.dataset.roomId || 0);
+            selectedThreadId = 0;
+            renderRooms(filteredRooms());
+            await loadThreads(selectedRoomId);
+            await loadMessages(selectedRoomId);
+          });
+        });
+      }
+
+      function renderMessages(messages) {
+        if (!messageList) return;
+        const visibleMessages = selectedThreadId
+          ? messages.filter((item) => Number(item.thread_id || 0) === Number(selectedThreadId))
+          : messages;
+        if (!visibleMessages.length) {
+          messageList.innerHTML = '<div class="muted">Belum ada pesan di room ini.</div>';
+          return;
+        }
+        messageList.innerHTML = visibleMessages.map((item) => {
+          const mine = item.sender_email === document.body.dataset.email;
+          return `
+            <div class="story-item" style="border:1px solid rgba(255,255,255,.08); background:${mine ? 'rgba(31,80,56,.28)' : 'rgba(255,255,255,.03)'};">
+              <div style="display:flex; justify-content:space-between; gap:12px; align-items:flex-start;">
+                <div style="font-weight:700;">${mine ? 'Anda' : escapeHtml(item.sender_email)}</div>
+                <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                  ${item.thread_id ? `<span class="panel-badge">Thread #${Number(item.thread_id)}</span>` : ""}
+                  ${mine ? `<button type="button" class="btn secondary" data-delete-message-id="${Number(item.id || 0)}" style="min-height:32px; padding:0 10px;">Hapus</button>` : ""}
+                </div>
+              </div>
+              <div style="margin-top:4px; line-height:1.5;">${escapeHtml(item.message)}</div>
+              <div class="muted" style="margin-top:6px;">${escapeHtml(item.created_at || '-')}</div>
+            </div>
+          `;
+        }).join("");
+        messageList.querySelectorAll("[data-delete-message-id]").forEach((button) => {
+          button.addEventListener("click", async () => {
+            const messageId = Number(button.dataset.deleteMessageId || 0);
+            if (!messageId) return;
+            try {
+              await requestJson("/api/chat/message/delete", {
+                method: "POST",
+                body: JSON.stringify({ message_id: messageId }),
+              });
+              await loadMessages(selectedRoomId);
+              showToast("Pesan dihapus.");
+            } catch (error) {
+              showToast(error.message);
+            }
+          });
+        });
+        messageList.scrollTop = messageList.scrollHeight;
+      }
+
+      function renderThreads(threads) {
+        if (!threadList) return;
+        if (threadBadge) {
+          threadBadge.textContent = `${threads.length} topic`;
+        }
+        if (!threads.length) {
+          threadList.innerHTML = '<div class="muted">Belum ada thread pada room ini.</div>';
+          return;
+        }
+        threadList.innerHTML = `
+          <button type="button" class="story-item" data-thread-id="0" style="width:100%; text-align:left; border:1px solid rgba(255,255,255,.08); background:${selectedThreadId === 0 ? 'rgba(255,255,255,.08)' : 'rgba(255,255,255,.03)'};">
+            <div style="font-weight:700;">Semua pesan</div>
+            <div class="muted">Tampilkan seluruh percakapan room</div>
+          </button>
+        ` + threads.map((thread) => `
+          <button type="button" class="story-item" data-thread-id="${Number(thread.id || 0)}" style="width:100%; text-align:left; border:1px solid rgba(255,255,255,.08); background:${selectedThreadId === Number(thread.id || 0) ? 'rgba(255,255,255,.08)' : 'rgba(255,255,255,.03)'};">
+            <div style="display:flex; justify-content:space-between; gap:12px; align-items:flex-start;">
+              <div style="font-weight:700;">${escapeHtml(thread.title)}</div>
+              ${Number(thread.is_locked || 0) === 1 ? '<span class="panel-badge">Locked</span>' : ""}
+            </div>
+            <div class="muted">${Number(thread.reply_count || 0)} reply • ${escapeHtml(thread.last_reply_at || thread.created_at || "-")}</div>
+          </button>
+        `).join("");
+        threadList.querySelectorAll("[data-thread-id]").forEach((button) => {
+          button.addEventListener("click", () => {
+            selectedThreadId = Number(button.dataset.threadId || 0);
+            renderThreads(threadsCache);
+            renderMessages(window.__employeeChatMessages || []);
+          });
+        });
+      }
+
+      function renderAnnouncements(items) {
+        if (!announcementList) return;
+        if (!items.length) {
+          announcementList.innerHTML = '<div class="muted">Belum ada pengumuman aktif.</div>';
+          return;
+        }
+        announcementList.innerHTML = items.map((item) => `
+          <button type="button" class="story-item" data-announcement-id="${item.id}" style="width:100%; text-align:left; border:1px solid rgba(255,255,255,.08); background:${item.read_at ? 'rgba(255,255,255,.03)' : 'rgba(91,58,24,.22)'};">
+            <div style="display:flex; justify-content:space-between; gap:12px; align-items:flex-start;">
+              <div style="font-weight:700;">${escapeHtml(item.title)}</div>
+              ${item.is_mandatory ? '<span class="badge">Mandatory</span>' : ''}
+            </div>
+            <div style="margin-top:6px; line-height:1.5;">${escapeHtml(item.message)}</div>
+            <div class="muted" style="margin-top:6px;">${escapeHtml(item.created_at || '-')}</div>
+          </button>
+        `).join("");
+        announcementList.querySelectorAll("[data-announcement-id]").forEach((button) => {
+          button.addEventListener("click", async () => {
+            const announcementId = Number(button.dataset.announcementId || 0);
+            if (!announcementId) return;
+            try {
+              await requestJson("/api/announcement/read", {
+                method: "POST",
+                body: JSON.stringify({ announcement_id: announcementId }),
+              });
+              await loadAnnouncements({ silent: true });
+            } catch (error) {
+              showToast(error.message);
+            }
+          });
+        });
+      }
+
+      function renderIncidents(items) {
+        if (!incidentList) return;
+        if (!items.length) {
+          incidentList.innerHTML = '<div class="muted">Belum ada incident aktif.</div>';
+          return;
+        }
+        incidentList.innerHTML = items.map((item) => `
+          <button type="button" class="story-item" data-incident-room-id="${Number(item.chat_room_id || 0)}" style="width:100%; text-align:left; border:1px solid rgba(255,255,255,.08); background:rgba(255,255,255,.03);">
+            <div style="display:flex; justify-content:space-between; gap:12px; align-items:flex-start;">
+              <div style="font-weight:700;">${escapeHtml(item.title)}</div>
+              <span class="panel-badge">${escapeHtml(String(item.status || "open").toUpperCase())}</span>
+            </div>
+            <div style="margin-top:6px; line-height:1.5;">${escapeHtml(item.description)}</div>
+            <div class="muted" style="margin-top:6px;">${escapeHtml(item.created_at || "-")}${item.photo_path ? " • Foto terlampir" : ""}</div>
+          </button>
+        `).join("");
+        incidentList.querySelectorAll("[data-incident-room-id]").forEach((button) => {
+          button.addEventListener("click", async () => {
+            const roomId = Number(button.dataset.incidentRoomId || 0);
+            if (!roomId) return;
+            selectedRoomId = roomId;
+            selectedRoomFilter = "incident";
+            selectedThreadId = 0;
+            applyRoomTabs();
+            renderRooms(filteredRooms());
+            await loadThreads(roomId);
+            await loadMessages(roomId);
+          });
+        });
+      }
+
+      function applyRoomTabs() {
+        roomTabs?.querySelectorAll("[data-room-filter]").forEach((button) => {
+          const active = button.dataset.roomFilter === selectedRoomFilter;
+          button.classList.toggle("active", active);
+          button.setAttribute("aria-pressed", active ? "true" : "false");
+        });
+      }
+
+      async function loadRooms(options = {}) {
+        const silent = Boolean(options.silent);
+        const refreshSelection = Boolean(options.refreshSelection);
+        try {
+          const payload = await requestJson("/api/chat/list", { method: "GET", headers: {} });
+          roomsCache = Array.isArray(payload.data) ? payload.data : [];
+          const unreadTotal = roomsCache.reduce((total, room) => total + Number(room.unread_count || 0), 0);
+          if (!silent && unreadTotal > unreadRoomCount) {
+            notifyActivity("Ada pesan baru masuk.");
+          }
+          unreadRoomCount = unreadTotal;
+          if (unreadBadge) unreadBadge.textContent = `${unreadTotal} unread`;
+          if (!selectedRoomId && roomsCache.length) {
+            selectedRoomId = Number(roomsCache[0].id || 0);
+          }
+          if (selectedRoomId && !roomsCache.some((room) => Number(room.id) === Number(selectedRoomId))) {
+            selectedRoomId = Number(roomsCache[0]?.id || 0);
+          }
+          renderRooms(filteredRooms());
+          if (refreshSelection && selectedRoomId) {
+            await loadThreads(selectedRoomId);
+            await loadMessages(selectedRoomId, { refreshRooms: false });
+          } else if (!selectedRoomId && roomTitle) {
+            roomTitle.textContent = "Percakapan";
+          }
+        } catch (error) {
+          if (roomList) roomList.innerHTML = `<div class="muted">${error.message}</div>`;
+        }
+      }
+
+      async function loadMessages(roomId, options = {}) {
+        const refreshRooms = options.refreshRooms !== false;
+        if (!roomId) return;
+        const room = roomsCache.find((item) => Number(item.id) === Number(roomId));
+        if (roomTitle) {
+          roomTitle.textContent = room ? room.name : "Percakapan";
+        }
+        try {
+          const payload = await requestJson(`/api/chat/room/${roomId}`, { method: "GET", headers: {} });
+          window.__employeeChatMessages = Array.isArray(payload.data) ? payload.data : [];
+          renderMessages(window.__employeeChatMessages);
+          if (refreshRooms) {
+            await loadRooms({ silent: true });
+          }
+        } catch (error) {
+          if (messageList) messageList.innerHTML = `<div class="muted">${error.message}</div>`;
+        }
+      }
+
+      async function loadThreads(roomId) {
+        if (!roomId) {
+          threadsCache = [];
+          selectedThreadId = 0;
+          renderThreads([]);
+          return;
+        }
+        try {
+          const payload = await requestJson(`/api/chat/room/${roomId}/threads`, { method: "GET", headers: {} });
+          threadsCache = Array.isArray(payload.data) ? payload.data : [];
+          if (selectedThreadId && !threadsCache.some((thread) => Number(thread.id) === Number(selectedThreadId))) {
+            selectedThreadId = 0;
+          }
+          renderThreads(threadsCache);
+        } catch (error) {
+          threadsCache = [];
+          selectedThreadId = 0;
+          if (threadList) {
+            threadList.innerHTML = `<div class="muted">${error.message}</div>`;
+          }
+        }
+      }
+
+      async function loadAnnouncements(options = {}) {
+        const silent = Boolean(options.silent);
+        try {
+          const payload = await requestJson("/api/announcement/list", { method: "GET", headers: {} });
+          const items = Array.isArray(payload.data) ? payload.data : [];
+          const unreadCount = items.filter((item) => !item.read_at).length;
+          if (!silent && unreadCount > unreadAnnouncementCount) {
+            notifyActivity("Ada pengumuman operasional baru.");
+          }
+          unreadAnnouncementCount = unreadCount;
+          if (announcementBadge) {
+            announcementBadge.textContent = `${unreadCount} unread`;
+          }
+          renderAnnouncements(items);
+        } catch (error) {
+          if (announcementList) announcementList.innerHTML = `<div class="muted">${error.message}</div>`;
+        }
+      }
+
+      async function loadIncidents() {
+        try {
+          const payload = await requestJson("/api/incident/list", { method: "GET", headers: {} });
+          incidentsCache = Array.isArray(payload.data) ? payload.data : [];
+          renderIncidents(incidentsCache);
+        } catch (error) {
+          if (incidentList) incidentList.innerHTML = `<div class="muted">${error.message}</div>`;
+        }
+      }
+
+      sendForm?.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        if (!selectedRoomId) {
+          showToast("Pilih room chat terlebih dahulu.");
+          return;
+        }
+        const message = (messageInput?.value || "").trim();
+        if (!message) {
+          showToast("Pesan tidak boleh kosong.");
+          return;
+        }
+        if (sendButton) {
+          sendButton.disabled = true;
+          sendButton.textContent = "Mengirim...";
+        }
+        try {
+          await requestJson("/api/chat/send", {
+            method: "POST",
+            body: JSON.stringify({ room_id: selectedRoomId, message, thread_id: selectedThreadId || null }),
+          });
+          if (messageInput) messageInput.value = "";
+          await loadMessages(selectedRoomId);
+          showToast("Pesan terkirim.");
+        } catch (error) {
+          showToast(error.message);
+        } finally {
+          if (sendButton) {
+            sendButton.disabled = false;
+            sendButton.textContent = "Kirim Pesan";
+          }
+        }
+      });
+
+      threadCreateForm?.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        if (!selectedRoomId) {
+          showToast("Pilih room chat terlebih dahulu.");
+          return;
+        }
+        const title = (threadTitleInput?.value || "").trim();
+        if (!title) {
+          showToast("Judul thread tidak boleh kosong.");
+          return;
+        }
+        if (threadCreateButton) {
+          threadCreateButton.disabled = true;
+          threadCreateButton.textContent = "Membuat...";
+        }
+        try {
+          const payload = await requestJson("/api/chat/thread/create", {
+            method: "POST",
+            body: JSON.stringify({ room_id: selectedRoomId, title }),
+          });
+          selectedThreadId = Number(payload.data?.id || 0);
+          if (threadTitleInput) threadTitleInput.value = "";
+          await loadThreads(selectedRoomId);
+          renderMessages(window.__employeeChatMessages || []);
+          showToast("Thread dibuat.");
+        } catch (error) {
+          showToast(error.message);
+        } finally {
+          if (threadCreateButton) {
+            threadCreateButton.disabled = false;
+            threadCreateButton.textContent = "Buat Thread";
+          }
+        }
+      });
+
+      incidentForm?.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        if (!incidentForm) return;
+        const formData = new FormData(incidentForm);
+        if (incidentSubmit) {
+          incidentSubmit.disabled = true;
+          incidentSubmit.textContent = "Mengirim laporan...";
+        }
+        if (incidentStatus) {
+          incidentStatus.textContent = "Sedang mengirim laporan incident...";
+        }
+        try {
+          const payload = await requestForm("/api/incident/create", formData);
+          const roomId = Number(payload.data?.chat_room_id || 0);
+          incidentForm.reset();
+          if (incidentStatus) {
+            incidentStatus.textContent = payload.message || "Incident berhasil dilaporkan.";
+          }
+          await loadIncidents();
+          await loadRooms({ silent: true });
+          if (roomId) {
+            selectedRoomId = roomId;
+            selectedRoomFilter = "incident";
+            applyRoomTabs();
+            renderRooms(filteredRooms());
+            await loadMessages(roomId, { refreshRooms: false });
+          }
+          showToast("Incident berhasil dibuat.");
+        } catch (error) {
+          if (incidentStatus) {
+            incidentStatus.textContent = error.message;
+          }
+          showToast(error.message);
+        } finally {
+          if (incidentSubmit) {
+            incidentSubmit.disabled = false;
+            incidentSubmit.textContent = "Laporkan Kejadian";
+          }
+        }
+      });
+
+      roomTabs?.querySelectorAll("[data-room-filter]").forEach((button) => {
+        button.addEventListener("click", async () => {
+          selectedRoomFilter = button.dataset.roomFilter || "all";
+          applyRoomTabs();
+          const visibleRooms = filteredRooms();
+          if (!visibleRooms.some((room) => Number(room.id) === Number(selectedRoomId))) {
+            selectedRoomId = Number(visibleRooms[0]?.id || 0);
+          }
+          renderRooms(visibleRooms);
+          if (selectedRoomId) {
+            selectedThreadId = 0;
+            await loadThreads(selectedRoomId);
+            await loadMessages(selectedRoomId, { refreshRooms: false });
+          } else if (messageList) {
+            messageList.innerHTML = '<div class="muted">Belum ada room pada kategori ini.</div>';
+          }
+        });
+      });
+
+      document.addEventListener("DOMContentLoaded", () => {
+        applyRoomTabs();
+        loadRooms({ refreshSelection: true });
+        loadAnnouncements({ silent: true });
+        loadIncidents();
+        window.setInterval(() => {
+          loadRooms({ silent: false });
+          loadAnnouncements({ silent: false });
+          loadIncidents();
+        }, 30000);
+      });
+    })();
+  </script>
+
   <script src="{{ url_for('static', filename='js/i18n.js') }}"></script>
   <script src="{{ url_for('static', filename='js/dashboard_employee_mobile.js') }}"></script>
   <script src="{{ url_for('static', filename='js/change_password.js') }}"></script>
@@ -760,47 +1388,20 @@
 
       // Handle Patroli page visibility
       (function(){
-        const patroli_key = "gmi_page_patroli_enabled";
         const patroli_pane = document.querySelector('[data-pane="4"]');
         const patroli_nav_btn = document.querySelector('[data-tab="4"]');
         const patroli_ops_pane = document.querySelector('[data-pane="3"]');
         const patroli_ops_nav_btn = document.querySelector('[data-tab="3"]');
-        const swipeTrack = document.getElementById("swipeTrack");
         
-        function updatePatroliVisibility(enabled) {
+        function updatePatroliVisibility() {
           if (!patroli_pane || !patroli_nav_btn) return;
-          
-          if (!enabled) {
-            // Hide patroli pane
-            patroli_pane.style.display = "none";
-            patroli_nav_btn.style.display = "none";
-            if (patroli_ops_pane) patroli_ops_pane.style.display = "none";
-            if (patroli_ops_nav_btn) patroli_ops_nav_btn.style.display = "none";
-          } else {
-            // Show patroli pane
-            patroli_pane.style.display = "";
-            patroli_nav_btn.style.display = "";
-            if (patroli_ops_pane) patroli_ops_pane.style.display = "";
-            if (patroli_ops_nav_btn) patroli_ops_nav_btn.style.display = "";
-          }
+          patroli_pane.style.display = "";
+          patroli_nav_btn.style.display = "";
+          if (patroli_ops_pane) patroli_ops_pane.style.display = "";
+          if (patroli_ops_nav_btn) patroli_ops_nav_btn.style.display = "";
         }
-        
-        // Check on load
-        const stored = localStorage.getItem(patroli_key);
-        const isEnabled = stored === null ? true : stored === "1";
-        updatePatroliVisibility(isEnabled);
-        
-        // Listen for toggle changes from main page
-        window.addEventListener("gmi_patroli_toggle_changed", (e) => {
-          updatePatroliVisibility(e.detail.enabled);
-        });
-        
-        // Also check periodically (in case changed in another tab)
-        setInterval(() => {
-          const current = localStorage.getItem(patroli_key);
-          const enabled = current === null ? true : current === "1";
-          updatePatroliVisibility(enabled);
-        }, 1000);
+
+        updatePatroliVisibility();
       })();
     })();
   </script>

@@ -86,3 +86,87 @@ def test_enterprise_billing_summary_calculates_per_head_with_tax(phase15_db):
     assert summary["tax_amount"] == 10000
     assert summary["calculated_amount"] == 110000
     assert summary["warnings"] == []
+
+
+def test_api_access_client_addon_persists_to_primary_and_legacy_storage(phase15_db):
+    client_id = _seed_client_usage(phase15_db)
+    presensi._set_global_addons([presensi.ADDON_API_ACCESS])
+
+    active = presensi._set_client_addons(client_id, [presensi.ADDON_API_ACCESS])
+
+    assert active == [presensi.ADDON_API_ACCESS]
+    assert presensi._list_client_addons(client_id) == [presensi.ADDON_API_ACCESS]
+
+    conn = sqlite3.connect(phase15_db)
+    conn.row_factory = sqlite3.Row
+    try:
+        addon_row = conn.execute(
+            """
+            SELECT is_enabled FROM client_addons
+            WHERE client_id = ? AND addon_key = ?
+            """,
+            (client_id, presensi.ADDON_API_ACCESS),
+        ).fetchone()
+        client_row = conn.execute("SELECT addons FROM clients WHERE id = ?", (client_id,)).fetchone()
+    finally:
+        conn.close()
+
+    assert addon_row["is_enabled"] == 1
+    assert presensi.ADDON_API_ACCESS in presensi._addons_from_value(client_row["addons"])
+    assert presensi.has_addon(presensi._get_client_by_id(client_id), presensi.ADDON_API_ACCESS) is True
+
+
+def test_api_access_legacy_client_addons_are_used_as_fallback(phase15_db):
+    client_id = _seed_client_usage(phase15_db)
+    presensi._set_global_addons([presensi.ADDON_API_ACCESS])
+    conn = sqlite3.connect(phase15_db)
+    try:
+        conn.execute(
+            "UPDATE clients SET addons = ? WHERE id = ?",
+            (presensi._addons_json([presensi.ADDON_API_ACCESS]), client_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    assert presensi._list_client_addons(client_id) == [presensi.ADDON_API_ACCESS]
+    assert presensi.has_addon(presensi._get_client_by_id(client_id), presensi.ADDON_API_ACCESS) is True
+
+
+def test_client_addons_source_of_truth_wins_over_stale_legacy_addons(phase15_db):
+    client_id = _seed_client_usage(phase15_db)
+    presensi._set_global_addons([presensi.ADDON_API_ACCESS])
+    now = presensi._now_ts()
+    conn = sqlite3.connect(phase15_db)
+    try:
+        conn.execute(
+            "UPDATE clients SET addons = ? WHERE id = ?",
+            (presensi._addons_json([presensi.ADDON_API_ACCESS]), client_id),
+        )
+        conn.execute(
+            """
+            INSERT INTO client_addons (client_id, addon_key, is_enabled, created_at, updated_at)
+            VALUES (?, ?, 0, ?, ?)
+            """,
+            (client_id, presensi.ADDON_API_ACCESS, now, now),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    assert presensi._list_client_addons(client_id) == []
+    assert presensi.has_addon(presensi._get_client_by_id(client_id), presensi.ADDON_API_ACCESS) is False
+
+    presensi._init_db()
+
+    assert presensi._list_client_addons(client_id) == []
+    assert presensi.has_addon(presensi._get_client_by_id(client_id), presensi.ADDON_API_ACCESS) is False
+
+
+def test_client_feature_enabled_respects_api_access_addon(phase15_db):
+    client_id = _seed_client_usage(phase15_db)
+    presensi._set_global_addons([presensi.ADDON_API_ACCESS])
+    presensi._set_client_addons(client_id, [presensi.ADDON_API_ACCESS])
+    user = presensi.User(id=10, email="client@acme.test", role="client_admin", client_id=client_id)
+
+    assert presensi._client_feature_enabled(user, presensi.ADDON_API_ACCESS, client_id) is True
