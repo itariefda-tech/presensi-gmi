@@ -57,6 +57,11 @@
     .client-access-shell .label { margin-bottom:6px; display:block; }
     .client-access-shell .input { width:100%; min-width:0; }
     .client-access-shell .form-actions { display:flex; justify-content:flex-start; gap:10px; flex-wrap:wrap; }
+    .payroll-slip-preview { margin-top:14px; border:1px solid rgba(255,255,255,.08); border-radius:10px; padding:14px; background:rgba(255,255,255,.025); display:grid; gap:10px; }
+    .payroll-slip-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:10px; margin-top:8px; }
+    .payroll-slip-item { border:1px solid rgba(255,255,255,.08); border-radius:8px; padding:10px; display:grid; gap:4px; min-width:0; }
+    .payroll-slip-item span { color:var(--muted); font-size:11px; line-height:1.3; }
+    .payroll-slip-item strong { font-size:15px; line-height:1.2; overflow-wrap:anywhere; }
     @media (max-width: 1080px) {
       .client-access-grid,
       .client-access-summary,
@@ -1118,8 +1123,9 @@
           </section>
         </section>
 
+        {% if payroll_enabled %}
         <section class="swipe-pane" data-pane="5" aria-label="Payroll">
-          <article class="panel payroll-hero" id="payroll" data-can-manage-payroll="{{ 1 if can_manage_payroll else 0 }}" data-payroll-plus="{{ 1 if client and client.addons and 'payroll_plus' in client.addons else 0 }}">
+          <article class="panel payroll-hero" id="payroll" data-can-manage-payroll="{{ 1 if can_manage_payroll else 0 }}" data-payroll-enabled="{{ 1 if payroll_enabled else 0 }}" data-site-id="{{ site.id if site else '' }}">
             <div class="panel-head">
               <div>
                 <h3>Payroll</h3>
@@ -1237,24 +1243,24 @@
               <div class="payroll-stack">
                 <div class="stack-row">
                   <span>Gaji Pokok</span>
-                  <span>72%</span>
+                  <span id="clientPayrollBasePct">0%</span>
                 </div>
-                <div class="meter"><span style="width:72%"></span></div>
+                <div class="meter"><span id="clientPayrollBaseMeter" style="width:0%"></span></div>
                 <div class="stack-row">
                   <span>Lembur</span>
-                  <span>12%</span>
+                  <span id="clientPayrollOvertimePct">0%</span>
                 </div>
-                <div class="meter"><span style="width:12%"></span></div>
+                <div class="meter"><span id="clientPayrollOvertimeMeter" style="width:0%"></span></div>
                 <div class="stack-row">
                   <span>Tunjangan</span>
-                  <span>10%</span>
+                  <span id="clientPayrollAllowancePct">0%</span>
                 </div>
-                <div class="meter"><span style="width:10%"></span></div>
+                <div class="meter"><span id="clientPayrollAllowanceMeter" style="width:0%"></span></div>
                 <div class="stack-row">
                   <span>Potongan</span>
-                  <span>6%</span>
+                  <span id="clientPayrollDeductionPct">0%</span>
                 </div>
-                <div class="meter warn"><span style="width:6%"></span></div>
+                <div class="meter warn"><span id="clientPayrollDeductionMeter" style="width:0%"></span></div>
               </div>
               <div class="payroll-note-card">
                 <div class="note-title">Catatan Payroll</div>
@@ -1263,8 +1269,13 @@
                 <button class="btn ghost" id="clientPayrollNoteDetail" type="button">Lihat Detail</button>
               </div>
             </div>
+            <div class="payroll-slip-preview" id="clientPayrollSlipDetail" aria-live="polite">
+              <div class="note-title">Slip Detail</div>
+              <p class="muted">Pilih tombol Detail pada slip untuk melihat breakdown payroll.</p>
+            </div>
           </article>
         </section>
+        {% endif %}
 
         <section class="swipe-pane" data-pane="6" aria-label="Settings">
           <article class="panel" id="settings">
@@ -1433,6 +1444,7 @@
         </svg>
       </span>
     </button>
+    {% if payroll_enabled %}
     <button class="nav-btn" data-tab="5" type="button" aria-label="Payroll" data-i18n-aria-label="nav.payroll">
       <span class="nav-icon" aria-hidden="true">
         <svg viewBox="0 0 24 24" fill="none">
@@ -1442,6 +1454,7 @@
         </svg>
       </span>
     </button>
+    {% endif %}
   </div>
 
   <div class="modal" id="siteModal" aria-hidden="true">

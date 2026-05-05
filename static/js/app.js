@@ -432,6 +432,7 @@ const OWNER_ADDON_PRO_KEY = "hris_pro";
 const OWNER_ADDON_PRO_PLUS_KEY = "hris_pro_plus";
 const OWNER_ADDON_BILLING_CONTRACT_KEY = "billing_engine";
 const OWNER_ADDON_CONTRACT_KEY = "contract_management";
+const OWNER_ADDON_ALIASES = { payroll: "payroll_plus" };
 const OWNER_COMMUNICATION_CHAT_KEY = "communication_chat";
 const OWNER_COMMUNICATION_ANNOUNCEMENT_KEY = "communication_announcement";
 const OWNER_COMMUNICATION_INCIDENT_KEY = "communication_incident";
@@ -518,6 +519,7 @@ function setOwnerAddonValues(addons){
   const active = new Set(Array.isArray(addons) ? addons : []);
   ownerAddonToggles.forEach(toggle => {
     const key = toggle.dataset.ownerAddon;
+    const canonicalKey = OWNER_ADDON_ALIASES[key] || key;
     if (key === OWNER_ADDON_BILLING_CONTRACT_KEY){
       toggle.checked = active.has(OWNER_ADDON_BILLING_CONTRACT_KEY) && active.has(OWNER_ADDON_CONTRACT_KEY);
       return;
@@ -526,7 +528,7 @@ function setOwnerAddonValues(addons){
       toggle.checked = false;
       return;
     }
-    toggle.checked = active.has(key);
+    toggle.checked = active.has(key) || active.has(canonicalKey);
   });
   applyOwnerSuiteMode();
 }
@@ -637,7 +639,7 @@ function selectedOwnerAddons(){
       addons.push(OWNER_ADDON_BILLING_CONTRACT_KEY, OWNER_ADDON_CONTRACT_KEY);
       return;
     }
-    addons.push(key);
+    addons.push(OWNER_ADDON_ALIASES[key] || key);
   });
   return addons;
 }

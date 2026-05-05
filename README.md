@@ -53,7 +53,7 @@ Sampai titik ini, aplikasi sudah berkembang cukup jauh dari sistem presensi dasa
 - **Payroll sudah berjalan**
   - generate payroll
   - detail payroll
-  - payroll plus adjustment
+  - payroll adjustment
   - filter payroll sudah dirapikan agar mengikuti policy site, bukan duplikasi aturan manual
 
 - **Operational Communication sudah tersedia**

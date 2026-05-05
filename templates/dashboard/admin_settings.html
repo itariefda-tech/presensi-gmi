@@ -623,8 +623,8 @@
           <span>Reporting Adv</span>
         </label>
         <label class="check">
-          <input type="checkbox" data-owner-addon value="payroll_plus" disabled />
-          <span>Payroll Plus</span>
+          <input type="checkbox" data-owner-addon value="payroll" disabled />
+          <span>Payroll</span>
         </label>
         <label class="check">
           <input type="checkbox" data-owner-addon value="ai" disabled />
@@ -787,6 +787,7 @@
     const communicationChatKey = "communication_chat";
     const communicationAnnouncementKey = "communication_announcement";
     const communicationIncidentKey = "communication_incident";
+    const addonAliases = { payroll: "payroll_plus" };
     const modeKeys = new Set([enterpriseAddonKey, proAddonKey, proPlusAddonKey]);
 
     function showMessage(message) {
@@ -839,6 +840,7 @@
     function applyAddons(addons) {
       const active = new Set(Array.isArray(addons) ? addons : []);
       toggles.forEach((toggle) => {
+        const canonicalValue = addonAliases[toggle.value] || toggle.value;
         if (toggle.value === billingContractKey) {
           toggle.checked = active.has(billingContractKey) && active.has(contractManagementKey);
           return;
@@ -847,7 +849,7 @@
           toggle.checked = false;
           return;
         }
-        toggle.checked = active.has(toggle.value);
+        toggle.checked = active.has(toggle.value) || active.has(canonicalValue);
       });
       applyOwnerSuiteMode();
       applyCommunicationAddons();
@@ -950,7 +952,7 @@
           selected.push(billingContractKey, contractManagementKey);
           return;
         }
-        selected.push(toggle.value);
+        selected.push(addonAliases[toggle.value] || toggle.value);
       });
       return selected;
     }

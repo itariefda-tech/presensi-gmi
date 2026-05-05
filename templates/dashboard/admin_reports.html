@@ -28,7 +28,7 @@
     <div class="calendar-report-field calendar-report-actions"><button class="btn primary" id="btnCalendarReportGenerate" type="button">Generate Calendar Report</button></div>
   </div>
   <div class="table-wrap" style="margin-top:12px;">
-    <table class="table" aria-label="Calendar HRIS report">
+    <table class="table calendar-report-table" aria-label="Calendar HRIS report">
       <thead id="calendarReportHead"><tr><th>Report</th></tr></thead>
       <tbody id="calendarReportRows"><tr><td class="muted">Generate report untuk melihat data.</td></tr></tbody>
     </table>
@@ -403,9 +403,54 @@
   justify-content: center;
 }
 
+.calendar-report-table {
+  min-width: 960px;
+  table-layout: fixed;
+}
+
+.calendar-report-table td {
+  vertical-align: top;
+}
+
+.calendar-report-head-sub {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.calendar-report-cell-pair {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.calendar-report-cell-main,
+.calendar-report-cell-sub {
+  min-width: 0;
+}
+
+.calendar-report-cell-main strong,
+.calendar-report-cell-sub strong {
+  display: block;
+  font-size: 13px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.calendar-report-cell-main span,
+.calendar-report-cell-sub span {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
 .custom-builder-grid {
   display: grid;
-  grid-template-columns: minmax(170px, .9fr) minmax(260px, 1.45fr) minmax(360px, 2fr) minmax(190px, .95fr);
+  grid-template-columns: minmax(220px, 1.15fr) minmax(180px, .75fr) minmax(360px, 2fr) minmax(190px, .95fr);
   gap: 12px;
   align-items: start;
 }
@@ -597,6 +642,24 @@
   background: rgba(102, 126, 234, 0.05);
 }
 
+.reports-dashboard-card.is-generated .tab-btn.active {
+  color: #fff;
+  border-bottom-color: transparent;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.12);
+}
+
+.reports-dashboard-card.is-generated .tab-btn[data-tab="attendance"].active {
+  background: linear-gradient(135deg, #2563eb 0%, #4f46e5 100%);
+}
+
+.reports-dashboard-card.is-generated .tab-btn[data-tab="late"].active {
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+}
+
+.reports-dashboard-card.is-generated .tab-btn[data-tab="absent"].active {
+  background: linear-gradient(135deg, #ef4444 0%, #be123c 100%);
+}
+
 .tab-panel {
   display: none;
 }
@@ -747,6 +810,69 @@
     coverage: ['client_name','site_name','schedule_count','unique_employees','present','late','absent'],
     late_absent: ['date','employee_name','employee_email','client_name','site_name','shift_name','attendance_status','checkin_time','late_minutes']
   };
+  const calendarReportPairs = {
+    schedule_attendance: [
+      ['employee_name', 'employee_email'],
+      ['client_name', 'site_name'],
+      ['date', 'shift_name'],
+      ['scheduled_start', 'scheduled_end'],
+      ['checkin_time', 'checkout_time'],
+      ['attendance_status', 'late_minutes']
+    ],
+    task_completion: [
+      ['title', 'priority'],
+      ['employee_name', 'employee_email'],
+      ['client_name', 'site_name'],
+      ['due_date', 'status']
+    ],
+    workload: [
+      ['employee_name', 'employee_email'],
+      ['scheduled_days', 'late_days'],
+      ['absent_days', 'tasks_total'],
+      ['tasks_done', 'urgent_open']
+    ],
+    coverage: [
+      ['client_name', 'site_name'],
+      ['schedule_count', 'unique_employees'],
+      ['present', 'late'],
+      ['absent']
+    ],
+    late_absent: [
+      ['employee_name', 'employee_email'],
+      ['client_name', 'site_name'],
+      ['date', 'shift_name'],
+      ['attendance_status', 'late_minutes'],
+      ['checkin_time']
+    ]
+  };
+  const calendarReportFieldNames = {
+    date: 'Date',
+    due_date: 'Due date',
+    employee_name: 'Employee',
+    employee_email: 'Email',
+    client_name: 'Client',
+    site_name: 'Site',
+    shift_name: 'Shift',
+    scheduled_start: 'Scheduled start',
+    scheduled_end: 'Scheduled end',
+    attendance_status: 'Status',
+    checkin_time: 'Check-in',
+    checkout_time: 'Check-out',
+    late_minutes: 'Late minutes',
+    title: 'Task',
+    priority: 'Priority',
+    scheduled_days: 'Scheduled days',
+    late_days: 'Late days',
+    absent_days: 'Absent days',
+    tasks_total: 'Total tasks',
+    tasks_done: 'Done tasks',
+    urgent_open: 'Urgent open',
+    schedule_count: 'Schedules',
+    unique_employees: 'Employees',
+    present: 'Present',
+    late: 'Late',
+    absent: 'Absent'
+  };
   
   // Initialize date inputs
   function initializeDateInputs() {
@@ -798,15 +924,39 @@
   function renderCalendarReport(reportType, rows) {
     if (!calendarReportsEnabled) return;
     const keys = calendarReportLabels[reportType] || Object.keys((rows || [])[0] || {});
+    const pairs = calendarReportPairs[reportType] || keys.map(key => [key]);
     const head = document.getElementById('calendarReportHead');
     const body = document.getElementById('calendarReportRows');
-    head.innerHTML = `<tr>${keys.map(key => `<th>${key.replaceAll('_', ' ')}</th>`).join('')}</tr>`;
+    const label = (key) => calendarReportFieldNames[key] || key.replaceAll('_', ' ');
+    const value = (row, key) => row[key] ?? '-';
+    head.innerHTML = `<tr>${pairs.map(pair => {
+      const [primary, secondary] = pair;
+      return `<th>${label(primary)}${secondary ? `<br><span class="calendar-report-head-sub">${label(secondary)}</span>` : ''}</th>`;
+    }).join('')}</tr>`;
     if (!rows || rows.length === 0) {
-      body.innerHTML = `<tr><td colspan="${keys.length}" class="muted">Tidak ada data.</td></tr>`;
+      body.innerHTML = `<tr><td colspan="${pairs.length}" class="muted">Tidak ada data.</td></tr>`;
       return;
     }
     body.innerHTML = rows.map(row => `
-      <tr>${keys.map(key => `<td>${row[key] ?? '-'}</td>`).join('')}</tr>
+      <tr>${pairs.map(pair => {
+        const [primary, secondary] = pair;
+        return `
+          <td>
+            <div class="calendar-report-cell-pair">
+              <div class="calendar-report-cell-main">
+                <strong>${value(row, primary)}</strong>
+                <span>${label(primary)}</span>
+              </div>
+              ${secondary ? `
+                <div class="calendar-report-cell-sub">
+                  <strong>${value(row, secondary)}</strong>
+                  <span>${label(secondary)}</span>
+                </div>
+              ` : ''}
+            </div>
+          </td>
+        `;
+      }).join('')}</tr>
     `).join('');
   }
 
@@ -1018,6 +1168,8 @@
       return;
     }
     
+    document.querySelector('.reports-dashboard-card')?.classList.add('is-generated');
+
     // Show loading
     showLoading();
     

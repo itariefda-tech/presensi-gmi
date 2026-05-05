@@ -14,6 +14,7 @@ def payroll_db(tmp_path, monkeypatch):
     db_path = tmp_path / "payroll.db"
     monkeypatch.setattr(presensi, "DB_PATH", str(db_path))
     presensi._init_db()
+    presensi._set_global_addons([presensi.ADDON_HRIS_PRO_PLUS, presensi.ADDON_PAYROLL])
     return db_path
 
 
@@ -424,7 +425,7 @@ def test_employee_summary_uses_pay_cycle_metadata(payroll_db):
     assert summary["present"] == 2
 
 
-def test_client_payroll_list_defaults_to_client_wide(payroll_db, monkeypatch):
+def test_client_payroll_list_defaults_to_active_site(payroll_db, monkeypatch):
     monkeypatch.setenv("FLASK_SECRET", "test-secret-for-payroll-list")
     _seed_employee_policy(
         payroll_db,
@@ -454,16 +455,10 @@ def test_client_payroll_list_defaults_to_client_wide(payroll_db, monkeypatch):
         assert response.status_code == 200
         payload = response.get_json()
         assert payload["ok"] is True
-        assert {row["employee_email"] for row in payload["data"]} == {
-            "employee@test.local",
-            "employee2@test.local",
-        }
+        assert [row["employee_email"] for row in payload["data"]] == ["employee@test.local"]
 
         filtered = client.get("/api/payroll/list?period=2026-02&site_id=2")
-        assert filtered.status_code == 200
-        filtered_payload = filtered.get_json()
-        assert [row["employee_email"] for row in filtered_payload["data"]] == ["employee2@test.local"]
-        assert filtered_payload["data"][0]["site_id"] == 2
+        assert filtered.status_code == 403
 
         schedule_filtered = client.get(
             "/api/payroll/list?period=2026-02&payroll_schedule=MONTH_END"
@@ -765,6 +760,166 @@ def test_approved_payroll_is_immutable_for_regenerate_and_adjustment(payroll_db,
         )
         assert response.status_code == 400
         assert "approved" in response.get_json()["message"].lower()
+
+
+def test_payroll_profile_save_and_generate_refreshes_defaults(payroll_db, monkeypatch):
+    monkeypatch.setenv("FLASK_SECRET", "test-secret-for-payroll-profile")
+    _seed_employee_policy(
+        payroll_db,
+        schedule=presensi.PAYROLL_SCHEDULE_MID_MONTH,
+        scheme=presensi.PAYROLL_SCHEME_PRORATED,
+    )
+    _insert_checkins(payroll_db, ["2026-01-16"])
+    presensi._set_app_setting(
+        "payroll_bpjs_rates",
+        {
+            "employee": {"kesehatan": 0.1, "jht": 0, "jp": 0},
+            "company": {"kesehatan": 0, "jht": 0, "jp": 0, "jkk": 0, "jkm": 0.2},
+        },
+    )
+
+    flask_app = presensi.create_app()
+    flask_app.config.update(TESTING=True)
+    with flask_app.test_client() as client:
+        with client.session_transaction() as sess:
+            sess["csrf_token"] = "csrf-test-token"
+            sess["user"] = {
+                "id": 0,
+                "email": "admin@test.local",
+                "role": "hr_superadmin",
+                "name": "Admin",
+                "tier": "pro",
+            }
+
+        saved = client.post(
+            "/api/payroll/profile",
+            json={
+                "employee_email": "employee@test.local",
+                "salary_base": 4500,
+                "potongan_telat_rate": 25,
+                "potongan_absen_rate": 75,
+                "tax_status": "TK0",
+                "bpjs_enabled": True,
+                "allowances": {"jabatan": 300, "transport": 200, "makan": 100},
+                "deductions": {"loan": 40, "penalty": 10},
+            },
+            headers={"X-CSRF-Token": "csrf-test-token"},
+        )
+        assert saved.status_code == 200
+        saved_payload = saved.get_json()["data"]
+        assert saved_payload["salary_base"] == 4500
+        assert saved_payload["tax_status"] == "TK0"
+        assert saved_payload["bpjs_enabled"] is True
+        assert saved_payload["tunjangan"] == 600
+        assert saved_payload["potongan_lain"] == 50
+        assert saved_payload["allowances"]["transport"] == 200
+        assert saved_payload["deductions"]["loan"] == 40
+
+        loaded = client.get("/api/payroll/profile?employee_email=employee@test.local")
+        assert loaded.status_code == 200
+        assert loaded.get_json()["data"]["potongan_telat_rate"] == 25
+
+        generated = client.post(
+            "/api/payroll/generate",
+            json={
+                "employee_email": "employee@test.local",
+                "period": "2026-02",
+                "salary_base": 5100,
+                "potongan_telat_rate": 30,
+                "potongan_absen_rate": 80,
+            },
+            headers={"X-CSRF-Token": "csrf-test-token"},
+        )
+        assert generated.status_code == 200
+        generated_payload = generated.get_json()["data"]
+        assert generated_payload["tunjangan"] == 600
+        assert generated_payload["potongan_lain"] == 50
+        assert generated_payload["breakdown"]["allowances"]["items"]["jabatan"] == 300
+        assert generated_payload["breakdown"]["deductions"]["custom"]["items"]["penalty"] == 10
+        bpjs = generated_payload["breakdown"]["bpjs"]
+        expected_gross = float(generated_payload["gross_salary"])
+        assert generated_payload["payroll_mode"] == presensi.PAYROLL_MODE_ADVANCED
+        assert bpjs["enabled"] is True
+        assert bpjs["employee_total"] == pytest.approx(expected_gross * 0.1)
+        assert bpjs["company_total"] == pytest.approx(expected_gross * 0.2)
+        assert presensi.loads_breakdown(generated_payload["bpjs_json"])["employee_total"] == pytest.approx(
+            expected_gross * 0.1
+        )
+        assert generated_payload["total_gaji"] == pytest.approx(
+            expected_gross + 600 - 50 - bpjs["employee_total"]
+        )
+        payroll_list = client.get("/api/payroll/list?period=2026-02")
+        assert payroll_list.status_code == 200
+        assert [row["employee_email"] for row in payroll_list.get_json()["data"]] == ["employee@test.local"]
+
+        refreshed = client.get("/api/payroll/profile?employee_email=employee@test.local")
+        refreshed_payload = refreshed.get_json()["data"]
+        assert refreshed_payload["salary_base"] == 5100
+        assert refreshed_payload["potongan_telat_rate"] == 30
+        assert refreshed_payload["potongan_absen_rate"] == 80
+
+
+def test_advanced_payroll_generates_tax_thr_overtime_snapshots(payroll_db, monkeypatch):
+    _seed_employee_policy(
+        payroll_db,
+        schedule=presensi.PAYROLL_SCHEDULE_MID_MONTH,
+        scheme=presensi.PAYROLL_SCHEME_FULL_MONTHLY,
+    )
+
+    monkeypatch.setattr(
+        presensi,
+        "_calculate_attendance_summary_by_cycle",
+        lambda *args, **kwargs: {
+            "attendance_days": 20,
+            "late_days": 0,
+            "absent_days": 0,
+            "leave_days": 0,
+            "working_days": 20,
+            "period_start": "2026-01-16",
+            "period_end": "2026-02-15",
+        },
+    )
+    presensi._upsert_payroll_profile_for_employee(
+        "employee@test.local",
+        salary_base=120000000,
+        tax_status="K0",
+        bpjs_enabled=True,
+        bpjs_kesehatan_enabled=True,
+        bpjs_tk_enabled=True,
+        overtime_rate=100000,
+        thr_base_multiplier=1,
+        allowances={"jabatan": 2000000},
+        deductions={"loan": 500000},
+    )
+
+    payroll_id = presensi._create_payroll_record(
+        "employee@test.local",
+        "2026-02",
+        120000000,
+        potongan_telat_rate=0,
+        potongan_absen_rate=0,
+        advanced_config={
+            "is_thr_period": True,
+            "tenure_months": 6,
+            "overtime_hours": 10,
+            "overtime_multiplier": 2,
+        },
+    )
+
+    record = presensi._get_payroll_by_id(payroll_id)
+    breakdown = record["breakdown"]
+    assert record["payroll_mode"] == presensi.PAYROLL_MODE_ADVANCED
+    assert breakdown["thr"]["amount"] == pytest.approx(60000000)
+    assert breakdown["overtime"]["amount"] == pytest.approx(2000000)
+    assert breakdown["tax"]["enabled"] is True
+    assert breakdown["tax"]["monthly_tax"] > 0
+    assert breakdown["bpjs"]["employee_total"] > 0
+    assert presensi.loads_breakdown(record["tax_json"])["monthly_tax"] == pytest.approx(
+        breakdown["tax"]["monthly_tax"]
+    )
+    assert presensi.loads_breakdown(record["thr_json"])["amount"] == pytest.approx(60000000)
+    assert presensi.loads_breakdown(record["overtime_json"])["amount"] == pytest.approx(2000000)
+    assert record["total_gaji"] == pytest.approx(breakdown["net"])
 
 
 def test_client_admin_cannot_access_other_client_payroll(payroll_db, monkeypatch):

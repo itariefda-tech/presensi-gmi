@@ -15,7 +15,7 @@
           </select>
           <input type="date" id="guardTourStart" class="input" aria-label="Tanggal mulai" />
           <input type="date" id="guardTourEnd" class="input" aria-label="Tanggal selesai" />
-          <button class="btn primary" type="button" id="guardTourApply">Filter</button>
+          <button class="btn primary" type="button" id="guardTourApply">Apply</button>
           <button class="btn secondary" type="button" id="guardTourRefresh">Refresh</button>
           <button class="btn secondary" type="button" id="guardTourExport">Export CSV</button>
         </div>
@@ -36,23 +36,43 @@
     </div>
     <div class="patrol-hero-grid">
       <div class="patrol-hero-card">
-        <div class="patrol-hero-label">Checkpoint Aktif</div>
-        <div class="patrol-hero-value" id="patrolHeroCheckpointCount">0/30</div>
+        <div class="patrol-hero-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><circle cx="12" cy="10" r="2.5" stroke="currentColor" stroke-width="1.7"/></svg>
+        </div>
+        <div class="patrol-hero-copy">
+          <div class="patrol-hero-label">Checkpoint Aktif</div>
+          <div class="patrol-hero-value" id="patrolHeroCheckpointCount">0/30</div>
+        </div>
         <div class="patrol-hero-meta" id="patrolHeroRouteName">Guard Tour Route</div>
       </div>
       <div class="patrol-hero-card">
-        <div class="patrol-hero-label">Sedang Berjalan</div>
-        <div class="patrol-hero-value" id="patrolHeroOngoing">0</div>
+        <div class="patrol-hero-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.7"/><path d="M12 7v5l3 2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+        <div class="patrol-hero-copy">
+          <div class="patrol-hero-label">Sedang Berjalan</div>
+          <div class="patrol-hero-value" id="patrolHeroOngoing">0</div>
+        </div>
         <div class="patrol-hero-meta">Sesi aktif sesuai filter</div>
       </div>
       <div class="patrol-hero-card">
-        <div class="patrol-hero-label">Selesai</div>
-        <div class="patrol-hero-value" id="patrolHeroCompleted">0</div>
+        <div class="patrol-hero-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.7"/><path d="m8.5 12.2 2.2 2.2 4.8-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+        <div class="patrol-hero-copy">
+          <div class="patrol-hero-label">Selesai</div>
+          <div class="patrol-hero-value" id="patrolHeroCompleted">0</div>
+        </div>
         <div class="patrol-hero-meta">Sesi selesai sesuai filter</div>
       </div>
       <div class="patrol-hero-card">
-        <div class="patrol-hero-label">Terhenti</div>
-        <div class="patrol-hero-value" id="patrolHeroStopped">0</div>
+        <div class="patrol-hero-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M12 4 21 20H3L12 4Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M12 9v5M12 17h.01" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>
+        </div>
+        <div class="patrol-hero-copy">
+          <div class="patrol-hero-label">Terhenti</div>
+          <div class="patrol-hero-value" id="patrolHeroStopped">0</div>
+        </div>
         <div class="patrol-hero-meta">Sesi incomplete/invalid</div>
       </div>
     </div>
@@ -162,6 +182,42 @@
   padding: 1rem;
 }
 
+.patrol-hero-card {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+.patrol-hero-icon {
+  display: grid;
+  place-items: center;
+  width: 50px;
+  height: 50px;
+  flex: 0 0 50px;
+  border-radius: 50%;
+  background: rgba(148, 163, 184, 0.14);
+  color: var(--text);
+}
+
+.patrol-hero-icon svg {
+  width: 24px;
+  height: 24px;
+}
+
+.patrol-hero-copy {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+}
+
+.patrol-hero-card .patrol-hero-meta {
+  flex: 0 0 100%;
+  margin-top: 0.25rem;
+  text-align: center;
+}
+
 .patrol-hero-label {
   color: var(--muted);
   font-size: 0.78rem;
@@ -174,6 +230,54 @@
   font-weight: 900;
   line-height: 1;
   margin: 0.45rem 0;
+}
+
+html[data-theme="light"] .patrol-hero-grid {
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+}
+
+html[data-theme="light"] .patrol-hero-card {
+  align-content: center;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border: 0;
+  border-radius: 12px;
+  box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+  color: #fff;
+  min-height: 118px;
+  padding: 1.5rem;
+  transition: transform 0.2s;
+}
+
+html[data-theme="light"] .patrol-hero-card:hover {
+  transform: translateY(-2px);
+}
+
+html[data-theme="light"] .patrol-hero-label,
+html[data-theme="light"] .patrol-hero-value,
+html[data-theme="light"] .patrol-hero-meta {
+  color: #fff;
+}
+
+html[data-theme="light"] .patrol-hero-icon {
+  background: rgba(255,255,255,0.2);
+  color: #fff;
+}
+
+html[data-theme="light"] .patrol-hero-label {
+  font-size: 0.9rem;
+  font-weight: 600;
+  letter-spacing: 0;
+  opacity: 0.9;
+  text-transform: none;
+}
+
+html[data-theme="light"] .patrol-hero-value {
+  font-size: 2rem;
+  margin: 0.25rem 0;
+}
+
+html[data-theme="light"] .patrol-hero-meta {
+  opacity: 0.9;
 }
 
 .patrol-checkpoint-list,

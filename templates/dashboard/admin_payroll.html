@@ -4,37 +4,16 @@
 {% set subtitle = "Generate and manage employee payroll" %}
 
 {% block body %}
-<div class="card">
-  <div class="card-header">
-    <div class="card-header-actions">
-      <h3>Payroll Management</h3>
-      <div class="header-actions">
-        <select id="periodSelect" class="input">
-          <option value="">Select Period</option>
-        </select>
-        <select id="clientSelect" class="input">
-          <option value="">All Clients</option>
-        </select>
-        <select id="siteSelect" class="input">
-          <option value="">All Sites</option>
-        </select>
-        <select id="statusSelect" class="input">
-          <option value="">All Status</option>
-          <option value="draft">Draft</option>
-          <option value="approved">Approved</option>
-        </select>
-        <button class="btn primary" id="btnLoadPayroll">Load Payroll</button>
-        <button class="btn secondary" id="btnGeneratePayroll">Generate New</button>
-      </div>
-    </div>
+<!-- Generate Payroll Form -->
+<div class="card payroll-setup-card is-collapsed" id="payrollSetupCard">
+  <div class="card-header payroll-setup-header">
+    <h3>Set up Payroll</h3>
+    <button class="payroll-collapse-btn" id="btnTogglePayrollSetup" type="button" aria-expanded="false" aria-controls="generateForm" aria-label="Toggle setup payroll">
+      <span class="icon-burger" aria-hidden="true"><span></span><span></span><span></span></span>
+      <span class="icon-minus" aria-hidden="true"></span>
+    </button>
   </div>
-  
-  <div class="card-body">
-    <div id="payrollAlert" class="alert info" style="display:none;"></div>
-    
-    <!-- Generate Payroll Form -->
-    <div id="generateForm" class="form-section" style="display:none;">
-      <h4>Generate Payroll</h4>
+  <div id="generateForm" class="card-body payroll-setup-body" hidden>
       <form id="payrollGenerateForm" class="form-grid">
         <div class="field-group">
           <label for="employeeEmail">Employee Email</label>
@@ -52,19 +31,162 @@
         </div>
         <div class="field-group">
           <label for="potonganTelat">Late Deduction Rate</label>
-          <input type="number" id="potonganTelat" class="input" placeholder="50000" min="0" value="50000" {% if not payroll_plus_enabled %}readonly{% endif %}>
+          <input type="number" id="potonganTelat" class="input" placeholder="50000" min="0" value="50000">
         </div>
         <div class="field-group">
           <label for="potonganAbsen">Absent Deduction Rate</label>
-          <input type="number" id="potonganAbsen" class="input" placeholder="100000" min="0" value="100000" {% if not payroll_plus_enabled %}readonly{% endif %}>
+          <input type="number" id="potonganAbsen" class="input" placeholder="100000" min="0" value="100000">
+        </div>
+        <details class="payroll-advanced-box" open>
+          <summary>
+            <span>Konfigurasi Payroll</span>
+            <small>BPJS, PPh21, THR, overtime</small>
+          </summary>
+          <div class="form-grid payroll-advanced-grid">
+            <div class="field-group">
+              <label for="payrollTaxStatus">Tax Status</label>
+              <select id="payrollTaxStatus" class="input">
+                <option value="">Belum diset</option>
+                <option value="TK0">TK0</option>
+                <option value="TK1">TK1</option>
+                <option value="K0">K0</option>
+                <option value="K1">K1</option>
+                <option value="K2">K2</option>
+                <option value="K3">K3</option>
+              </select>
+            </div>
+            <div class="field-group">
+              <label for="payrollBpjsEnabled">BPJS</label>
+              <label class="check-inline">
+                <input type="checkbox" id="payrollBpjsEnabled">
+                <span>Aktif untuk profile payroll</span>
+              </label>
+            </div>
+            <div class="field-group">
+              <label>BPJS Component</label>
+              <label class="check-inline">
+                <input type="checkbox" id="payrollBpjsKesehatanEnabled" checked>
+                <span>Kesehatan</span>
+              </label>
+              <label class="check-inline">
+                <input type="checkbox" id="payrollBpjsTkEnabled" checked>
+                <span>Ketenagakerjaan</span>
+              </label>
+            </div>
+            <div class="field-group">
+              <label for="payrollOvertimeRate">Overtime Rate</label>
+              <input type="number" id="payrollOvertimeRate" class="input" min="0" step="1000" placeholder="Rate per jam">
+            </div>
+            <div class="field-group">
+              <label for="payrollThrMultiplier">THR Multiplier</label>
+              <input type="number" id="payrollThrMultiplier" class="input" min="0" step="0.1" value="1">
+            </div>
+            <div class="field-group">
+              <label for="payrollIsThrPeriod">THR Period</label>
+              <label class="check-inline">
+                <input type="checkbox" id="payrollIsThrPeriod">
+                <span>Masukkan THR periode ini</span>
+              </label>
+            </div>
+            <div class="field-group">
+              <label for="payrollTenureMonths">Tenure Months</label>
+              <input type="number" id="payrollTenureMonths" class="input" min="0" step="1" placeholder="12">
+            </div>
+            <div class="field-group">
+              <label for="payrollThrAmount">THR Override</label>
+              <input type="number" id="payrollThrAmount" class="input" min="0" step="1000" placeholder="Opsional">
+            </div>
+            <div class="field-group">
+              <label for="payrollOvertimeHours">Overtime Hours</label>
+              <input type="number" id="payrollOvertimeHours" class="input" min="0" step="0.5" placeholder="0">
+            </div>
+            <div class="field-group">
+              <label for="payrollOvertimeMultiplier">Overtime Multiplier</label>
+              <input type="number" id="payrollOvertimeMultiplier" class="input" min="0" step="0.1" value="1">
+            </div>
+            <div class="field-group">
+              <label for="payrollOvertimeAmount">Overtime Override</label>
+              <input type="number" id="payrollOvertimeAmount" class="input" min="0" step="1000" placeholder="Opsional">
+            </div>
+            <div class="field-group">
+              <label for="payrollMonthlyTaxOverride">PPh21 Override</label>
+              <input type="number" id="payrollMonthlyTaxOverride" class="input" min="0" step="1000" placeholder="Opsional">
+            </div>
+          </div>
+        </details>
+        <div class="field-group payroll-component-group">
+          <label>Allowance Detail</label>
+          <div class="payroll-component-grid">
+            <input type="number" class="input" min="0" step="1000" placeholder="Jabatan" data-payroll-allowance="jabatan">
+            <input type="number" class="input" min="0" step="1000" placeholder="Transport" data-payroll-allowance="transport">
+            <input type="number" class="input" min="0" step="1000" placeholder="Makan" data-payroll-allowance="makan">
+            <input type="number" class="input" min="0" step="1000" placeholder="Tetap" data-payroll-allowance="tetap">
+            <input type="number" class="input" min="0" step="1000" placeholder="Custom" data-payroll-allowance="custom">
+          </div>
+        </div>
+        <div class="field-group payroll-component-group">
+          <label>Deduction Detail</label>
+          <div class="payroll-component-grid">
+            <input type="number" class="input" min="0" step="1000" placeholder="Loan / cicilan" data-payroll-deduction="loan">
+            <input type="number" class="input" min="0" step="1000" placeholder="Penalty" data-payroll-deduction="penalty">
+            <input type="number" class="input" min="0" step="1000" placeholder="Custom" data-payroll-deduction="custom">
+          </div>
         </div>
         <div class="btn-row">
           <button type="submit" class="btn primary">Generate Payroll</button>
+          <button type="button" class="btn secondary" id="btnSavePayrollProfile">Save Profile</button>
           <button type="button" class="btn secondary" id="btnCancelGenerate">Cancel</button>
         </div>
       </form>
+  </div>
+</div>
+
+<div class="card payroll-output-card">
+  <div class="card-header">
+    <div class="card-header-actions">
+      <div class="header-actions">
+        <select id="periodSelect" class="input">
+          <option value="">Select Period</option>
+        </select>
+        <select id="clientSelect" class="input">
+          <option value="">All Clients</option>
+        </select>
+        <select id="siteSelect" class="input">
+          <option value="">All Sites</option>
+        </select>
+        <select id="statusSelect" class="input">
+          <option value="">All Status</option>
+          <option value="draft">Draft</option>
+          <option value="approved">Approved</option>
+        </select>
+        <button class="btn primary" id="btnLoadPayroll">Load Payroll</button>
+      </div>
     </div>
-    
+  </div>
+  <div class="card-body">
+    <div id="payrollAlert" class="alert info" style="display:none;"></div>
+    <div class="payroll-kpis" id="payrollKpis">
+      <div class="payroll-kpi">
+        <span>Total Net Payroll</span>
+        <strong id="payrollKpiNet">Rp 0</strong>
+        <em id="payrollKpiCount">0 slip</em>
+      </div>
+      <div class="payroll-kpi accent">
+        <span>Slip Lengkap</span>
+        <strong id="payrollKpiComplete">0</strong>
+        <em>slip dengan komponen</em>
+      </div>
+      <div class="payroll-kpi">
+        <span>BPJS + PPh21</span>
+        <strong id="payrollKpiStatutory">Rp 0</strong>
+        <em>employee portion</em>
+      </div>
+      <div class="payroll-kpi">
+        <span>THR + Overtime</span>
+        <strong id="payrollKpiExtra">Rp 0</strong>
+        <em>additional earning</em>
+      </div>
+    </div>
     <!-- Payroll Table -->
     <div id="payrollTable" class="table-section">
       <div class="table-header">
@@ -81,10 +203,10 @@
               <th>Periode<br><span class="payroll-head-sub">Pay date</span></th>
               <th>Attendance Period<br><span class="payroll-head-sub">Schedule</span></th>
               <th>Scheme<br><span class="payroll-head-sub">Status</span></th>
-              <th>Base Salary<br><span class="payroll-head-sub">Total Salary</span></th>
-              <th>Attendance Days<br><span class="payroll-head-sub">Leave Days</span></th>
-              <th>Late Days<br><span class="payroll-head-sub">Absent Days</span></th>
-              <th>Late Deduction<br><span class="payroll-head-sub">Absent Deduction</span></th>
+              <th>Gross<br><span class="payroll-head-sub">Net Salary</span></th>
+              <th>Earnings<br><span class="payroll-head-sub">Allowance / THR / OT</span></th>
+              <th>Deductions<br><span class="payroll-head-sub">Attendance / Other</span></th>
+              <th>Statutory<br><span class="payroll-head-sub">BPJS / PPh21</span></th>
               <th>Actions</th>
             </tr>
           </thead>
@@ -192,7 +314,6 @@
               <span id="calcTotalSalary"><strong>-</strong></span>
             </div>
           </div>
-          {% if payroll_plus_enabled %}
           <div class="form-grid" style="margin-top:1rem;">
             <div class="field-group">
               <label for="editOtherDeductions">Other Deductions</label>
@@ -203,16 +324,19 @@
               <input type="number" id="editAllowances" class="input" min="0" value="0">
             </div>
           </div>
-          {% endif %}
+        </div>
+        <div class="detail-section payroll-breakdown-section">
+          <h5>Engine Breakdown</h5>
+          <div class="payroll-breakdown-grid" id="payrollEngineBreakdown">
+            <div class="muted">Breakdown belum tersedia.</div>
+          </div>
         </div>
       </div>
     </div>
     <div class="modal-footer">
       <div class="btn-row">
         <button class="btn secondary" type="button" id="btnCloseDetail">Close</button>
-        {% if payroll_plus_enabled %}
         <button class="btn secondary" type="button" id="btnSavePayroll">Save</button>
-        {% endif %}
         <button class="btn primary" type="button" id="btnApprovePayroll">Approve</button>
       </div>
     </div>
@@ -221,10 +345,11 @@
 
 <style>
 .form-section {
-  background: #f8f9fa;
+  background: linear-gradient(180deg, rgba(255,255,255,0.96), rgba(246,248,252,0.96));
   padding: 1.5rem;
   border-radius: 8px;
   margin-bottom: 2rem;
+  border: 1px solid var(--border);
 }
 
 .form-grid {
@@ -244,6 +369,185 @@
   color: #333;
 }
 
+.check-inline {
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 500;
+}
+
+.check-inline input {
+  width: auto;
+}
+
+.payroll-component-group {
+  grid-column: span 2;
+}
+
+.payroll-component-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.5rem;
+}
+
+.payroll-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 0.85rem;
+  margin-bottom: 1.25rem;
+}
+
+.payroll-kpi {
+  display: grid;
+  gap: 0.35rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.payroll-kpi span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.payroll-kpi strong {
+  color: #152238;
+  font-size: 1.35rem;
+  line-height: 1.15;
+}
+
+.payroll-kpi em {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-style: normal;
+}
+
+.payroll-kpi.accent {
+  border-color: rgba(25, 118, 210, 0.25);
+  background: #eef6ff;
+}
+
+.payroll-output-card {
+  margin-top: 1rem;
+}
+
+.payroll-setup-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.payroll-setup-header h3 {
+  margin: 0;
+}
+
+.payroll-collapse-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  color: #152238;
+  cursor: pointer;
+}
+
+.payroll-collapse-btn:hover {
+  background: #f5f7fb;
+}
+
+.payroll-collapse-btn .icon-burger {
+  display: grid;
+  gap: 4px;
+  width: 18px;
+}
+
+.payroll-collapse-btn .icon-burger span,
+.payroll-collapse-btn .icon-minus {
+  display: block;
+  height: 2px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.payroll-collapse-btn .icon-minus {
+  display: none;
+  width: 18px;
+}
+
+.payroll-setup-card:not(.is-collapsed) .payroll-collapse-btn .icon-burger {
+  display: none;
+}
+
+.payroll-setup-card:not(.is-collapsed) .payroll-collapse-btn .icon-minus {
+  display: block;
+}
+
+.payroll-setup-card.is-collapsed .payroll-setup-header {
+  border-bottom: 0;
+}
+
+.payroll-setup-body[hidden] {
+  display: none;
+}
+
+.payroll-advanced-box {
+  grid-column: 1 / -1;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  padding: 0.9rem;
+}
+
+.payroll-advanced-box summary {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  font-weight: 700;
+}
+
+.payroll-advanced-box summary small {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.payroll-advanced-grid {
+  margin-top: 1rem;
+}
+
+.payroll-status-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  width: fit-content;
+  padding: 0 0.55rem;
+  border-radius: 999px;
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.payroll-status-pill.draft {
+  background: #fff7e6;
+  color: #9a5b00;
+}
+
+.payroll-status-pill.approved {
+  background: #e8f5ee;
+  color: #087443;
+}
+
+.payroll-money-strong {
+  color: #0f7a4f;
+}
+
 .card-header-actions {
   display: flex;
   justify-content: space-between;
@@ -257,6 +561,10 @@
   gap: 0.5rem;
   align-items: center;
   flex-wrap: wrap;
+}
+
+.payroll-output-card .card-header {
+  padding-bottom: 10px;
 }
 
 .table-header {
@@ -348,6 +656,30 @@
   border-radius: 8px;
 }
 
+.payroll-breakdown-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.75rem;
+}
+
+.payroll-breakdown-item {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255,255,255,0.04);
+}
+
+.payroll-breakdown-item span {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.payroll-breakdown-item strong {
+  font-size: 1rem;
+}
+
 .calc-row {
   display: flex;
   justify-content: space-between;
@@ -381,6 +713,11 @@
   .header-actions {
     justify-content: stretch;
   }
+
+  .payroll-setup-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
   
   .header-actions input,
   .header-actions button {
@@ -399,8 +736,23 @@
 <script>
 (function() {
   const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
-  const payrollPlusEnabled = {{ payroll_plus_enabled|default(false)|tojson }};
+  const payrollEnabled = true;
   let currentPayrollId = null;
+
+  function setPayrollSetupOpen(open) {
+    const card = document.getElementById('payrollSetupCard');
+    const body = document.getElementById('generateForm');
+    const button = document.getElementById('btnTogglePayrollSetup');
+    if (!card || !body || !button) return;
+    card.classList.toggle('is-collapsed', !open);
+    body.hidden = !open;
+    button.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (open) {
+      window.requestAnimationFrame(() => {
+        document.getElementById('employeeEmail')?.focus();
+      });
+    }
+  }
 
   // Initialize period options
   function initializePeriodOptions() {
@@ -442,6 +794,92 @@
       });
   }
 
+  function payrollGenerateProfilePayload() {
+    const allowances = {};
+    const deductions = {};
+    document.querySelectorAll('[data-payroll-allowance]').forEach((input) => {
+      allowances[input.dataset.payrollAllowance] = parseFloat(input.value || '0');
+    });
+    document.querySelectorAll('[data-payroll-deduction]').forEach((input) => {
+      deductions[input.dataset.payrollDeduction] = parseFloat(input.value || '0');
+    });
+    return {
+      employee_email: document.getElementById('employeeEmail').value,
+      salary_base: parseFloat(document.getElementById('salaryBase').value || '0'),
+      potongan_telat_rate: parseFloat(document.getElementById('potonganTelat').value || '50000'),
+      potongan_absen_rate: parseFloat(document.getElementById('potonganAbsen').value || '100000'),
+      tax_status: document.getElementById('payrollTaxStatus')?.value || '',
+      bpjs_enabled: Boolean(document.getElementById('payrollBpjsEnabled')?.checked),
+      bpjs_kesehatan_enabled: Boolean(document.getElementById('payrollBpjsKesehatanEnabled')?.checked),
+      bpjs_tk_enabled: Boolean(document.getElementById('payrollBpjsTkEnabled')?.checked),
+      overtime_rate: parseFloat(document.getElementById('payrollOvertimeRate')?.value || '0'),
+      thr_base_multiplier: parseFloat(document.getElementById('payrollThrMultiplier')?.value || '1'),
+      allowances,
+      deductions,
+    };
+  }
+
+  function applyPayrollProfile(profile) {
+    if (!profile || !Object.keys(profile).length) return;
+    if (profile.salary_base) document.getElementById('salaryBase').value = Number(profile.salary_base || 0);
+    if (profile.potongan_telat_rate) document.getElementById('potonganTelat').value = Number(profile.potongan_telat_rate || 50000);
+    if (profile.potongan_absen_rate) document.getElementById('potonganAbsen').value = Number(profile.potongan_absen_rate || 100000);
+    document.getElementById('payrollTaxStatus').value = profile.tax_status || '';
+    document.getElementById('payrollBpjsEnabled').checked = Boolean(profile.bpjs_enabled);
+    document.getElementById('payrollBpjsKesehatanEnabled').checked = profile.bpjs_kesehatan_enabled !== false;
+    document.getElementById('payrollBpjsTkEnabled').checked = profile.bpjs_tk_enabled !== false;
+    document.getElementById('payrollOvertimeRate').value = Number(profile.overtime_rate || 0) || '';
+    document.getElementById('payrollThrMultiplier').value = Number(profile.thr_base_multiplier || 1) || 1;
+    document.querySelectorAll('[data-payroll-allowance]').forEach((input) => {
+      input.value = Number((profile.allowances || {})[input.dataset.payrollAllowance] || 0) || '';
+    });
+    document.querySelectorAll('[data-payroll-deduction]').forEach((input) => {
+      input.value = Number((profile.deductions || {})[input.dataset.payrollDeduction] || 0) || '';
+    });
+    if (profile.updated_at || profile.period || profile.latest_period) {
+      showAlert(`Profile payroll ${profile.updated_at ? 'tersimpan' : 'terakhir'} dimuat.`, 'success');
+    }
+  }
+
+  function loadPayrollProfile(employeeEmail) {
+    const email = String(employeeEmail || '').trim();
+    if (!email) return;
+    fetch(`/api/payroll/profile?employee_email=${encodeURIComponent(email)}`)
+      .then(r => r.json())
+      .then(response => {
+        if (response.ok) applyPayrollProfile(response.data || {});
+      })
+      .catch(() => {
+        showAlert('Gagal memuat profile payroll employee.', 'error');
+      });
+  }
+
+  function savePayrollProfile() {
+    const payload = payrollGenerateProfilePayload();
+    if (!payload.employee_email) {
+      showAlert('Pilih employee terlebih dahulu.', 'warning');
+      return;
+    }
+    fetch('/api/payroll/profile', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {})
+      },
+      body: JSON.stringify(payload)
+    })
+      .then(r => r.json())
+      .then(response => {
+        if (response.ok) {
+          applyPayrollProfile(response.data || {});
+          showAlert(response.message || 'Profile payroll disimpan.', 'success');
+        } else {
+          showAlert(response.message || 'Gagal menyimpan profile payroll.', 'error');
+        }
+      })
+      .catch(() => showAlert('Gagal menyimpan profile payroll.', 'error'));
+  }
+
   // Load sites for filter
   function loadSites() {
     const siteSelect = document.getElementById('siteSelect');
@@ -452,13 +890,39 @@
           siteSelect.innerHTML = '<option value="">All Sites</option>';
           response.data.forEach(s => {
             const option = new Option(s.name || s.address || `Site ${s.id}`, s.id);
+            option.dataset.clientId = String(s.client_id || '');
             siteSelect.add(option);
           });
+          updatePayrollFilterCascade();
         }
       })
       .catch(() => {
         console.error('Failed to load sites');
       });
+  }
+
+  function setPayrollOptionVisibility(option, visible) {
+    option.hidden = !visible;
+    option.disabled = !visible;
+  }
+
+  function updatePayrollFilterCascade(options = {}) {
+    const clientSelect = document.getElementById('clientSelect');
+    const siteSelect = document.getElementById('siteSelect');
+    const clientId = clientSelect?.value || '';
+    if (!siteSelect) return;
+
+    Array.from(siteSelect.options).forEach(option => {
+      if (!option.value) {
+        setPayrollOptionVisibility(option, true);
+        return;
+      }
+      setPayrollOptionVisibility(option, !clientId || option.dataset.clientId === clientId);
+    });
+
+    if (options.resetSite || (siteSelect.value && siteSelect.selectedOptions[0]?.disabled)) {
+      siteSelect.value = '';
+    }
   }
 
   function loadClients() {
@@ -472,6 +936,7 @@
             const option = new Option(c.name || `Client ${c.id}`, c.id);
             clientSelect.add(option);
           });
+          updatePayrollFilterCascade();
         }
       })
       .catch(() => {
@@ -514,15 +979,58 @@
   }
   
   // Render payroll table
+  function payrollMoney(value) {
+    return `Rp ${formatNumber(value || 0)}`;
+  }
+
+  function payrollBreakdown(record) {
+    return record.breakdown || {};
+  }
+
+  function renderPayrollKpis(data) {
+    const rows = Array.isArray(data) ? data : [];
+    const totalNet = rows.reduce((sum, record) => sum + Number(record.total_gaji || 0), 0);
+    const complete = rows.filter((record) => {
+      const breakdown = payrollBreakdown(record);
+      return Boolean(
+        Number(breakdown.bpjs?.employee_total || 0)
+        || Number(breakdown.tax?.monthly_tax || 0)
+        || Number(breakdown.thr?.amount || 0)
+        || Number(breakdown.overtime?.amount || 0)
+        || Number(record.tunjangan || 0)
+        || Number(record.potongan_lain || 0)
+      );
+    }).length;
+    const statutory = rows.reduce((sum, record) => {
+      const breakdown = payrollBreakdown(record);
+      return sum + Number(breakdown.bpjs?.employee_total || 0) + Number(breakdown.tax?.monthly_tax || 0);
+    }, 0);
+    const extra = rows.reduce((sum, record) => {
+      const breakdown = payrollBreakdown(record);
+      return sum + Number(breakdown.thr?.amount || 0) + Number(breakdown.overtime?.amount || 0);
+    }, 0);
+    document.getElementById('payrollKpiNet').textContent = payrollMoney(totalNet);
+    document.getElementById('payrollKpiCount').textContent = `${rows.length} slip`;
+    document.getElementById('payrollKpiComplete').textContent = String(complete);
+    document.getElementById('payrollKpiStatutory').textContent = payrollMoney(statutory);
+    document.getElementById('payrollKpiExtra').textContent = payrollMoney(extra);
+  }
+
   function renderPayrollTable(data) {
     const tbody = document.getElementById('payrollRows');
+    renderPayrollKpis(data || []);
     
     if (!data || data.length === 0) {
       tbody.innerHTML = '<tr><td colspan="9" class="muted">No payroll records found for this period</td></tr>';
       return;
     }
     
-    tbody.innerHTML = data.map(record => `
+    tbody.innerHTML = data.map(record => {
+      const breakdown = payrollBreakdown(record);
+      const deductions = breakdown.deductions || {};
+      const attendanceDeduction = Number(deductions.potongan_telat ?? record.potongan_telat ?? 0) + Number(deductions.potongan_absen ?? record.potongan_absen ?? 0);
+      const status = String(record.status || 'draft').toLowerCase();
+      return `
       <tr>
         <td>
           <div class="payroll-cell-pair">
@@ -564,10 +1072,10 @@
           <div class="payroll-cell-pair">
             <div class="payroll-cell-main">
               <strong>${record.payroll_scheme === 'FULL_MONTHLY_DEDUCTION' ? 'Full Monthly' : 'Prorated'}</strong>
-              <span>Scheme</span>
+              <span>Payroll scheme</span>
             </div>
             <div class="payroll-cell-sub">
-              <strong>${record.status || '-'}</strong>
+              <strong><span class="payroll-status-pill ${status}">${record.status || '-'}</span></strong>
               <span>Status</span>
             </div>
           </div>
@@ -575,48 +1083,48 @@
         <td>
           <div class="payroll-cell-pair">
             <div class="payroll-cell-main">
-              <strong>Rp ${formatNumber(record.salary_base)}</strong>
-              <span>Base salary</span>
+              <strong>${payrollMoney(breakdown.gross ?? record.gross_salary)}</strong>
+              <span>Gross salary</span>
             </div>
             <div class="payroll-cell-sub">
-              <strong>Rp ${formatNumber(record.total_gaji)}</strong>
-              <span>Total salary</span>
+              <strong class="payroll-money-strong">${payrollMoney(breakdown.net ?? record.total_gaji)}</strong>
+              <span>Net salary</span>
             </div>
           </div>
         </td>
         <td>
           <div class="payroll-cell-pair">
             <div class="payroll-cell-main">
-              <strong>${record.attendance_days}</strong>
-              <span>Attendance days</span>
+              <strong>${payrollMoney(record.tunjangan || 0)}</strong>
+              <span>Allowance</span>
             </div>
             <div class="payroll-cell-sub">
-              <strong>${record.leave_days}</strong>
-              <span>Leave days</span>
+              <strong>${payrollMoney(Number(breakdown.thr?.amount || 0) + Number(breakdown.overtime?.amount || 0))}</strong>
+              <span>THR + overtime</span>
             </div>
           </div>
         </td>
         <td>
           <div class="payroll-cell-pair">
             <div class="payroll-cell-main">
-              <strong>${record.late_days}</strong>
-              <span>Late days</span>
+              <strong>${payrollMoney(attendanceDeduction)}</strong>
+              <span>Attendance</span>
             </div>
             <div class="payroll-cell-sub">
-              <strong>${record.absent_days}</strong>
-              <span>Absent days</span>
+              <strong>${payrollMoney(record.potongan_lain || 0)}</strong>
+              <span>Other deduction</span>
             </div>
           </div>
         </td>
         <td>
           <div class="payroll-cell-pair">
             <div class="payroll-cell-main">
-              <strong>Rp ${formatNumber(record.potongan_telat)}</strong>
-              <span>Late deduction</span>
+              <strong>${payrollMoney(breakdown.bpjs?.employee_total || 0)}</strong>
+              <span>BPJS employee</span>
             </div>
             <div class="payroll-cell-sub">
-              <strong>Rp ${formatNumber(record.potongan_absen)}</strong>
-              <span>Absent deduction</span>
+              <strong>${payrollMoney(breakdown.tax?.monthly_tax || 0)}</strong>
+              <span>PPh21 estimate</span>
             </div>
           </div>
         </td>
@@ -624,7 +1132,8 @@
           <button class="btn small primary" onclick="showPayrollDetail(${record.id})">Detail</button>
         </td>
       </tr>
-    `).join('');
+    `;
+    }).join('');
   }
   
   // Show payroll detail
@@ -642,6 +1151,47 @@
       });
   }
   
+  function payrollBreakdownValue(value, currency = true) {
+    const number = Number(value || 0);
+    return currency ? `Rp ${formatNumber(number)}` : formatNumber(number);
+  }
+
+  function renderPayrollBreakdown(record) {
+    const root = document.getElementById('payrollEngineBreakdown');
+    if (!root) return;
+    const breakdown = record.breakdown || {};
+    if (!Object.keys(breakdown).length) {
+      root.innerHTML = '<div class="muted">Breakdown belum tersedia.</div>';
+      return;
+    }
+    const deductions = breakdown.deductions || {};
+    const rows = [
+      ['Gross Salary', breakdown.gross ?? record.gross_salary, true],
+      ['Basic Salary', breakdown.basic_salary?.salary_base ?? record.salary_base, true],
+      ['Daily Rate', breakdown.basic_salary?.daily_rate ?? record.daily_rate, true],
+      ['Attendance Deduction', Number(deductions.potongan_telat || 0) + Number(deductions.potongan_absen || 0), true],
+      ['Custom Deduction', deductions.custom?.total ?? record.potongan_lain, true],
+      ['Allowances', breakdown.allowances?.total ?? record.tunjangan, true],
+      ['BPJS Employee', breakdown.bpjs?.employee_total || 0, true],
+      ['BPJS Company', breakdown.bpjs?.company_total || 0, true],
+      ['Tax Estimate', breakdown.tax?.monthly_tax || 0, true],
+      ['THR', breakdown.thr?.amount || 0, true],
+      ['Overtime', breakdown.overtime?.amount || 0, true],
+      ['Net Salary', breakdown.net ?? record.total_gaji, true],
+    ];
+    root.innerHTML = '';
+    rows.forEach(([label, value, currency]) => {
+      const item = document.createElement('div');
+      item.className = 'payroll-breakdown-item';
+      const labelEl = document.createElement('span');
+      const valueEl = document.createElement('strong');
+      labelEl.textContent = label;
+      valueEl.textContent = currency ? payrollBreakdownValue(value, true) : String(value || '-');
+      item.append(labelEl, valueEl);
+      root.appendChild(item);
+    });
+  }
+
   // Populate payroll detail modal
   function populatePayrollDetail(record) {
     currentPayrollId = record.id;
@@ -664,10 +1214,11 @@
     document.getElementById('calcOtherDeductions').textContent = `Rp ${formatNumber(record.potongan_lain || 0)}`;
     document.getElementById('calcAllowances').textContent = `Rp ${formatNumber(record.tunjangan || 0)}`;
     document.getElementById('calcTotalSalary').textContent = `Rp ${formatNumber(record.total_gaji)}`;
-    if (payrollPlusEnabled) {
+    if (payrollEnabled) {
       document.getElementById('editOtherDeductions').value = Number(record.potongan_lain || 0);
       document.getElementById('editAllowances').value = Number(record.tunjangan || 0);
     }
+    renderPayrollBreakdown(record);
     const approveBtn = document.getElementById('btnApprovePayroll');
     if (approveBtn) {
       const approved = String(record.status || '').toLowerCase() === 'approved';
@@ -690,7 +1241,7 @@
     .then(response => {
       if (response.ok) {
         showAlert(response.message, 'success');
-        document.getElementById('generateForm').style.display = 'none';
+        setPayrollSetupOpen(false);
         loadPayrollData(); // Reload table
       } else {
         showAlert(response.message || 'Failed to generate payroll', 'error');
@@ -730,10 +1281,11 @@
   
   // Export to CSV
   function exportToCSV(data, filename) {
-    const headers = ['Employee', 'Period', 'Attendance Period', 'Pay Date', 'Schedule', 'Scheme', 'Site', 'Base Salary', 'Attendance Days', 'Late Days', 'Absent Days', 'Leave Days', 'Late Deduction', 'Absent Deduction', 'Total Salary', 'Status'];
-    const csvContent = [
-      headers.join(','),
-      ...data.map(record => [
+    const money = (value) => Number(value || 0);
+    const headers = ['Employee', 'Period', 'Attendance Period', 'Pay Date', 'Schedule', 'Scheme', 'Site', 'Base Salary', 'Gross Salary', 'Attendance Days', 'Late Days', 'Absent Days', 'Leave Days', 'Late Deduction', 'Absent Deduction', 'Other Deduction', 'Allowance', 'BPJS Employee', 'BPJS Company', 'PPh21 Estimate', 'THR', 'Overtime', 'Net Salary', 'Status'];
+    const csvRows = data.map(record => {
+      const breakdown = record.breakdown || {};
+      return [
         record.employee_name || record.employee_email,
         record.period,
         `${record.period_start || ''} - ${record.period_end || ''}`,
@@ -742,16 +1294,27 @@
         record.payroll_scheme || 'PRORATED_ATTENDANCE',
         record.site_name || '',
         record.salary_base,
+        breakdown.gross ?? record.gross_salary,
         record.attendance_days,
         record.late_days,
         record.absent_days,
         record.leave_days,
         record.potongan_telat,
         record.potongan_absen,
+        record.potongan_lain || 0,
+        record.tunjangan || 0,
+        money(breakdown.bpjs?.employee_total),
+        money(breakdown.bpjs?.company_total),
+        money(breakdown.tax?.monthly_tax),
+        money(breakdown.thr?.amount),
+        money(breakdown.overtime?.amount),
         record.total_gaji,
         record.status
-      ].join(','))
-    ].join('\n');
+      ];
+    });
+    const csvContent = [headers, ...csvRows]
+      .map(row => row.map(cell => `"${String(cell ?? '').replace(/"/g, '""')}"`).join(','))
+      .join('\n');
     
     const blob = new Blob([csvContent], { type: 'text/csv' });
     const url = window.URL.createObjectURL(blob);
@@ -779,7 +1342,7 @@
   }
 
   function savePayrollAdjustment() {
-    if (!currentPayrollId || !payrollPlusEnabled) return;
+    if (!currentPayrollId || !payrollEnabled) return;
     fetch(`/api/payroll/${currentPayrollId}/update`, {
       method: 'POST',
       headers: {
@@ -841,27 +1404,54 @@
     
     // Load payroll button
     document.getElementById('btnLoadPayroll').addEventListener('click', loadPayrollData);
+    document.getElementById('clientSelect').addEventListener('change', () => {
+      updatePayrollFilterCascade({ resetSite: true });
+    });
+    document.getElementById('siteSelect').addEventListener('change', updatePayrollFilterCascade);
     
-    // Generate payroll button
-    document.getElementById('btnGeneratePayroll').addEventListener('click', () => {
-      document.getElementById('generateForm').style.display = 'block';
+    // Setup payroll collapse button
+    document.getElementById('btnTogglePayrollSetup').addEventListener('click', () => {
+      const isOpen = !document.getElementById('generateForm').hidden;
+      setPayrollSetupOpen(!isOpen);
     });
     
     // Cancel generate button
     document.getElementById('btnCancelGenerate').addEventListener('click', () => {
-      document.getElementById('generateForm').style.display = 'none';
+      setPayrollSetupOpen(false);
     });
+
+    document.getElementById('employeeEmail').addEventListener('change', (event) => {
+      loadPayrollProfile(event.target.value);
+    });
+
+    document.getElementById('btnSavePayrollProfile').addEventListener('click', savePayrollProfile);
     
     // Generate form submit
     document.getElementById('payrollGenerateForm').addEventListener('submit', (e) => {
       e.preventDefault();
+      const optionalNumber = (id) => {
+        const raw = document.getElementById(id)?.value;
+        return raw === undefined || raw === null || raw === '' ? null : parseFloat(raw);
+      };
       const formData = {
         employee_email: document.getElementById('employeeEmail').value,
         period: document.getElementById('period').value,
         salary_base: parseFloat(document.getElementById('salaryBase').value),
         potongan_telat_rate: parseFloat(document.getElementById('potonganTelat').value),
-        potongan_absen_rate: parseFloat(document.getElementById('potonganAbsen').value)
+        potongan_absen_rate: parseFloat(document.getElementById('potonganAbsen').value),
+        is_thr_period: Boolean(document.getElementById('payrollIsThrPeriod')?.checked),
+        overtime_multiplier: parseFloat(document.getElementById('payrollOvertimeMultiplier')?.value || '1')
       };
+      [
+        ['tenure_months', 'payrollTenureMonths'],
+        ['thr_amount', 'payrollThrAmount'],
+        ['overtime_hours', 'payrollOvertimeHours'],
+        ['overtime_amount', 'payrollOvertimeAmount'],
+        ['monthly_tax_override', 'payrollMonthlyTaxOverride'],
+      ].forEach(([key, id]) => {
+        const value = optionalNumber(id);
+        if (value !== null && !Number.isNaN(value)) formData[key] = value;
+      });
       generatePayroll(formData);
     });
     

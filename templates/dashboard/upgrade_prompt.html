@@ -6,7 +6,7 @@
 {% block body %}
 <div class="card">
   <div class="card-header">
-    <h3>Upgrade ke HRIS PRO</h3>
+    <h3>{{ "Aktifkan Add-on" if feature == "Payroll" else "Upgrade ke HRIS PRO" }}</h3>
   </div>
   <div class="card-body">
     <div class="upgrade-illustration">
@@ -25,7 +25,7 @@
       </div>
       
       <div class="upgrade-benefits">
-        <h5>Dengan HRIS PRO Anda dapat:</h5>
+        <h5>{{ "Payroll aktif setelah add-on dinyalakan:" if feature == "Payroll" else "Dengan HRIS PRO Anda dapat:" }}</h5>
         <ul class="benefits-list">
           <li>
             <div class="benefit-icon">QR</div>
@@ -49,10 +49,10 @@
             </div>
           </li>
           <li>
-            <div class="benefit-icon">Payroll</div>
+            <div class="benefit-icon">Add-on</div>
             <div>
-              <strong>Payroll Basic</strong>
-              <span>Perhitungan gaji otomatis</span>
+              <strong>Payroll Opsional</strong>
+              <span>Payroll aktif saat owner menyalakan add-on Payroll.</span>
             </div>
           </li>
         </ul>
@@ -85,7 +85,7 @@
               <li>QR Attendance</li>
               <li>Manual Attendance</li>
               <li>Advanced Reporting</li>
-              <li>Payroll Basic</li>
+              <li>Payroll tersedia sebagai add-on</li>
             </ul>
             <button class="btn primary">Upgrade ke PRO</button>
           </div>

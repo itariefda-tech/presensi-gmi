@@ -1808,8 +1808,12 @@
     return payrollPane()?.dataset.canManagePayroll === "1";
   }
 
-  function payrollPlusEnabled(){
-    return payrollPane()?.dataset.payrollPlus === "1";
+  function payrollEnabled(){
+    return payrollPane()?.dataset.payrollEnabled === "1";
+  }
+
+  function payrollSiteId(){
+    return payrollPane()?.dataset.siteId || "";
   }
 
   function payrollCurrentPeriod(){
@@ -1833,6 +1837,18 @@
 
   function payrollSchemeLabel(scheme){
     return scheme === "FULL_MONTHLY_DEDUCTION" ? "Full Monthly" : "Prorated";
+  }
+
+  function payrollRecordBreakdown(row){
+    return row?.breakdown || {};
+  }
+
+  function payrollSetPercent(id, meterId, value){
+    const pct = Math.max(0, Math.min(100, Number(value || 0)));
+    const label = document.getElementById(id);
+    const meter = document.getElementById(meterId);
+    if (label) label.textContent = `${Math.round(pct)}%`;
+    if (meter) meter.style.width = `${pct}%`;
   }
 
   function payrollSetMessage(text, type){
@@ -1877,6 +1893,9 @@
     const pendingEl = document.getElementById("clientPayrollPending");
     const noteApproval = document.getElementById("clientPayrollNoteApproval");
     const noteSync = document.getElementById("clientPayrollNoteSync");
+    const grossTotal = rows.reduce((sum, row) => sum + Number(payrollRecordBreakdown(row).gross ?? row.gross_salary ?? 0), 0);
+    const overtimeTotal = rows.reduce((sum, row) => sum + Number(payrollRecordBreakdown(row).overtime?.amount || 0), 0);
+    const denominator = Math.max(1, grossTotal + totalAllowance + overtimeTotal);
     if (totalEl) totalEl.textContent = payrollFormatMoney(totalPayroll);
     if (metaEl) metaEl.textContent = `${rows.length} pegawai`;
     if (allowanceEl) allowanceEl.textContent = payrollFormatMoney(totalAllowance);
@@ -1890,6 +1909,10 @@
     if (noteSync) {
       noteSync.textContent = `Periode ${payrollCurrentPeriod()} mengikuti schedule payroll policy site.`;
     }
+    payrollSetPercent("clientPayrollBasePct", "clientPayrollBaseMeter", (grossTotal / denominator) * 100);
+    payrollSetPercent("clientPayrollOvertimePct", "clientPayrollOvertimeMeter", (overtimeTotal / denominator) * 100);
+    payrollSetPercent("clientPayrollAllowancePct", "clientPayrollAllowanceMeter", (totalAllowance / denominator) * 100);
+    payrollSetPercent("clientPayrollDeductionPct", "clientPayrollDeductionMeter", (totalDeduction / Math.max(1, grossTotal + totalAllowance)) * 100);
   }
 
   function payrollRenderRows(rows){
@@ -1903,13 +1926,16 @@
       const id = Number(row.id || 0);
       const status = String(row.status || "draft");
       const approved = status.toLowerCase() === "approved";
+      const breakdown = payrollRecordBreakdown(row);
+      const statutory = Number(breakdown.bpjs?.employee_total || 0) + Number(breakdown.tax?.monthly_tax || 0);
+      const extra = Number(breakdown.thr?.amount || 0) + Number(breakdown.overtime?.amount || 0);
       const actionButtons = [
         `<button class="mini-btn" type="button" data-payroll-action="detail" data-id="${id}">Detail</button>`,
       ];
       if (payrollCanManage() && !approved) {
         actionButtons.push(`<button class="mini-btn" type="button" data-payroll-action="approve" data-id="${id}">Approve</button>`);
       }
-      if (payrollCanManage() && payrollPlusEnabled() && !approved) {
+      if (payrollCanManage() && !approved) {
         actionButtons.push(`<button class="mini-btn" type="button" data-payroll-action="adjust" data-id="${id}">Edit</button>`);
       }
       return `
@@ -1926,7 +1952,7 @@
               <span class="muted">${escapeHtml(row.period_start || "-")} - ${escapeHtml(row.period_end || "-")}</span>
               <span class="muted">Pay ${escapeHtml(row.pay_date || "-")} | ${row.payroll_schedule === "MID_MONTH" ? "Tengah Bulan" : "Akhir Bulan"}</span>
               <span class="muted">${payrollSchemeLabel(row.payroll_scheme)}</span>
-              <span class="muted">Rp ${payrollFormatMoney(row.total_gaji)}</span>
+              <span class="muted">Net Rp ${payrollFormatMoney(row.total_gaji)} | BPJS/PPh Rp ${payrollFormatMoney(statutory)} | THR/OT Rp ${payrollFormatMoney(extra)}</span>
             </div>
           </td>
           <td>
@@ -1948,6 +1974,8 @@
     try {
       const period = payrollCurrentPeriod();
       const params = new URLSearchParams({ period });
+      const siteId = payrollSiteId();
+      if (siteId) params.set("site_id", siteId);
       const status = document.getElementById("clientPayrollStatusFilter")?.value || "";
       if (status) params.set("status", status);
       const payload = await payrollApi(`/api/payroll/list?${params.toString()}`);
@@ -1984,6 +2012,25 @@
     payrollSetMessage("Payroll berhasil dibuat.", "success");
   }
 
+  async function payrollApplyLatestInput(employeeEmail){
+    const email = String(employeeEmail || "").trim();
+    if (!email) return;
+    const params = new URLSearchParams({ employee_email: email });
+    const siteId = payrollSiteId();
+    if (siteId) params.set("site_id", siteId);
+    const payload = await payrollApi(`/api/payroll/latest-input?${params.toString()}`);
+    const latest = payload.data || {};
+    const salary = document.getElementById("clientPayrollSalary");
+    const late = document.getElementById("clientPayrollLateRate");
+    const absent = document.getElementById("clientPayrollAbsentRate");
+    if (salary && latest.salary_base) salary.value = Number(latest.salary_base || 0);
+    if (late && latest.potongan_telat_rate) late.value = Number(latest.potongan_telat_rate || 50000);
+    if (absent && latest.potongan_absen_rate) absent.value = Number(latest.potongan_absen_rate || 100000);
+    if (latest.period) {
+      payrollSetMessage(`Input terakhir ${latest.period} dipakai sebagai default.`, "success");
+    }
+  }
+
   async function payrollApprove(id){
     await payrollApi(`/api/payroll/${id}/approve`, { method: "POST", body: {} });
     await payrollLoad({ silent: true });
@@ -2008,24 +2055,71 @@
     payrollSetMessage("Payroll diperbarui.", "success");
   }
 
+  function payrollBreakdownDetail(record){
+    const breakdown = record.breakdown || {};
+    if (!Object.keys(breakdown).length) return "";
+    const deductions = breakdown.deductions || {};
+    const parts = [
+      `Gross: Rp ${payrollFormatMoney(breakdown.gross ?? record.gross_salary)}`,
+      `Basic: Rp ${payrollFormatMoney(breakdown.basic_salary?.salary_base ?? record.salary_base)}`,
+      `Rate harian: Rp ${payrollFormatMoney(breakdown.basic_salary?.daily_rate ?? record.daily_rate)}`,
+      `Potongan attendance: Rp ${payrollFormatMoney(Number(deductions.potongan_telat || 0) + Number(deductions.potongan_absen || 0))}`,
+      `Potongan lain: Rp ${payrollFormatMoney(deductions.custom?.total ?? record.potongan_lain)}`,
+      `Tunjangan: Rp ${payrollFormatMoney(breakdown.allowances?.total ?? record.tunjangan)}`,
+    ];
+    if (Number(breakdown.bpjs?.employee_total || 0) > 0) {
+      parts.push(`BPJS employee: Rp ${payrollFormatMoney(breakdown.bpjs.employee_total)}`);
+    }
+    if (Number(breakdown.bpjs?.company_total || 0) > 0) {
+      parts.push(`BPJS company: Rp ${payrollFormatMoney(breakdown.bpjs.company_total)}`);
+    }
+    if (Number(breakdown.tax?.monthly_tax || 0) > 0) {
+      parts.push(`PPh21 estimasi: Rp ${payrollFormatMoney(breakdown.tax.monthly_tax)}`);
+    }
+    if (Number(breakdown.thr?.amount || 0) > 0) {
+      parts.push(`THR: Rp ${payrollFormatMoney(breakdown.thr.amount)}`);
+    }
+    if (Number(breakdown.overtime?.amount || 0) > 0) {
+      parts.push(`Overtime: Rp ${payrollFormatMoney(breakdown.overtime.amount)}`);
+    }
+    parts.push(`Net: Rp ${payrollFormatMoney(breakdown.net ?? record.total_gaji)}`);
+    return parts.join(" | ");
+  }
+
   function payrollShowDetail(id){
     const record = payrollState.rows.find((row) => Number(row.id || 0) === Number(id));
     if (!record) return;
-    const detail = [
-      `Pegawai: ${record.employee_name || record.employee_email || "-"}`,
-      `Periode: ${record.period || "-"}`,
-      `Attendance period: ${record.period_start || "-"} sampai ${record.period_end || "-"}`,
-      `Pay date: ${record.pay_date || "-"}`,
-      `Schedule: ${record.payroll_schedule === "MID_MONTH" ? "Tengah Bulan" : "Akhir Bulan"}`,
-      `Scheme: ${payrollSchemeLabel(record.payroll_scheme)}`,
-      `Hadir: ${record.attendance_days || 0}, telat: ${record.late_days || 0}, absen: ${record.absent_days || 0}, leave: ${record.leave_days || 0}`,
-      `Gaji pokok: Rp ${payrollFormatMoney(record.salary_base)}`,
-      `Potongan: Rp ${payrollFormatMoney(Number(record.potongan_telat || 0) + Number(record.potongan_absen || 0) + Number(record.potongan_lain || 0))}`,
-      `Tunjangan: Rp ${payrollFormatMoney(record.tunjangan)}`,
-      `Total: Rp ${payrollFormatMoney(record.total_gaji)}`,
-      `Status: ${record.status || "draft"}`,
-    ].join(" | ");
-    payrollSetMessage(detail);
+    const breakdown = payrollRecordBreakdown(record);
+    const deductions = breakdown.deductions || {};
+    const detailRoot = document.getElementById("clientPayrollSlipDetail");
+    const rows = [
+      ["Gross", breakdown.gross ?? record.gross_salary],
+      ["Allowance", breakdown.allowances?.total ?? record.tunjangan],
+      ["THR", breakdown.thr?.amount || 0],
+      ["Overtime", breakdown.overtime?.amount || 0],
+      ["Potongan attendance", Number(deductions.potongan_telat || 0) + Number(deductions.potongan_absen || 0)],
+      ["Potongan lain", deductions.custom?.total ?? record.potongan_lain],
+      ["BPJS employee", breakdown.bpjs?.employee_total || 0],
+      ["BPJS company", breakdown.bpjs?.company_total || 0],
+      ["PPh21 estimasi", breakdown.tax?.monthly_tax || 0],
+      ["Net salary", breakdown.net ?? record.total_gaji],
+    ];
+    if (detailRoot) {
+      detailRoot.innerHTML = `
+        <div class="note-title">Slip Detail - ${escapeHtml(record.employee_name || record.employee_email || "-")}</div>
+        <div class="muted">${escapeHtml(record.period || "-")} | ${escapeHtml(record.period_start || "-")} - ${escapeHtml(record.period_end || "-")}</div>
+        <div class="payroll-slip-grid">
+          ${rows.map(([label, value]) => `
+            <div class="payroll-slip-item">
+              <span>${escapeHtml(label)}</span>
+              <strong>Rp ${payrollFormatMoney(value)}</strong>
+            </div>
+          `).join("")}
+        </div>
+        ${breakdown.tax?.disclaimer ? `<p class="muted">${escapeHtml(breakdown.tax.disclaimer)}</p>` : ""}
+      `;
+    }
+    payrollSetMessage("Detail slip payroll ditampilkan.", "success");
   }
 
   function payrollExportCsv(){
@@ -2034,27 +2128,36 @@
       payrollSetMessage("Tidak ada data payroll untuk export.", "error");
       return;
     }
-    const headers = ["Pegawai", "Email", "Periode", "Attendance Period", "Pay Date", "Schedule", "Scheme", "Gaji Pokok", "Hadir", "Telat", "Absen", "Leave", "Potongan Telat", "Potongan Absen", "Potongan Lain", "Tunjangan", "Total", "Status"];
-    const csvRows = rows.map((row) => [
-      row.employee_name || "",
-      row.employee_email || "",
-      row.period || "",
-      `${row.period_start || ""} - ${row.period_end || ""}`,
-      row.pay_date || "",
-      row.payroll_schedule || "MONTH_END",
-      row.payroll_scheme || "PRORATED_ATTENDANCE",
-      row.salary_base || 0,
-      row.attendance_days || 0,
-      row.late_days || 0,
-      row.absent_days || 0,
-      row.leave_days || 0,
-      row.potongan_telat || 0,
-      row.potongan_absen || 0,
-      row.potongan_lain || 0,
-      row.tunjangan || 0,
-      row.total_gaji || 0,
-      row.status || "draft",
-    ]);
+    const headers = ["Pegawai", "Email", "Periode", "Attendance Period", "Pay Date", "Schedule", "Scheme", "Gaji Pokok", "Gross", "Hadir", "Telat", "Absen", "Leave", "Potongan Telat", "Potongan Absen", "Potongan Lain", "Tunjangan", "BPJS Employee", "BPJS Company", "PPh21 Estimasi", "THR", "Overtime", "Net", "Status"];
+    const csvRows = rows.map((row) => {
+      const breakdown = row.breakdown || {};
+      return [
+        row.employee_name || "",
+        row.employee_email || "",
+        row.period || "",
+        `${row.period_start || ""} - ${row.period_end || ""}`,
+        row.pay_date || "",
+        row.payroll_schedule || "MONTH_END",
+        row.payroll_scheme || "PRORATED_ATTENDANCE",
+        row.salary_base || 0,
+        breakdown.gross ?? row.gross_salary ?? 0,
+        row.attendance_days || 0,
+        row.late_days || 0,
+        row.absent_days || 0,
+        row.leave_days || 0,
+        row.potongan_telat || 0,
+        row.potongan_absen || 0,
+        row.potongan_lain || 0,
+        row.tunjangan || 0,
+        breakdown.bpjs?.employee_total || 0,
+        breakdown.bpjs?.company_total || 0,
+        breakdown.tax?.monthly_tax || 0,
+        breakdown.thr?.amount || 0,
+        breakdown.overtime?.amount || 0,
+        row.total_gaji || 0,
+        row.status || "draft",
+      ];
+    });
     const csv = [headers, ...csvRows]
       .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","))
       .join("\n");
@@ -2083,21 +2186,25 @@
     const refresh = document.getElementById("clientPayrollRefresh");
     const exportBtn = document.getElementById("clientPayrollExport");
     const noteDetail = document.getElementById("clientPayrollNoteDetail");
+    const employeeInput = document.getElementById("clientPayrollEmployee");
     const lateRate = document.getElementById("clientPayrollLateRate");
     const absentRate = document.getElementById("clientPayrollAbsentRate");
     const now = new Date();
     if (periodInput && !periodInput.value) {
       periodInput.value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
     }
-    if (!payrollPlusEnabled()) {
-      if (lateRate) lateRate.readOnly = true;
-      if (absentRate) absentRate.readOnly = true;
-    }
     periodInput?.addEventListener("change", () => payrollLoad({ silent: false }));
     statusFilter?.addEventListener("change", () => payrollLoad({ silent: false }));
     refresh?.addEventListener("click", () => payrollLoad({ silent: false }));
     exportBtn?.addEventListener("click", payrollExportCsv);
     noteDetail?.addEventListener("click", () => payrollLoad({ silent: false }));
+    employeeInput?.addEventListener("change", async () => {
+      try {
+        await payrollApplyLatestInput(employeeInput.value);
+      } catch (err) {
+        payrollSetMessage(err.message || "Gagal mengambil input payroll terakhir.", "error");
+      }
+    });
     form?.addEventListener("submit", async (event) => {
       event.preventDefault();
       try {

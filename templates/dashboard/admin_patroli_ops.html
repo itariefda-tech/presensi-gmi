@@ -24,7 +24,7 @@
           <option value="incident">Insiden</option>
           <option value="handover">Handover</option>
         </select>
-        <button class="btn primary" type="button" id="patrolOpsApply">Filter</button>
+        <button class="btn primary" type="button" id="patrolOpsApply">Apply</button>
         <button class="btn secondary" type="button" id="patrolOpsExport">Export CSV</button>
       </div>
     </div>
@@ -32,10 +32,30 @@
   </article>
 
   <div class="patrol-ops-kpis">
-    <article class="card patrol-ops-kpi"><span>Total</span><strong id="patrolOpsTotal">0</strong></article>
-    <article class="card patrol-ops-kpi"><span>Critical</span><strong id="patrolOpsCritical">0</strong></article>
-    <article class="card patrol-ops-kpi"><span>Open</span><strong id="patrolOpsOpen">0</strong></article>
-    <article class="card patrol-ops-kpi"><span>Resolved</span><strong id="patrolOpsResolved">0</strong></article>
+    <article class="card patrol-ops-kpi">
+      <div class="patrol-ops-kpi-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M5 6h14M5 12h14M5 18h9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </div>
+      <div class="patrol-ops-kpi-copy"><span>Total</span><strong id="patrolOpsTotal">0</strong></div>
+    </article>
+    <article class="card patrol-ops-kpi">
+      <div class="patrol-ops-kpi-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M12 4 21 20H3L12 4Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M12 9v5M12 17h.01" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>
+      </div>
+      <div class="patrol-ops-kpi-copy"><span>Critical</span><strong id="patrolOpsCritical">0</strong></div>
+    </article>
+    <article class="card patrol-ops-kpi">
+      <div class="patrol-ops-kpi-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.7"/><path d="M12 7v5l3 2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div class="patrol-ops-kpi-copy"><span>Open</span><strong id="patrolOpsOpen">0</strong></div>
+    </article>
+    <article class="card patrol-ops-kpi">
+      <div class="patrol-ops-kpi-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.7"/><path d="m8.5 12.2 2.2 2.2 4.8-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div class="patrol-ops-kpi-copy"><span>Resolved</span><strong id="patrolOpsResolved">0</strong></div>
+    </article>
   </div>
 
   <article class="card">
@@ -154,6 +174,31 @@
   width: 0;
   background: var(--accent2);
 }
+.patrol-ops-kpi {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  justify-content: flex-start;
+}
+.patrol-ops-kpi-icon {
+  display: grid;
+  place-items: center;
+  width: 50px;
+  height: 50px;
+  flex: 0 0 50px;
+  border-radius: 50%;
+  background: rgba(148, 163, 184, 0.14);
+  color: var(--text);
+}
+.patrol-ops-kpi-icon svg {
+  width: 24px;
+  height: 24px;
+}
+.patrol-ops-kpi-copy {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+}
 .patrol-ops-kpi span {
   color: var(--muted);
   display: block;
@@ -165,6 +210,46 @@
   display: block;
   font-size: 2rem;
   margin-top: 0.25rem;
+}
+html[data-theme="light"] .patrol-ops-kpis {
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+}
+html[data-theme="light"] .patrol-ops-kpi {
+  align-items: center;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border: 0;
+  border-radius: 12px;
+  box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+  color: #fff;
+  display: flex;
+  gap: 1rem;
+  justify-content: flex-start;
+  min-height: 118px;
+  padding: 1.5rem;
+  transition: transform 0.2s;
+}
+html[data-theme="light"] .patrol-ops-kpi:hover {
+  transform: translateY(-2px);
+}
+html[data-theme="light"] .patrol-ops-kpi span,
+html[data-theme="light"] .patrol-ops-kpi strong {
+  color: #fff;
+}
+html[data-theme="light"] .patrol-ops-kpi-icon {
+  background: rgba(255,255,255,0.2);
+  color: #fff;
+}
+html[data-theme="light"] .patrol-ops-kpi span {
+  font-size: 0.9rem;
+  font-weight: 600;
+  letter-spacing: 0;
+  opacity: 0.9;
+  text-transform: none;
+}
+html[data-theme="light"] .patrol-ops-kpi strong {
+  font-size: 2rem;
+  line-height: 1;
+  margin-top: 0;
 }
 .patrol-ops-item {
   border: 1px solid var(--border);

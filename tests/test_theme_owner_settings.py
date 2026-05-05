@@ -141,6 +141,30 @@ def test_admin_employee_page_hides_addon_nav_when_owner_mode_is_hris_pro(theme_d
     assert 'href="/dashboard/admin/ai-analysis"' not in html
     assert 'href="/dashboard/admin/billing"' not in html
     assert 'href="/dashboard/admin/contract"' not in html
+    assert 'href="/dashboard/admin/payroll"' not in html
+
+
+def test_hris_pro_without_payroll_addon_blocks_payroll_page(theme_db, monkeypatch):
+    monkeypatch.setenv("FLASK_SECRET", "test-secret-hris-pro-no-payroll")
+    presensi._set_global_addons([presensi.ADDON_HRIS_PRO])
+
+    flask_app = presensi.create_app()
+    flask_app.config.update(TESTING=True)
+    with flask_app.test_client() as client:
+        with client.session_transaction() as sess:
+            sess["user"] = {
+                "id": 0,
+                "email": "admin@test.local",
+                "role": "hr_superadmin",
+                "name": "Admin",
+                "tier": "pro",
+            }
+
+        response = client.get("/dashboard/admin/payroll")
+        assert response.status_code == 200
+        html = response.get_data(as_text=True)
+
+    assert "Aktifkan add-on Payroll" in html
 
 
 def test_legacy_basic_package_normalizes_to_pro_and_pro_plus_supports_addons(theme_db):

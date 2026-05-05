@@ -28,6 +28,15 @@ from flask import Flask, jsonify, render_template, request, session, Blueprint, 
 from werkzeug.utils import secure_filename
 from werkzeug.security import generate_password_hash, check_password_hash
 
+from payroll_engine import (
+    PAYROLL_MODE_ADVANCED,
+    PAYROLL_MODE_STANDARD,
+    dumps_breakdown,
+    loads_breakdown,
+    run_payroll_engine,
+    update_payroll_breakdown_adjustments,
+)
+
 
 @dataclass
 class AuthResult:
@@ -736,7 +745,7 @@ def create_app() -> Flask:
             "guard_tour_enabled": _client_feature_enabled(user, ADDON_PATROL, client_id),
             "patrol_ops_enabled": _client_feature_enabled(user, ADDON_PATROL_OPS, client_id),
             "calendar_enabled": _client_feature_enabled(user, ADDON_CALENDAR, client_id),
-            "payroll_plus_enabled": _payroll_plus_enabled(user, client_id),
+            "payroll_enabled": _payroll_enabled(user, client_id),
         }
         return render_template(
             "dashboard/employee.html",
@@ -811,12 +820,15 @@ def create_app() -> Flask:
         policies = _policies_for_site(client_id, site_id)
         client_users = _client_users_for_site(client_id, site_id)
         client_communication_config = _communication_site_config(site_id, client_id)
+        payroll_enabled = _payroll_enabled(user, client_id)
+        if not payroll_enabled and initial_pane == 5:
+            initial_pane = 6
         client_access_features = [
             {"label": "Guard Tour", "enabled": _client_feature_enabled(user, ADDON_PATROL, client_id)},
             {"label": "Patroli Ops", "enabled": _client_feature_enabled(user, ADDON_PATROL_OPS, client_id)},
             {"label": "Calendar", "enabled": _client_feature_enabled(user, ADDON_CALENDAR, client_id)},
             {"label": "Reporting Adv", "enabled": _advanced_reporting_enabled(user, client_id)},
-            {"label": "Payroll Plus", "enabled": _payroll_plus_enabled(user, client_id)},
+            {"label": "Payroll", "enabled": payroll_enabled},
             {"label": "AI Analysis", "enabled": _client_feature_enabled(user, ADDON_AI, client_id)},
             {"label": "Billing + Contract", "enabled": _phase15_global_enabled(ADDON_BILLING_ENGINE)},
             {"label": "SLA Tracking", "enabled": _phase15_global_enabled(ADDON_SLA_TRACKING)},
@@ -847,7 +859,8 @@ def create_app() -> Flask:
             can_manage_employees=user.role == "client_admin",
             can_manage_policies=user.role == "client_admin",
             can_manage_patrol=user.role == "client_admin",
-            can_manage_payroll=user.role == "client_admin",
+            payroll_enabled=payroll_enabled,
+            can_manage_payroll=user.role == "client_admin" and payroll_enabled,
             can_manage_users=user.role == "client_admin",
             can_change_password=user.role == "client_admin",
         )
@@ -3100,9 +3113,11 @@ def create_app() -> Flask:
             client_scope = _client_user_client_id(user)
             if not client_scope:
                 return _json_forbidden()
-            site_scope = None
+            site_scope = _client_user_site_id(user)
         else:
             return _json_forbidden()
+        if not _payroll_enabled(user, client_scope if is_client_admin else None):
+            return _payroll_required_response()
         
         data = _get_json()
         period = _normalize_period_input(data.get("period"))
@@ -3110,6 +3125,9 @@ def create_app() -> Flask:
         salary_base = data.get("salary_base")
         potongan_telat_rate = data.get("potongan_telat_rate", PAYROLL_DEFAULT_LATE_DEDUCTION)
         potongan_absen_rate = data.get("potongan_absen_rate", PAYROLL_DEFAULT_ABSENT_DEDUCTION)
+        advanced_config: dict[str, object] = {
+            "is_thr_period": _payroll_bool(data.get("is_thr_period")),
+        }
         
         if not period:
             return jsonify(ok=False, message="Period wajib diisi (format: YYYY-MM)."), 400
@@ -3120,18 +3138,24 @@ def create_app() -> Flask:
             salary_base = float(salary_base)
             potongan_telat_rate = float(potongan_telat_rate)
             potongan_absen_rate = float(potongan_absen_rate)
+            for key in (
+                "tenure_months",
+                "thr_amount",
+                "overtime_hours",
+                "overtime_multiplier",
+                "overtime_amount",
+                "monthly_tax_override",
+            ):
+                if data.get(key) not in (None, ""):
+                    advanced_config[key] = float(data.get(key) or 0)
         except (TypeError, ValueError):
             return jsonify(ok=False, message="Nominal payroll tidak valid."), 400
         if salary_base <= 0:
             return jsonify(ok=False, message="Salary base wajib diisi dan harus > 0."), 400
         if potongan_telat_rate < 0 or potongan_absen_rate < 0:
             return jsonify(ok=False, message="Potongan payroll tidak boleh minus."), 400
-        uses_custom_rates = (
-            potongan_telat_rate != PAYROLL_DEFAULT_LATE_DEDUCTION
-            or potongan_absen_rate != PAYROLL_DEFAULT_ABSENT_DEDUCTION
-        )
-        if uses_custom_rates and not _payroll_plus_enabled(user, client_scope):
-            return _addon_required_response("Custom payroll rate")
+        if any(float(value or 0) < 0 for value in advanced_config.values() if isinstance(value, (int, float))):
+            return jsonify(ok=False, message="Nominal payroll advanced tidak boleh minus."), 400
         if is_client_admin and not _employee_email_in_payroll_scope(
             employee_email,
             client_id=client_scope,
@@ -3146,8 +3170,24 @@ def create_app() -> Flask:
                 salary_base,
                 potongan_telat_rate=potongan_telat_rate,
                 potongan_absen_rate=potongan_absen_rate,
+                advanced_config=advanced_config,
+            )
+            _upsert_payroll_profile_for_employee(
+                employee_email,
+                salary_base=salary_base,
+                potongan_telat_rate=potongan_telat_rate,
+                potongan_absen_rate=potongan_absen_rate,
             )
             payroll_record = _get_payroll_by_employee_period(employee_email, period)
+            if payroll_record:
+                _log_audit_event(
+                    entity_type="payroll",
+                    entity_id=int(payroll_record.get("id") or 0),
+                    action="GENERATE",
+                    actor=user,
+                    summary="Payroll generated.",
+                    details={"after_json": payroll_record},
+                )
             return jsonify(ok=True, message="Payroll berhasil dibuat.", data=payroll_record), 200
         except ValueError as err:
             return jsonify(ok=False, message=str(err)), 400
@@ -3168,8 +3208,11 @@ def create_app() -> Flask:
             client_scope = _client_user_client_id(user)
             if not client_scope:
                 return _json_forbidden()
+            site_scope_default = _client_user_site_id(user)
         else:
             return _json_forbidden()
+        if not _payroll_enabled(user, client_scope if user.role in CLIENT_ROLES else None):
+            return _payroll_required_response()
         
         period = _normalize_period_input(request.args.get("period"))
         if not period:
@@ -3195,7 +3238,11 @@ def create_app() -> Flask:
             return jsonify(ok=False, message="site_id tidak valid."), 400
         if user.role in CLIENT_ROLES:
             client_filter = client_scope
-            if site_id_val is not None:
+            if site_id_val is None:
+                site_id_val = site_scope_default
+            else:
+                if site_scope_default is not None and int(site_id_val) != int(site_scope_default):
+                    return jsonify(ok=False, message="Payroll client hanya untuk site aktif dashboard ini."), 403
                 site = _get_site_by_id(site_id_val)
                 if not site or int(_row_get(site, "client_id") or 0) != int(client_scope):
                     return jsonify(ok=False, message="Site tidak berada dalam scope client ini."), 403
@@ -3208,11 +3255,167 @@ def create_app() -> Flask:
             status=status_filter,
         )
         return jsonify(ok=True, data=payroll_list), 200
+
+    @app.route("/api/payroll/profile", methods=["GET", "POST"])
+    def payroll_profile():
+        user = _current_user()
+        if not user:
+            return _json_forbidden()
+        if user.role in ADMIN_ROLES:
+            if not _is_pro(user):
+                return _json_forbidden()
+            client_scope = None
+            site_scope = None
+            source = request.args if request.method == "GET" else _get_json()
+            client_id_raw = str(source.get("client_id") or "").strip()
+            site_id_raw = str(source.get("site_id") or "").strip()
+            if client_id_raw.isdigit():
+                client_scope = int(client_id_raw)
+            if site_id_raw.isdigit():
+                site_scope = int(site_id_raw)
+        elif user.role == "client_admin":
+            client_scope = _client_user_client_id(user)
+            site_scope = _client_user_site_id(user)
+            if not client_scope or not site_scope:
+                return _json_forbidden()
+            source = request.args if request.method == "GET" else _get_json()
+        else:
+            return _json_forbidden()
+        if not _payroll_enabled(user, client_scope if user.role == "client_admin" else None):
+            return _payroll_required_response()
+        employee_email = (source.get("employee_email") or "").strip()
+        if not employee_email:
+            return jsonify(ok=False, message="Employee email wajib diisi."), 400
+        if client_scope is not None and not _employee_email_in_payroll_scope(
+            employee_email,
+            client_id=client_scope,
+            site_id=site_scope,
+        ):
+            return _json_forbidden()
+        if request.method == "GET":
+            profile = _get_payroll_profile_for_employee(
+                employee_email,
+                client_id=client_scope,
+                site_id=site_scope,
+            )
+            latest = _latest_payroll_input_for_employee(
+                employee_email,
+                client_id=client_scope,
+                site_id=site_scope,
+            )
+            return jsonify(ok=True, data=profile or latest or {}), 200
+        try:
+            salary_base = float(source.get("salary_base", 0) or 0)
+            late_rate = float(source.get("potongan_telat_rate", PAYROLL_DEFAULT_LATE_DEDUCTION) or 0)
+            absent_rate = float(source.get("potongan_absen_rate", PAYROLL_DEFAULT_ABSENT_DEDUCTION) or 0)
+            potongan_lain = float(source.get("potongan_lain", 0) or 0)
+            tunjangan = float(source.get("tunjangan", 0) or 0)
+            overtime_rate = float(source.get("overtime_rate", 0) or 0)
+            thr_base_multiplier = float(source.get("thr_base_multiplier", 1) or 1)
+        except (TypeError, ValueError):
+            return jsonify(ok=False, message="Nominal profile payroll tidak valid."), 400
+        allowances = _payroll_component_payload(
+            source.get("allowances"),
+            {"jabatan", "transport", "makan", "tetap", "custom"},
+        )
+        deductions = _payroll_component_payload(
+            source.get("deductions"),
+            {"loan", "penalty", "custom"},
+        )
+        if allowances:
+            tunjangan = _payroll_component_total(allowances)
+        if deductions:
+            potongan_lain = _payroll_component_total(deductions)
+        if (
+            salary_base < 0
+            or late_rate < 0
+            or absent_rate < 0
+            or potongan_lain < 0
+            or tunjangan < 0
+            or overtime_rate < 0
+            or thr_base_multiplier < 0
+        ):
+            return jsonify(ok=False, message="Nominal profile payroll tidak boleh minus."), 400
+        profile = _upsert_payroll_profile_for_employee(
+            employee_email,
+            salary_base=salary_base,
+            potongan_telat_rate=late_rate,
+            potongan_absen_rate=absent_rate,
+            potongan_lain=potongan_lain,
+            tunjangan=tunjangan,
+            tax_status=source.get("tax_status"),
+            bpjs_enabled=_payroll_bool(source.get("bpjs_enabled")),
+            bpjs_kesehatan_enabled=_payroll_bool(source.get("bpjs_kesehatan_enabled"), True),
+            bpjs_tk_enabled=_payroll_bool(source.get("bpjs_tk_enabled"), True),
+            overtime_rate=overtime_rate,
+            thr_base_multiplier=thr_base_multiplier,
+            allowances=allowances,
+            deductions=deductions,
+        )
+        if profile:
+            _log_audit_event(
+                entity_type="payroll_profile",
+                entity_id=profile.get("employee_id"),
+                action="UPSERT",
+                actor=user,
+                summary="Payroll profile saved.",
+                details={"after_json": profile},
+            )
+        return jsonify(ok=True, message="Profile payroll disimpan.", data=profile or {}), 200
+
+    @app.route("/api/payroll/latest-input", methods=["GET"])
+    def payroll_latest_input():
+        user = _current_user()
+        if not user:
+            return _json_forbidden()
+        if user.role in ADMIN_ROLES:
+            if not _is_pro(user):
+                return _json_forbidden()
+            client_scope = None
+            site_scope = None
+            client_id_raw = (request.args.get("client_id") or "").strip()
+            site_id_raw = (request.args.get("site_id") or "").strip()
+            if client_id_raw.isdigit():
+                client_scope = int(client_id_raw)
+            if site_id_raw.isdigit():
+                site_scope = int(site_id_raw)
+        elif user.role in CLIENT_ROLES:
+            client_scope = _client_user_client_id(user)
+            site_scope = _client_user_site_id(user)
+            if not client_scope or not site_scope:
+                return _json_forbidden()
+        else:
+            return _json_forbidden()
+        if not _payroll_enabled(user, client_scope if user.role in CLIENT_ROLES else None):
+            return _payroll_required_response()
+        employee_email = (request.args.get("employee_email") or "").strip()
+        if not employee_email:
+            return jsonify(ok=False, message="Employee email wajib diisi."), 400
+        if user.role in CLIENT_ROLES and not _employee_email_in_payroll_scope(
+            employee_email,
+            client_id=client_scope,
+            site_id=site_scope,
+        ):
+            return _json_forbidden()
+        latest = _latest_payroll_input_for_employee(
+            employee_email,
+            client_id=client_scope,
+            site_id=site_scope,
+        )
+        profile = _get_payroll_profile_for_employee(
+            employee_email,
+            client_id=client_scope,
+            site_id=site_scope,
+        )
+        data = profile or latest or {}
+        if profile and latest and latest.get("period"):
+            data = {**data, "latest_period": latest.get("period")}
+        return jsonify(ok=True, data=data), 200
     
     @app.route("/api/payroll/my", methods=["GET"])
     def payroll_my():
         user = _current_user()
-        if not user or not _is_pro(user):
+        if not user or not _is_pro(user) or not _payroll_enabled(user):
             return _json_forbidden()
         
         period = _normalize_period_input(request.args.get("period"))
@@ -3254,9 +3457,11 @@ def create_app() -> Flask:
             client_scope = _client_user_client_id(user)
             if not client_scope:
                 return _json_forbidden()
-            site_scope = None
+            site_scope = _client_user_site_id(user)
         else:
             return _json_forbidden()
+        if not _payroll_enabled(user, client_scope if user.role in CLIENT_ROLES else None):
+            return _payroll_required_response()
         record = _get_payroll_by_id(payroll_id)
         if not record:
             return jsonify(ok=False, message="Payroll tidak ditemukan."), 404
@@ -3282,11 +3487,11 @@ def create_app() -> Flask:
             client_scope = _client_user_client_id(user)
             if not client_scope:
                 return _json_forbidden()
-            site_scope = None
+            site_scope = _client_user_site_id(user)
         else:
             return _json_forbidden()
-        if not _payroll_plus_enabled(user, client_scope):
-            return _addon_required_response("Payroll plus")
+        if not _payroll_enabled(user, client_scope if user.role == "client_admin" else None):
+            return _payroll_required_response()
         data = _get_json()
         try:
             potongan_lain = float(data.get("potongan_lain", 0) or 0)
@@ -3307,6 +3512,15 @@ def create_app() -> Flask:
         if (record.get("status") or "").lower() == "approved":
             return jsonify(ok=False, message="Payroll approved tidak dapat diubah."), 400
         updated = _update_payroll_adjustments(payroll_id, potongan_lain, tunjangan)
+        if updated:
+            _log_audit_event(
+                entity_type="payroll",
+                entity_id=payroll_id,
+                action="UPDATE_ADJUSTMENT",
+                actor=user,
+                summary="Payroll adjustment updated.",
+                details={"before_json": record, "after_json": updated},
+            )
         return jsonify(ok=True, message="Payroll diperbarui.", data=updated), 200
 
     @app.route("/api/payroll/<int:payroll_id>/approve", methods=["POST"])
@@ -3323,9 +3537,11 @@ def create_app() -> Flask:
             client_scope = _client_user_client_id(user)
             if not client_scope:
                 return _json_forbidden()
-            site_scope = None
+            site_scope = _client_user_site_id(user)
         else:
             return _json_forbidden()
+        if not _payroll_enabled(user, client_scope if user.role == "client_admin" else None):
+            return _payroll_required_response()
         record = _get_payroll_by_id(payroll_id)
         if not record:
             return jsonify(ok=False, message="Payroll tidak ditemukan."), 404
@@ -5234,11 +5450,52 @@ PAYROLL_SCHEDULE_MONTH_END = "MONTH_END"
 PAYROLL_SCHEDULE_MID_MONTH = "MID_MONTH"
 PAYROLL_SCHEDULE_OPTIONS = {PAYROLL_SCHEDULE_MONTH_END, PAYROLL_SCHEDULE_MID_MONTH}
 PAYROLL_CALCULATION_VERSION = "attendance_policy_v1"
+PAYROLL_DEFAULT_BPJS_RATES = {
+    "employee": {
+        "kesehatan": 0.005,
+        "jht": 0.02,
+        "jp": 0.01,
+    },
+    "company": {
+        "kesehatan": 0.04,
+        "jht": 0.037,
+        "jp": 0.02,
+        "jkk": 0.0024,
+        "jkm": 0.003,
+    },
+}
+PAYROLL_DEFAULT_BPJS_CAPS = {
+    "kesehatan": 12000000.0,
+    "jp": 10547000.0,
+}
+PAYROLL_DEFAULT_PPH21_CONFIG = {
+    "ptkp": {
+        "TK0": 54000000.0,
+        "TK1": 58500000.0,
+        "TK2": 63000000.0,
+        "TK3": 67500000.0,
+        "K0": 58500000.0,
+        "K1": 63000000.0,
+        "K2": 67500000.0,
+        "K3": 72000000.0,
+    },
+    "tax_brackets": [
+        {"limit": 60000000.0, "rate": 0.05},
+        {"limit": 250000000.0, "rate": 0.15},
+        {"limit": 500000000.0, "rate": 0.25},
+        {"limit": 5000000000.0, "rate": 0.30},
+        {"limit": None, "rate": 0.35},
+    ],
+    "occupational_expense_rate": 0.05,
+    "occupational_expense_monthly_cap": 500000.0,
+    "round_pkp_thousand": True,
+}
 ADDON_PATROL = "patrol"
 ADDON_CALENDAR = "calendar"
 ADDON_REPORTING_ADVANCED = "reporting_advanced"
 ADDON_API_ACCESS = "api_access"
-ADDON_PAYROLL_PLUS = "payroll_plus"
+ADDON_PAYROLL = "payroll_plus"
+ADDON_PAYROLL_PLUS = ADDON_PAYROLL
 ADDON_AI = "ai"
 ADDON_PATROL_OPS = "patrol_ops"
 ADDON_ENTERPRISE_TIER = "enterprise_tier"
@@ -5255,7 +5512,7 @@ ADDON_ALLOWED = {
     ADDON_CALENDAR,
     ADDON_REPORTING_ADVANCED,
     ADDON_API_ACCESS,
-    ADDON_PAYROLL_PLUS,
+    ADDON_PAYROLL,
     ADDON_AI,
     ADDON_PATROL_OPS,
     ADDON_ENTERPRISE_TIER,
@@ -5276,10 +5533,11 @@ ADDON_OWNER_ORDER = (
     ADDON_PATROL_OPS,
     ADDON_CALENDAR,
     ADDON_REPORTING_ADVANCED,
+    ADDON_API_ACCESS,
     ADDON_COMMUNICATION_CHAT,
     ADDON_COMMUNICATION_ANNOUNCEMENT,
     ADDON_COMMUNICATION_INCIDENT,
-    ADDON_PAYROLL_PLUS,
+    ADDON_PAYROLL,
     ADDON_AI,
     ADDON_BILLING_ENGINE,
     ADDON_CONTRACT_MANAGEMENT,
@@ -5315,7 +5573,8 @@ ADDON_FEATURE_ALIASES = {
     "advanced_reporting": ADDON_REPORTING_ADVANCED,
     "api": ADDON_API_ACCESS,
     "api_access": ADDON_API_ACCESS,
-    "payroll_plus": ADDON_PAYROLL_PLUS,
+    "payroll": ADDON_PAYROLL,
+    "payroll_plus": ADDON_PAYROLL,
     "ai": ADDON_AI,
     "enterprise": ADDON_ENTERPRISE_TIER,
     "enterprise_tier": ADDON_ENTERPRISE_TIER,
@@ -14476,6 +14735,18 @@ def _init_db() -> None:
                 payroll_schedule TEXT,
                 payroll_scheme TEXT,
                 calculation_version TEXT,
+                payroll_profile_id INTEGER,
+                engine_version TEXT,
+                payroll_mode TEXT DEFAULT 'standard',
+                tax_status TEXT,
+                bpjs_enabled INTEGER DEFAULT 0,
+                allowance_json TEXT,
+                deduction_json TEXT,
+                bpjs_json TEXT,
+                tax_json TEXT,
+                thr_json TEXT,
+                overtime_json TEXT,
+                breakdown_json TEXT,
                 status TEXT DEFAULT 'draft',
                 approved_by_email TEXT,
                 approved_at TEXT,
@@ -14492,6 +14763,41 @@ def _init_db() -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_payroll_period ON payroll(period)"
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS payroll_employee_profiles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                employee_id INTEGER NOT NULL,
+                client_id INTEGER,
+                site_id INTEGER,
+                salary_base REAL DEFAULT 0,
+                late_deduction_rate REAL DEFAULT 0,
+                absent_deduction_rate REAL DEFAULT 0,
+                potongan_lain REAL DEFAULT 0,
+                tunjangan REAL DEFAULT 0,
+                tax_status TEXT,
+                bpjs_enabled INTEGER DEFAULT 0,
+                bpjs_kesehatan_enabled INTEGER DEFAULT 1,
+                bpjs_tk_enabled INTEGER DEFAULT 1,
+                default_allowance_json TEXT,
+                default_deduction_json TEXT,
+                overtime_rate REAL DEFAULT 0,
+                thr_base_multiplier REAL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT,
+                FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE,
+                UNIQUE(employee_id)
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_payroll_profiles_client_site ON payroll_employee_profiles(client_id, site_id)"
+        )
+        if _table_exists(conn, "payroll_employee_profiles"):
+            _ensure_column(conn, "payroll_employee_profiles", "bpjs_kesehatan_enabled", "bpjs_kesehatan_enabled INTEGER DEFAULT 1")
+            _ensure_column(conn, "payroll_employee_profiles", "bpjs_tk_enabled", "bpjs_tk_enabled INTEGER DEFAULT 1")
+            _ensure_column(conn, "payroll_employee_profiles", "overtime_rate", "overtime_rate REAL DEFAULT 0")
+            _ensure_column(conn, "payroll_employee_profiles", "thr_base_multiplier", "thr_base_multiplier REAL DEFAULT 1")
         if _table_exists(conn, "payroll"):
             _ensure_column(conn, "payroll", "client_id", "client_id INTEGER")
             _ensure_column(conn, "payroll", "site_id", "site_id INTEGER")
@@ -14510,6 +14816,18 @@ def _init_db() -> None:
             _ensure_column(conn, "payroll", "late_deduction_rate", "late_deduction_rate REAL DEFAULT 0")
             _ensure_column(conn, "payroll", "absent_deduction_rate", "absent_deduction_rate REAL DEFAULT 0")
             _ensure_column(conn, "payroll", "calculation_version", "calculation_version TEXT")
+            _ensure_column(conn, "payroll", "payroll_profile_id", "payroll_profile_id INTEGER")
+            _ensure_column(conn, "payroll", "engine_version", "engine_version TEXT")
+            _ensure_column(conn, "payroll", "payroll_mode", "payroll_mode TEXT DEFAULT 'standard'")
+            _ensure_column(conn, "payroll", "tax_status", "tax_status TEXT")
+            _ensure_column(conn, "payroll", "bpjs_enabled", "bpjs_enabled INTEGER DEFAULT 0")
+            _ensure_column(conn, "payroll", "allowance_json", "allowance_json TEXT")
+            _ensure_column(conn, "payroll", "deduction_json", "deduction_json TEXT")
+            _ensure_column(conn, "payroll", "bpjs_json", "bpjs_json TEXT")
+            _ensure_column(conn, "payroll", "tax_json", "tax_json TEXT")
+            _ensure_column(conn, "payroll", "thr_json", "thr_json TEXT")
+            _ensure_column(conn, "payroll", "overtime_json", "overtime_json TEXT")
+            _ensure_column(conn, "payroll", "breakdown_json", "breakdown_json TEXT")
             conn.execute(
                 """
                 UPDATE payroll
@@ -15478,6 +15796,119 @@ def _set_app_setting(key: str, value: object) -> None:
         conn.close()
 
 
+def _normalize_payroll_bpjs_rates(value: object) -> dict[str, dict[str, float]]:
+    if not isinstance(value, dict):
+        value = {}
+    normalized: dict[str, dict[str, float]] = {"employee": {}, "company": {}}
+    for group in normalized:
+        source = value.get(group) if isinstance(value.get(group), dict) else {}
+        default_group = PAYROLL_DEFAULT_BPJS_RATES.get(group, {})
+        keys = set(default_group) | set(source)
+        for key in keys:
+            try:
+                rate = float(source.get(key, default_group.get(key, 0)) or 0)
+            except (TypeError, ValueError):
+                rate = float(default_group.get(key, 0) or 0)
+            normalized[group][str(key)] = max(0.0, rate)
+    return normalized
+
+
+def _payroll_bpjs_rates() -> dict[str, dict[str, float]]:
+    env_value = (os.environ.get("PAYROLL_BPJS_RATES_JSON") or "").strip()
+    if env_value:
+        try:
+            return _normalize_payroll_bpjs_rates(json.loads(env_value))
+        except json.JSONDecodeError:
+            pass
+    return _normalize_payroll_bpjs_rates(
+        _get_app_setting("payroll_bpjs_rates", PAYROLL_DEFAULT_BPJS_RATES)
+    )
+
+
+def _payroll_bpjs_caps() -> dict[str, float]:
+    raw = _get_app_setting("payroll_bpjs_caps", PAYROLL_DEFAULT_BPJS_CAPS)
+    if not isinstance(raw, dict):
+        raw = PAYROLL_DEFAULT_BPJS_CAPS
+    caps: dict[str, float] = {}
+    for key, default in PAYROLL_DEFAULT_BPJS_CAPS.items():
+        try:
+            caps[key] = max(0.0, float(raw.get(key, default) or 0))
+        except (TypeError, ValueError):
+            caps[key] = float(default)
+    for key, value in raw.items():
+        if key in caps:
+            continue
+        try:
+            caps[str(key)] = max(0.0, float(value or 0))
+        except (TypeError, ValueError):
+            continue
+    return caps
+
+
+def _normalize_tax_status(value: object) -> str:
+    status = str(value or "").strip().upper().replace("/", "")
+    return status if status in PAYROLL_DEFAULT_PPH21_CONFIG["ptkp"] else ""
+
+
+def _normalize_payroll_tax_config(value: object) -> dict[str, object]:
+    source = value if isinstance(value, dict) else {}
+    default = PAYROLL_DEFAULT_PPH21_CONFIG
+    ptkp_source = source.get("ptkp") if isinstance(source.get("ptkp"), dict) else {}
+    ptkp: dict[str, float] = {}
+    for key, default_value in default["ptkp"].items():
+        try:
+            ptkp[key] = max(0.0, float(ptkp_source.get(key, default_value) or 0))
+        except (TypeError, ValueError):
+            ptkp[key] = float(default_value)
+    brackets_source = source.get("tax_brackets") if isinstance(source.get("tax_brackets"), list) else []
+    brackets: list[dict[str, float | None]] = []
+    for bracket in brackets_source or default["tax_brackets"]:
+        if not isinstance(bracket, dict):
+            continue
+        raw_limit = bracket.get("limit")
+        try:
+            limit = None if raw_limit in (None, "", "inf") else max(0.0, float(raw_limit))
+            rate = max(0.0, float(bracket.get("rate") or 0))
+        except (TypeError, ValueError):
+            continue
+        brackets.append({"limit": limit, "rate": rate})
+    if not brackets:
+        brackets = list(default["tax_brackets"])
+    try:
+        occupational_rate = max(
+            0.0,
+            float(source.get("occupational_expense_rate", default["occupational_expense_rate"]) or 0),
+        )
+    except (TypeError, ValueError):
+        occupational_rate = float(default["occupational_expense_rate"])
+    try:
+        occupational_cap = max(
+            0.0,
+            float(source.get("occupational_expense_monthly_cap", default["occupational_expense_monthly_cap"]) or 0),
+        )
+    except (TypeError, ValueError):
+        occupational_cap = float(default["occupational_expense_monthly_cap"])
+    return {
+        "ptkp": ptkp,
+        "tax_brackets": brackets,
+        "occupational_expense_rate": occupational_rate,
+        "occupational_expense_monthly_cap": occupational_cap,
+        "round_pkp_thousand": bool(source.get("round_pkp_thousand", default["round_pkp_thousand"])),
+    }
+
+
+def _payroll_tax_config() -> dict[str, object]:
+    env_value = (os.environ.get("PAYROLL_PPH21_CONFIG_JSON") or "").strip()
+    if env_value:
+        try:
+            return _normalize_payroll_tax_config(json.loads(env_value))
+        except json.JSONDecodeError:
+            pass
+    return _normalize_payroll_tax_config(
+        _get_app_setting("payroll_pph21_config", PAYROLL_DEFAULT_PPH21_CONFIG)
+    )
+
+
 def _global_addons() -> list[str]:
     return _normalize_global_addons(_get_app_setting("global_addons", []))
 
@@ -16065,8 +16496,22 @@ def _client_feature_enabled(
     return has_addon(client, feature)
 
 
-def _payroll_plus_enabled(user: User | None, client_id: int | None = None) -> bool:
-    return _client_feature_enabled(user, ADDON_PAYROLL_PLUS, client_id)
+def _payroll_enabled(user: User | None, client_id: int | None = None) -> bool:
+    if ADDON_PAYROLL not in _global_addons():
+        return False
+    if user and user.role in ADMIN_ROLES and client_id is None:
+        return True
+    return _client_feature_enabled(user, ADDON_PAYROLL, client_id)
+
+
+def _payroll_required_response():
+    return (
+        jsonify(
+            ok=False,
+            message="Payroll membutuhkan add-on Payroll aktif.",
+        ),
+        403,
+    )
 
 
 def _advanced_reporting_enabled(user: User | None, client_id: int | None = None) -> bool:
@@ -16157,6 +16602,7 @@ def _effective_permissions_for(user: User | None) -> dict[str, bool]:
     permissions["view_patrol_ops"] = bool(permissions.get("view_patrol")) and _patrol_ops_admin_enabled(user)
     permissions["view_billing"] = bool(permissions.get("view_billing")) and _billing_feature_enabled(user)
     permissions["view_contract"] = bool(permissions.get("view_contract")) and _contract_feature_enabled(user)
+    permissions["view_payroll"] = bool(permissions.get("view_payroll")) and _payroll_enabled(user)
     return permissions
 
 
@@ -16862,8 +17308,9 @@ def _calculate_attendance_summary_by_cycle(
 
 def _calculate_payroll(employee_email: str, period: str, salary_base: float, 
                        potongan_telat_rate: float = 50000, 
-                       potongan_absen_rate: float = 100000) -> dict:
-    """Calculate payroll for an employee"""
+                       potongan_absen_rate: float = 100000,
+                       advanced_config: dict | None = None) -> dict:
+    """Calculate payroll for an employee through the shared payroll engine."""
     pay_cycle = _resolve_pay_cycle(employee_email, period)
     payroll_scheme = _normalize_payroll_scheme(pay_cycle.get("payroll_scheme"))
     attendance_summary = _calculate_attendance_summary_by_cycle(
@@ -16872,47 +17319,74 @@ def _calculate_payroll(employee_email: str, period: str, salary_base: float,
         pay_cycle["period_start"],
         pay_cycle["period_end"],
     )
-    
-    attendance_days = attendance_summary["attendance_days"]
-    late_days = attendance_summary["late_days"]
-    absent_days = attendance_summary["absent_days"]
-    leave_days = attendance_summary["leave_days"]
-    
-    working_days = max(1, int(attendance_summary.get("working_days") or 0))
-    daily_rate = salary_base / working_days
-    potongan_telat = late_days * potongan_telat_rate
-    if payroll_scheme == PAYROLL_SCHEME_FULL_MONTHLY:
-        gross_salary = salary_base
-        potongan_absen = absent_days * daily_rate
-    else:
-        gross_salary = attendance_days * daily_rate
-        potongan_absen = 0
-    total_gaji = gross_salary - potongan_telat - potongan_absen
-    
-    return {
-        "salary_base": salary_base,
-        "attendance_days": attendance_days,
-        "late_days": late_days,
-        "absent_days": absent_days,
-        "leave_days": leave_days,
-        "working_days": working_days,
-        "potongan_telat": potongan_telat,
-        "potongan_absen": potongan_absen,
-        "potongan_lain": 0,
-        "tunjangan": 0,
-        "total_gaji": max(0, total_gaji),  # Ensure non-negative
-        "daily_rate": daily_rate,
-        "gross_salary": gross_salary,
-        "late_deduction_rate": potongan_telat_rate,
-        "absent_deduction_rate": potongan_absen_rate,
-        "payroll_scheme": payroll_scheme,
-        "payroll_schedule": pay_cycle["payroll_schedule"],
-        "policy_id": pay_cycle.get("policy_id"),
-        "period_start": pay_cycle["period_start"],
-        "period_end": pay_cycle["period_end"],
-        "pay_date": pay_cycle["pay_date"],
-        "calculation_version": PAYROLL_CALCULATION_VERSION,
-    }
+    employee = _employee_by_email(employee_email, only_active=False) or {"email": employee_email}
+    profile = _get_payroll_profile_for_employee(employee_email) or {}
+    allowances = profile.get("allowances") if isinstance(profile.get("allowances"), dict) else {}
+    deductions = profile.get("deductions") if isinstance(profile.get("deductions"), dict) else {}
+    bpjs_enabled = bool(profile.get("bpjs_enabled"))
+    advanced_config = advanced_config if isinstance(advanced_config, dict) else {}
+    tax_status = _normalize_tax_status(profile.get("tax_status") or "")
+    tax_config = _payroll_tax_config()
+    is_advanced = (
+        bpjs_enabled
+        or bool(tax_status)
+        or _payroll_bool(advanced_config.get("is_thr_period"))
+        or float(advanced_config.get("thr_amount") or 0) > 0
+        or float(advanced_config.get("overtime_hours") or 0) > 0
+        or float(advanced_config.get("overtime_amount") or 0) > 0
+    )
+    payroll_mode = PAYROLL_MODE_ADVANCED if is_advanced else PAYROLL_MODE_STANDARD
+    payroll_data = run_payroll_engine(
+        dict(employee),
+        attendance_summary,
+        {
+            "salary_base": salary_base,
+            "potongan_telat_rate": potongan_telat_rate,
+            "potongan_absen_rate": potongan_absen_rate,
+            "payroll_scheme": payroll_scheme,
+            "payroll_mode": payroll_mode,
+            "allowances": allowances,
+            "deductions": deductions,
+            "tax_status": tax_status,
+            "tax_enabled": bool(tax_status),
+            **tax_config,
+            "bpjs_enabled": bpjs_enabled,
+            "bpjs_kesehatan_enabled": bool(profile.get("bpjs_kesehatan_enabled", True)),
+            "bpjs_tk_enabled": bool(profile.get("bpjs_tk_enabled", True)),
+            "bpjs_rates": _payroll_bpjs_rates(),
+            "bpjs_caps": _payroll_bpjs_caps(),
+            "overtime_rate": profile.get("overtime_rate") or 0,
+            "thr_base_multiplier": profile.get("thr_base_multiplier") or 1,
+            **advanced_config,
+        },
+    )
+    breakdown = payroll_data.get("breakdown") if isinstance(payroll_data.get("breakdown"), dict) else {}
+    bpjs_breakdown = breakdown.get("bpjs") if isinstance(breakdown, dict) else {}
+    tax_breakdown = breakdown.get("tax") if isinstance(breakdown, dict) else {}
+    thr_breakdown = breakdown.get("thr") if isinstance(breakdown, dict) else {}
+    overtime_breakdown = breakdown.get("overtime") if isinstance(breakdown, dict) else {}
+    payroll_data.update(
+        {
+            "payroll_scheme": payroll_scheme,
+            "payroll_schedule": pay_cycle["payroll_schedule"],
+            "policy_id": pay_cycle.get("policy_id"),
+            "period_start": pay_cycle["period_start"],
+            "period_end": pay_cycle["period_end"],
+            "pay_date": pay_cycle["pay_date"],
+            "calculation_version": PAYROLL_CALCULATION_VERSION,
+            "payroll_profile_id": profile.get("id"),
+            "tax_status": tax_status,
+            "bpjs_enabled": 1 if bpjs_enabled else 0,
+            "allowance_json": dumps_breakdown(allowances),
+            "deduction_json": dumps_breakdown(deductions),
+            "bpjs_json": dumps_breakdown(bpjs_breakdown),
+            "tax_json": dumps_breakdown(tax_breakdown),
+            "thr_json": dumps_breakdown(thr_breakdown),
+            "overtime_json": dumps_breakdown(overtime_breakdown),
+            "breakdown_json": dumps_breakdown(payroll_data.get("breakdown")),
+        }
+    )
+    return payroll_data
 
 
 def _resolve_payroll_policy_for_employee(employee_email: str, period: str) -> dict:
@@ -17063,6 +17537,7 @@ def _create_payroll_record(
     salary_base: float,
     potongan_telat_rate: float = 50000,
     potongan_absen_rate: float = 100000,
+    advanced_config: dict | None = None,
 ) -> int:
     """Create payroll record for an employee"""
     employee_email = (employee_email or "").strip().lower()
@@ -17084,6 +17559,7 @@ def _create_payroll_record(
             salary_base,
             potongan_telat_rate=potongan_telat_rate,
             potongan_absen_rate=potongan_absen_rate,
+            advanced_config=advanced_config,
         )
 
         if existing:
@@ -17108,8 +17584,8 @@ def _create_payroll_record(
                     potongan_absen = ?,
                     late_deduction_rate = ?,
                     absent_deduction_rate = ?,
-                    potongan_lain = 0,
-                    tunjangan = 0,
+                    potongan_lain = ?,
+                    tunjangan = ?,
                     total_gaji = ?,
                     period_start = ?,
                     period_end = ?,
@@ -17118,6 +17594,18 @@ def _create_payroll_record(
                     payroll_schedule = ?,
                     payroll_scheme = ?,
                     calculation_version = ?,
+                    payroll_profile_id = ?,
+                    tax_status = ?,
+                    bpjs_enabled = ?,
+                    allowance_json = ?,
+                    deduction_json = ?,
+                    bpjs_json = ?,
+                    tax_json = ?,
+                    thr_json = ?,
+                    overtime_json = ?,
+                    engine_version = ?,
+                    payroll_mode = ?,
+                    breakdown_json = ?,
                     status = 'draft',
                     approved_by_email = NULL,
                     approved_at = NULL,
@@ -17142,6 +17630,8 @@ def _create_payroll_record(
                     payroll_data["potongan_absen"],
                     payroll_data["late_deduction_rate"],
                     payroll_data["absent_deduction_rate"],
+                    payroll_data["potongan_lain"],
+                    payroll_data["tunjangan"],
                     payroll_data["total_gaji"],
                     payroll_data["period_start"],
                     payroll_data["period_end"],
@@ -17150,6 +17640,18 @@ def _create_payroll_record(
                     payroll_data["payroll_schedule"],
                     payroll_data["payroll_scheme"],
                     payroll_data["calculation_version"],
+                    payroll_data.get("payroll_profile_id"),
+                    payroll_data.get("tax_status"),
+                    payroll_data.get("bpjs_enabled") or 0,
+                    payroll_data.get("allowance_json"),
+                    payroll_data.get("deduction_json"),
+                    payroll_data.get("bpjs_json"),
+                    payroll_data.get("tax_json"),
+                    payroll_data.get("thr_json"),
+                    payroll_data.get("overtime_json"),
+                    payroll_data.get("engine_version"),
+                    payroll_data.get("payroll_mode") or PAYROLL_MODE_STANDARD,
+                    payroll_data.get("breakdown_json"),
                     _now_ts(),
                     payroll_id,
                 ),
@@ -17163,8 +17665,11 @@ def _create_payroll_record(
                 working_days, late_days, absent_days, leave_days, daily_rate, gross_salary,
                 potongan_telat, potongan_absen, late_deduction_rate, absent_deduction_rate,
                 potongan_lain, tunjangan, total_gaji, period_start, period_end, pay_date,
-                policy_id, payroll_schedule, payroll_scheme, calculation_version, status, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                policy_id, payroll_schedule, payroll_scheme, calculation_version, payroll_profile_id, tax_status,
+                bpjs_enabled, allowance_json, deduction_json, bpjs_json, tax_json, thr_json,
+                overtime_json, engine_version, payroll_mode,
+                breakdown_json, status, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 employee.get("id"),
@@ -17195,6 +17700,18 @@ def _create_payroll_record(
                 payroll_data["payroll_schedule"],
                 payroll_data["payroll_scheme"],
                 payroll_data["calculation_version"],
+                payroll_data.get("payroll_profile_id"),
+                payroll_data.get("tax_status"),
+                payroll_data.get("bpjs_enabled") or 0,
+                payroll_data.get("allowance_json"),
+                payroll_data.get("deduction_json"),
+                payroll_data.get("bpjs_json"),
+                payroll_data.get("tax_json"),
+                payroll_data.get("thr_json"),
+                payroll_data.get("overtime_json"),
+                payroll_data.get("engine_version"),
+                payroll_data.get("payroll_mode") or PAYROLL_MODE_STANDARD,
+                payroll_data.get("breakdown_json"),
                 "draft",
                 _now_ts(),
                 _now_ts(),
@@ -17212,6 +17729,7 @@ def _list_payroll_by_period(
     client_id: int | None = None,
     payroll_schedule: str | None = None,
     status: str | None = None,
+    payroll_mode: str | None = None,
 ) -> list[dict]:
     """List payroll records for a period with optional tenant/site filters."""
     conn = _db_connect()
@@ -17248,6 +17766,9 @@ def _list_payroll_by_period(
         if status:
             clauses.append("lower(COALESCE(p.status, 'draft')) = ?")
             params.append(status.lower())
+        if payroll_mode:
+            clauses.append("lower(COALESCE(p.payroll_mode, 'standard')) = ?")
+            params.append(payroll_mode.lower())
         query = f"""
             SELECT p.*, e.name as employee_name, s.name AS site_name, COALESCE(c.name, s.client_name) AS client_name
             FROM payroll p
@@ -17258,9 +17779,19 @@ def _list_payroll_by_period(
             ORDER BY e.name
         """
         cur = conn.execute(query, tuple(params))
-        return [dict(row) for row in cur.fetchall()]
+        return [_payroll_record_payload(dict(row)) for row in cur.fetchall()]
     finally:
         conn.close()
+
+
+def _payroll_record_payload(record: dict | None) -> dict | None:
+    if not record:
+        return None
+    payload = dict(record)
+    breakdown = loads_breakdown(payload.get("breakdown_json"))
+    if breakdown:
+        payload["breakdown"] = breakdown
+    return payload
 
 
 def _get_payroll_by_employee_period(employee_email: str, period: str) -> dict | None:
@@ -17279,7 +17810,7 @@ def _get_payroll_by_employee_period(employee_email: str, period: str) -> dict | 
             (employee_email, period)
         )
         row = cur.fetchone()
-        return dict(row) if row else None
+        return _payroll_record_payload(dict(row)) if row else None
     finally:
         conn.close()
 
@@ -17299,9 +17830,285 @@ def _get_payroll_by_id(payroll_id: int) -> dict | None:
             (payroll_id,),
         )
         row = cur.fetchone()
-        return dict(row) if row else None
+        return _payroll_record_payload(dict(row)) if row else None
     finally:
         conn.close()
+
+
+def _latest_payroll_input_for_employee(
+    employee_email: str,
+    *,
+    client_id: int | None = None,
+    site_id: int | None = None,
+) -> dict | None:
+    normalized = (employee_email or "").strip().lower()
+    if not normalized:
+        return None
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "payroll"):
+            return None
+        clauses = ["lower(p.employee_email) = lower(?)"]
+        params: list[object] = [normalized]
+        if client_id is not None:
+            clauses.append("(p.client_id = ? OR e.client_id = ? OR s.client_id = ?)")
+            params.extend([client_id, client_id, client_id])
+        if site_id is not None:
+            clauses.append("(p.site_id = ? OR p.branch_id = ? OR e.site_id = ?)")
+            params.extend([site_id, site_id, site_id])
+        cur = conn.execute(
+            f"""
+            SELECT p.*, e.name AS employee_name
+            FROM payroll p
+            LEFT JOIN employees e ON p.employee_id = e.id
+            LEFT JOIN sites s ON s.id = COALESCE(p.site_id, p.branch_id, e.site_id)
+            WHERE {' AND '.join(clauses)}
+            ORDER BY COALESCE(p.updated_at, p.created_at, '') DESC, p.id DESC
+            LIMIT 1
+            """,
+            tuple(params),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        record = _payroll_record_payload(dict(row)) or {}
+        return {
+            "employee_email": record.get("employee_email"),
+            "employee_name": record.get("employee_name"),
+            "salary_base": record.get("salary_base") or 0,
+            "potongan_telat_rate": record.get("late_deduction_rate") or PAYROLL_DEFAULT_LATE_DEDUCTION,
+            "potongan_absen_rate": record.get("absent_deduction_rate") or PAYROLL_DEFAULT_ABSENT_DEDUCTION,
+            "potongan_lain": record.get("potongan_lain") or 0,
+            "tunjangan": record.get("tunjangan") or 0,
+            "period": record.get("period"),
+            "payroll_scheme": record.get("payroll_scheme"),
+            "payroll_schedule": record.get("payroll_schedule"),
+        }
+    finally:
+        conn.close()
+
+
+def _payroll_profile_payload(row: dict | None) -> dict | None:
+    if not row:
+        return None
+    return {
+        "id": row.get("id"),
+        "employee_id": row.get("employee_id"),
+        "employee_email": row.get("employee_email"),
+        "employee_name": row.get("employee_name"),
+        "client_id": row.get("client_id"),
+        "site_id": row.get("site_id"),
+        "salary_base": row.get("salary_base") or 0,
+        "potongan_telat_rate": row.get("late_deduction_rate") or PAYROLL_DEFAULT_LATE_DEDUCTION,
+        "potongan_absen_rate": row.get("absent_deduction_rate") or PAYROLL_DEFAULT_ABSENT_DEDUCTION,
+        "potongan_lain": row.get("potongan_lain") or 0,
+        "tunjangan": row.get("tunjangan") or 0,
+        "tax_status": row.get("tax_status") or "",
+        "bpjs_enabled": bool(row.get("bpjs_enabled")),
+        "bpjs_kesehatan_enabled": bool(row.get("bpjs_kesehatan_enabled", 1)),
+        "bpjs_tk_enabled": bool(row.get("bpjs_tk_enabled", 1)),
+        "allowances": loads_breakdown(row.get("default_allowance_json")),
+        "deductions": loads_breakdown(row.get("default_deduction_json")),
+        "overtime_rate": row.get("overtime_rate") or 0,
+        "thr_base_multiplier": row.get("thr_base_multiplier") or 1,
+        "updated_at": row.get("updated_at"),
+    }
+
+
+def _payroll_component_total(items: object) -> float:
+    if not isinstance(items, dict):
+        return 0.0
+    total = 0.0
+    for value in items.values():
+        try:
+            total += float(value or 0)
+        except (TypeError, ValueError):
+            continue
+    return max(0.0, total)
+
+
+def _payroll_bool(value: object, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on", "y"}:
+        return True
+    if text in {"0", "false", "no", "off", "n", ""}:
+        return False
+    return default
+
+
+def _payroll_component_payload(raw: object, allowed_keys: set[str]) -> dict[str, float]:
+    if not isinstance(raw, dict):
+        return {}
+    payload: dict[str, float] = {}
+    for key in allowed_keys:
+        try:
+            value = float(raw.get(key, 0) or 0)
+        except (TypeError, ValueError):
+            value = 0.0
+        payload[key] = max(0.0, value)
+    return payload
+
+
+def _get_payroll_profile_for_employee(
+    employee_email: str,
+    *,
+    client_id: int | None = None,
+    site_id: int | None = None,
+) -> dict | None:
+    employee = _employee_by_email(employee_email, only_active=False)
+    if not employee:
+        return None
+    conn = _db_connect()
+    try:
+        if not _table_exists(conn, "payroll_employee_profiles"):
+            return None
+        clauses = ["pep.employee_id = ?"]
+        params: list[object] = [employee.get("id")]
+        if client_id is not None:
+            clauses.append("(pep.client_id = ? OR e.client_id = ?)")
+            params.extend([client_id, client_id])
+        if site_id is not None:
+            clauses.append("(pep.site_id = ? OR e.site_id = ? OR e.branch_id = ?)")
+            params.extend([site_id, site_id, site_id])
+        row = conn.execute(
+            f"""
+            SELECT pep.*, e.email AS employee_email, e.name AS employee_name
+            FROM payroll_employee_profiles pep
+            JOIN employees e ON e.id = pep.employee_id
+            WHERE {' AND '.join(clauses)}
+            LIMIT 1
+            """,
+            tuple(params),
+        ).fetchone()
+        return _payroll_profile_payload(dict(row)) if row else None
+    finally:
+        conn.close()
+
+
+def _upsert_payroll_profile_for_employee(
+    employee_email: str,
+    *,
+    salary_base: float | None = None,
+    potongan_telat_rate: float | None = None,
+    potongan_absen_rate: float | None = None,
+    potongan_lain: float | None = None,
+    tunjangan: float | None = None,
+    tax_status: str | None = None,
+    bpjs_enabled: bool | None = None,
+    bpjs_kesehatan_enabled: bool | None = None,
+    bpjs_tk_enabled: bool | None = None,
+    overtime_rate: float | None = None,
+    thr_base_multiplier: float | None = None,
+    allowances: dict | None = None,
+    deductions: dict | None = None,
+) -> dict | None:
+    employee_email = (employee_email or "").strip().lower()
+    employee = _employee_by_email(employee_email, only_active=False)
+    if not employee:
+        return None
+    client_id, site_id = _enterprise_scope_for_employee_email(employee_email)
+    existing = _get_payroll_profile_for_employee(employee_email)
+    now = _now_ts()
+    current = existing or {}
+    current_allowances = current.get("allowances") if isinstance(current.get("allowances"), dict) else {}
+    current_deductions = current.get("deductions") if isinstance(current.get("deductions"), dict) else {}
+    allowance_payload = allowances if allowances is not None else current_allowances
+    deduction_payload = deductions if deductions is not None else current_deductions
+    payload = {
+        "salary_base": float(salary_base if salary_base is not None else current.get("salary_base") or 0),
+        "late_deduction_rate": float(potongan_telat_rate if potongan_telat_rate is not None else current.get("potongan_telat_rate") or PAYROLL_DEFAULT_LATE_DEDUCTION),
+        "absent_deduction_rate": float(potongan_absen_rate if potongan_absen_rate is not None else current.get("potongan_absen_rate") or PAYROLL_DEFAULT_ABSENT_DEDUCTION),
+        "potongan_lain": float(potongan_lain if potongan_lain is not None else (_payroll_component_total(deduction_payload) if deductions is not None else current.get("potongan_lain") or 0)),
+        "tunjangan": float(tunjangan if tunjangan is not None else (_payroll_component_total(allowance_payload) if allowances is not None else current.get("tunjangan") or 0)),
+        "tax_status": _normalize_tax_status(tax_status if tax_status is not None else current.get("tax_status") or ""),
+        "bpjs_enabled": 1 if (bpjs_enabled if bpjs_enabled is not None else current.get("bpjs_enabled") or False) else 0,
+        "bpjs_kesehatan_enabled": 1 if (bpjs_kesehatan_enabled if bpjs_kesehatan_enabled is not None else current.get("bpjs_kesehatan_enabled", True)) else 0,
+        "bpjs_tk_enabled": 1 if (bpjs_tk_enabled if bpjs_tk_enabled is not None else current.get("bpjs_tk_enabled", True)) else 0,
+        "overtime_rate": float(overtime_rate if overtime_rate is not None else current.get("overtime_rate") or 0),
+        "thr_base_multiplier": float(thr_base_multiplier if thr_base_multiplier is not None else current.get("thr_base_multiplier") or 1),
+        "default_allowance_json": dumps_breakdown(allowance_payload),
+        "default_deduction_json": dumps_breakdown(deduction_payload),
+    }
+    conn = _db_connect()
+    try:
+        row = conn.execute(
+            "SELECT id FROM payroll_employee_profiles WHERE employee_id = ?",
+            (employee.get("id"),),
+        ).fetchone()
+        if row:
+            conn.execute(
+                """
+                UPDATE payroll_employee_profiles
+                SET client_id = ?, site_id = ?, salary_base = ?, late_deduction_rate = ?,
+                    absent_deduction_rate = ?, potongan_lain = ?, tunjangan = ?,
+                    tax_status = ?, bpjs_enabled = ?, bpjs_kesehatan_enabled = ?,
+                    bpjs_tk_enabled = ?, default_allowance_json = ?,
+                    default_deduction_json = ?, overtime_rate = ?, thr_base_multiplier = ?,
+                    updated_at = ?
+                WHERE employee_id = ?
+                """,
+                (
+                    client_id,
+                    site_id,
+                    payload["salary_base"],
+                    payload["late_deduction_rate"],
+                    payload["absent_deduction_rate"],
+                    payload["potongan_lain"],
+                    payload["tunjangan"],
+                    payload["tax_status"],
+                    payload["bpjs_enabled"],
+                    payload["bpjs_kesehatan_enabled"],
+                    payload["bpjs_tk_enabled"],
+                    payload["default_allowance_json"],
+                    payload["default_deduction_json"],
+                    payload["overtime_rate"],
+                    payload["thr_base_multiplier"],
+                    now,
+                    employee.get("id"),
+                ),
+            )
+        else:
+            conn.execute(
+                """
+                INSERT INTO payroll_employee_profiles (
+                    employee_id, client_id, site_id, salary_base, late_deduction_rate,
+                    absent_deduction_rate, potongan_lain, tunjangan, tax_status,
+                    bpjs_enabled, bpjs_kesehatan_enabled, bpjs_tk_enabled,
+                    default_allowance_json, default_deduction_json,
+                    overtime_rate, thr_base_multiplier, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    employee.get("id"),
+                    client_id,
+                    site_id,
+                    payload["salary_base"],
+                    payload["late_deduction_rate"],
+                    payload["absent_deduction_rate"],
+                    payload["potongan_lain"],
+                    payload["tunjangan"],
+                    payload["tax_status"],
+                    payload["bpjs_enabled"],
+                    payload["bpjs_kesehatan_enabled"],
+                    payload["bpjs_tk_enabled"],
+                    payload["default_allowance_json"],
+                    payload["default_deduction_json"],
+                    payload["overtime_rate"],
+                    payload["thr_base_multiplier"],
+                    now,
+                    now,
+                ),
+            )
+    finally:
+        conn.commit()
+        conn.close()
+    return _get_payroll_profile_for_employee(employee_email)
 
 
 def _update_payroll_adjustments(
@@ -17318,19 +18125,30 @@ def _update_payroll_adjustments(
         - float(record.get("tunjangan") or 0)
     )
     total_gaji = max(0, base_total - potongan_lain + tunjangan)
+    breakdown = update_payroll_breakdown_adjustments(
+        loads_breakdown(record.get("breakdown_json") or record.get("breakdown")),
+        potongan_lain,
+        tunjangan,
+    )
     conn = _db_connect()
     try:
         conn.execute(
             """
             UPDATE payroll
-            SET potongan_lain = ?, tunjangan = ?, total_gaji = ?, updated_at = ?
+            SET potongan_lain = ?, tunjangan = ?, total_gaji = ?, breakdown_json = ?, updated_at = ?
             WHERE id = ?
             """,
-            (potongan_lain, tunjangan, total_gaji, _now_ts(), payroll_id),
+            (potongan_lain, tunjangan, total_gaji, dumps_breakdown(breakdown), _now_ts(), payroll_id),
         )
     finally:
         conn.commit()
         conn.close()
+    if record.get("employee_email"):
+        _upsert_payroll_profile_for_employee(
+            record.get("employee_email") or "",
+            potongan_lain=potongan_lain,
+            tunjangan=tunjangan,
+        )
     return _get_payroll_by_id(payroll_id)
 
 
@@ -24702,12 +25520,19 @@ def admin_bp() -> Blueprint:
                 "dashboard/upgrade_prompt.html",
                 user=user,
                 feature="Payroll",
-                message="Payroll hanya tersedia untuk HRIS PRO dan Enterprise.",
+                message="Payroll membutuhkan akses HRIS Pro atau Enterprise.",
+            )
+        if not _payroll_enabled(user):
+            return render_template(
+                "dashboard/upgrade_prompt.html",
+                user=user,
+                feature="Payroll",
+                message="Aktifkan add-on Payroll dari owner credential untuk membuka modul payroll.",
             )
         return render_template(
             "dashboard/admin_payroll.html",
             user=user,
-            payroll_plus_enabled=_payroll_plus_enabled(user),
+            payroll_enabled=_payroll_enabled(user),
         )
 
     @bp.route("/billing", methods=["GET"])
