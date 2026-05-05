@@ -112,6 +112,10 @@ html[data-theme="light"] body{
   gap: 10px;
 }
 
+.client-lang-switch{
+  display: none;
+}
+
 .top-actions-group{
   display: flex;
   flex-direction: column;
@@ -173,10 +177,16 @@ html[data-theme="light"] body{
   border: 1px solid rgba(148, 163, 184, 0.2);
 }
 
+.payroll-hero .panel-head{
+  flex-wrap: wrap;
+}
+
 .payroll-period{
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
 }
 
 .payroll-period-chip{
@@ -190,13 +200,13 @@ html[data-theme="light"] body{
 }
 
 .payroll-month-input{
-  width: 150px;
+  width: min(150px, 100%);
   height: 36px;
   padding: 7px 10px;
 }
 
 .payroll-filter-input{
-  width: 140px;
+  width: min(140px, 100%);
   height: 36px;
   padding: 7px 10px;
 }
@@ -209,6 +219,19 @@ html[data-theme="light"] body{
 }
 
 @media (max-width: 640px){
+  .payroll-hero .panel-head{
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+  .payroll-period{
+    display: grid;
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+  .payroll-month-input,
+  .payroll-filter-input{
+    width: 100%;
+  }
   .payroll-kpi-grid{
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
