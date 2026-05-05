@@ -1310,12 +1310,25 @@ function initPatrolOps(){
   loadPatrolOpsTimeline();
 }
 
+function scrollActivePaneToTop(){
+  const activePane = document.querySelector(`.swipe-pane[data-pane="${swipeIndex}"]`);
+  if (activePane) activePane.scrollTop = 0;
+  if (swipeViewport) swipeViewport.scrollTop = 0;
+  const targetTop = document.querySelector(".employee-shell")?.offsetTop || 0;
+  window.requestAnimationFrame(() => {
+    window.scrollTo({ top: targetTop, left: 0, behavior: "auto" });
+    document.documentElement.scrollTop = targetTop;
+    document.body.scrollTop = targetTop;
+  });
+}
+
 function go(index){
   const paneCount = document.querySelectorAll(".swipe-pane").length;
   const max = Math.max(0, paneCount - 1);
   swipeIndex = Math.max(0, Math.min(max, index));
   const offset = swipeIndex * 100;
   swipeTrack.style.transform = `translateX(-${offset}%)`;
+  scrollActivePaneToTop();
   navButtons.forEach((btn) => {
     const tab = parseInt(btn.dataset.tab, 10);
     if (Number.isNaN(tab)) return;

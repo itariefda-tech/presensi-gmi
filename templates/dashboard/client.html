@@ -1279,8 +1279,7 @@
               <table class="data-table">
                 <thead>
                   <tr>
-                    <th>Nama</th>
-                    <th>Email</th>
+                    <th>Nama /<br>Email</th>
                     <th>Role</th>
                     <th>Status</th>
                   </tr>
@@ -1289,8 +1288,12 @@
                   {% if client_users %}
                   {% for cu in client_users %}
                   <tr>
-                    <td>{{ cu.name or "-" }}</td>
-                    <td>{{ cu.email }}</td>
+                    <td>
+                      <div class="client-user-contact">
+                        <strong>{{ cu.name or "-" }}</strong>
+                        <span class="muted">{{ cu.email }}</span>
+                      </div>
+                    </td>
                     <td>{{ cu.role|replace('client_', '')|replace('_',' ')|title }}</td>
                     <td>
                       {% if can_manage_users and cu.id != user.id %}
@@ -1310,7 +1313,7 @@
                   {% endfor %}
                   {% else %}
                   <tr>
-                    <td colspan="4" class="empty-row">Belum ada user client.</td>
+                    <td colspan="3" class="empty-row">Belum ada user client.</td>
                   </tr>
                   {% endif %}
                 </tbody>
