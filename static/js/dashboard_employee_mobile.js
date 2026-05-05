@@ -163,7 +163,6 @@ const btnPatrolOpsSubmit = document.getElementById("btnPatrolOpsSubmit");
 const patrolOpsHandoverChecklist = document.getElementById("patrolOpsHandoverChecklist");
 const patrolOpsTimeline = document.getElementById("patrolOpsTimeline");
 const patrolOpsToast = document.getElementById("patrolOpsToast");
-const patrolOpsTypeChips = Array.from(document.querySelectorAll(".patrol-note-type-chips .chip"));
 const patrolOpsQuickButtons = Array.from(document.querySelectorAll("[data-patrol-ops-quick]"));
 const btnPatrolOpsEmergency = document.getElementById("btnPatrolOpsEmergency");
 
@@ -637,11 +636,6 @@ function setPatrolOpsCategory(category){
     ? category
     : "activity";
   if (patrolOpsCategory) patrolOpsCategory.value = normalized;
-  patrolOpsTypeChips.forEach((chip) => {
-    const active = chip.dataset.noteCategory === normalized;
-    chip.classList.toggle("active", active);
-    chip.setAttribute("aria-pressed", active ? "true" : "false");
-  });
   patrolOpsGateDirection?.classList.toggle("is-hidden", normalized !== "gate");
   patrolOpsVehiclePlate?.classList.toggle("is-hidden", normalized !== "gate");
   patrolOpsVehicleType?.classList.toggle("is-hidden", normalized !== "gate");
@@ -1296,9 +1290,6 @@ function initPatrol(){
 }
 
 function initPatrolOps(){
-  patrolOpsTypeChips.forEach((chip) => {
-    chip.addEventListener("click", () => setPatrolOpsCategory(chip.dataset.noteCategory || "activity"));
-  });
   patrolOpsQuickButtons.forEach((button) => {
     button.addEventListener("click", () => {
       setPatrolOpsCategory(button.dataset.patrolOpsQuick || "activity");
@@ -1334,10 +1325,10 @@ function go(index){
     closeLeaveSheet();
     closeLeaveDetail();
   }
-  if (swipeIndex === 3) {
+  if (swipeIndex === 2) {
     loadPatrolOpsTimeline();
   }
-  if (swipeIndex === 4) {
+  if (swipeIndex === 3) {
     loadPatrolStatus({ silent: true });
   }
 }

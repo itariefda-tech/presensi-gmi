@@ -21,18 +21,6 @@
   <title>{{ (active_client.name.split(',')[0] if active_client and active_client.name else "Pegawai") }}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/employee_mobile.css') }}" />
-  <style>
-    .employee-access-summary { display:grid; gap:12px; }
-    .employee-access-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px; }
-    .employee-access-item { border:1px solid rgba(255,255,255,.08); border-radius:12px; padding:12px; background:rgba(255,255,255,.03); display:grid; gap:4px; }
-    .employee-access-pill-row { display:flex; flex-wrap:wrap; gap:8px; }
-    .employee-access-pill { display:inline-flex; align-items:center; min-height:28px; border-radius:999px; padding:0 12px; font-size:12px; font-weight:700; }
-    .employee-access-pill.is-on { background:#173b2a; color:#9ef0bf; }
-    .employee-access-pill.is-off { background:#4a2a1a; color:#ffcfa3; }
-    @media (max-width: 520px) {
-      .employee-access-grid { grid-template-columns:1fr; }
-    }
-  </style>
 </head>
 <body class="employee-body" data-email="{{ user.email }}" data-dashboard-home="{{ url_for('dashboard_employee') }}">
   <div class="employee-shell">
@@ -246,10 +234,10 @@
           </div>
         </section>
 
-        <section class="swipe-pane" data-pane="1" aria-label="Izin dan Story">
+        <section class="swipe-pane" data-pane="1" aria-label="Izin">
           <div class="card mobile-card">
             <div class="leave-header">
-                <h4 data-i18n="leave.apply">Ajukan</h4>
+              <h4>Izin</h4>
               <div class="leave-summary">
                 <span id="leavePendingCount">Menunggu: 0</span>
                 <button class="icon-btn" id="btnLeaveRefresh" type="button" aria-label="Refresh">
@@ -307,7 +295,7 @@
             </div>
           </div>
 
-      <div class="card mobile-card card-collapsible is-collapsed" id="leave-story-card" data-collapsible>
+          <div class="card mobile-card card-collapsible is-collapsed" id="leave-story-card" data-collapsible>
             <div class="card-header-collapsible">
               <div class="leave-story-header" style="margin:0;">
                 <h4 style="margin:0;">Story</h4>
@@ -342,20 +330,16 @@
             </div>
           </div>
 
-          <div class="leave-toast" id="leaveToast" role="status" aria-live="polite"></div>
-        </section>
-
-        <section class="swipe-pane" data-pane="2" aria-label="Laporan">
-           <div class="card mobile-card">
-             <h4 id="attendanceSummaryTitle" data-i18n="employee.month_summary">Ringkasan Periode Payroll</h4>
-             <div class="muted" id="attendanceSummaryMeta">Memuat periode...</div>
-             <div class="report-grid">
-               <div class="report-item" data-field="present"><span>Hadir</span><strong>0</strong></div>
-               <div class="report-item" data-field="late"><span>Telat</span><strong>0</strong></div>
-               <div class="report-item" data-field="izin"><span>Izin</span><strong>0</strong></div>
-               <div class="report-item" data-field="sakit"><span>Sakit</span><strong>0</strong></div>
-             </div>
-           </div>
+          <div class="card mobile-card">
+            <h4 id="attendanceSummaryTitle" data-i18n="employee.month_summary">Ringkasan Periode Payroll</h4>
+            <div class="muted" id="attendanceSummaryMeta">Memuat periode...</div>
+            <div class="report-grid">
+              <div class="report-item" data-field="present"><span>Hadir</span><strong>0</strong></div>
+              <div class="report-item" data-field="late"><span>Telat</span><strong>0</strong></div>
+              <div class="report-item" data-field="izin"><span>Izin</span><strong>0</strong></div>
+              <div class="report-item" data-field="sakit"><span>Sakit</span><strong>0</strong></div>
+            </div>
+          </div>
           <div class="card mobile-card card-collapsible is-collapsed" id="daily-report-card" data-collapsible>
             <div class="card-header-collapsible">
               <h4 style="margin:0;" data-i18n="employee.daily_report">Laporan Harian</h4>
@@ -384,36 +368,10 @@
             <p class="muted">Ganti password secara berkala untuk keamanan.</p>
             <button class="btn primary full" id="btnOpenChangePassword" type="button" data-i18n="modal.change_password">Ganti Password</button>
           </div>
-          <div class="card mobile-card employee-access-summary">
-            <div>
-              <h4 style="margin:0;">Akses Kerja Aktif</h4>
-              <p class="muted" style="margin:6px 0 0;">Ringkasan fitur kerja yang sedang aktif untuk client dan assignment Anda.</p>
-            </div>
-            <div class="employee-access-grid">
-              <div class="employee-access-item">
-                <span class="muted">Paket Client</span>
-                <strong>{{ employee_access_summary.package_label }}</strong>
-                <span class="muted">Komunikasi mengikuti site {{ employee_access_summary.communication_scope_label }}</span>
-              </div>
-              <div class="employee-access-item">
-                <span class="muted">Fitur Operasional</span>
-                <div class="employee-access-pill-row">
-                  <span class="employee-access-pill {{ 'is-on' if employee_access_summary.guard_tour_enabled else 'is-off' }}">Guard Tour {{ 'ON' if employee_access_summary.guard_tour_enabled else 'OFF' }}</span>
-                  <span class="employee-access-pill {{ 'is-on' if employee_access_summary.patrol_ops_enabled else 'is-off' }}">Patroli Ops {{ 'ON' if employee_access_summary.patrol_ops_enabled else 'OFF' }}</span>
-                  <span class="employee-access-pill {{ 'is-on' if employee_access_summary.calendar_enabled else 'is-off' }}">Calendar {{ 'ON' if employee_access_summary.calendar_enabled else 'OFF' }}</span>
-                  <span class="employee-access-pill {{ 'is-on' if employee_access_summary.payroll_plus_enabled else 'is-off' }}">Payroll Plus {{ 'ON' if employee_access_summary.payroll_plus_enabled else 'OFF' }}</span>
-                </div>
-              </div>
-            </div>
-            <div class="employee-access-pill-row">
-              <span class="employee-access-pill {{ 'is-on' if employee_access_summary.chat_enabled else 'is-off' }}">Live chat {{ 'ON' if employee_access_summary.chat_enabled else 'OFF' }}</span>
-              <span class="employee-access-pill {{ 'is-on' if employee_access_summary.announcement_enabled else 'is-off' }}">Announcement {{ 'ON' if employee_access_summary.announcement_enabled else 'OFF' }}</span>
-              <span class="employee-access-pill {{ 'is-on' if employee_access_summary.incident_enabled else 'is-off' }}">Incident {{ 'ON' if employee_access_summary.incident_enabled else 'OFF' }}</span>
-            </div>
-          </div>
+          <div class="leave-toast" id="leaveToast" role="status" aria-live="polite"></div>
         </section>
 
-        <section class="swipe-pane patrol-ops-pane" data-pane="3" aria-label="Patrol / Guard Tour">
+        <section class="swipe-pane patrol-ops-pane" data-pane="2" aria-label="Patrol / Guard Tour">
           <div class="card mobile-card patrol-hero-card">
             <div class="patrol-hero-top">
               <div>
@@ -530,7 +488,7 @@
 
         </section>
 
-        <section class="swipe-pane patrol-pane" data-pane="4" aria-label="Patroli Notes dan Report">
+        <section class="swipe-pane patrol-pane" data-pane="3" aria-label="Patroli Notes dan Report">
           <div class="card mobile-card patrol-note-card">
             <div class="card-header">
               <div>
@@ -545,12 +503,6 @@
                 <button class="btn secondary" type="button" data-patrol-ops-quick="incident">Insiden</button>
                 <button class="btn secondary" type="button" data-patrol-ops-quick="handover">Handover</button>
                 <button class="btn danger" type="button" id="btnPatrolOpsEmergency">Emergency</button>
-              </div>
-              <div class="mode-chips patrol-note-type-chips" role="group" aria-label="Jenis aktivitas patroli">
-                <button class="chip active" type="button" data-note-category="activity" aria-pressed="true">Catatan</button>
-                <button class="chip" type="button" data-note-category="gate" aria-pressed="false">Gate</button>
-                <button class="chip" type="button" data-note-category="incident" aria-pressed="false">Insiden</button>
-                <button class="chip" type="button" data-note-category="handover" aria-pressed="false">Handover</button>
               </div>
               <input type="hidden" id="patrolOpsCategory" name="category" value="activity" />
               <div class="patrol-note-grid">
@@ -603,7 +555,7 @@
           </div>
         </section>
 
-        <section class="swipe-pane" data-pane="5" aria-label="Komunikasi Operasional">
+        <section class="swipe-pane" data-pane="4" aria-label="Komunikasi Operasional">
           <div class="card mobile-card">
             <div class="panel-head">
               <div>
@@ -715,10 +667,11 @@
         <button class="nav-btn" data-tab="2" type="button">
           <span class="nav-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none">
-              <path d="M6 14h4v6H6zM10 10h4v10h-4zM14 6h4v14h-4z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M12 4l5 2.25v5.75c0 3.5-2.3 6.9-5 8-2.7-1.1-5-4.5-5-8V6.25L12 4z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+              <path d="M9 12l2 2 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
             </svg>
           </span>
-          <span class="nav-label" data-i18n="nav.reports">Laporan</span>
+          <span class="nav-label" data-i18n="nav.patrol">Patroli</span>
         </button>
         <button class="nav-btn" data-tab="3" type="button">
           <span class="nav-icon" aria-hidden="true">
@@ -727,18 +680,9 @@
               <path d="M9 12l2 2 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
             </svg>
           </span>
-          <span class="nav-label" data-i18n="nav.patrol">Patroli</span>
-        </button>
-        <button class="nav-btn" data-tab="4" type="button">
-          <span class="nav-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none">
-              <path d="M12 4l5 2.25v5.75c0 3.5-2.3 6.9-5 8-2.7-1.1-5-4.5-5-8V6.25L12 4z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
-              <path d="M9 12l2 2 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-            </svg>
-          </span>
           <span class="nav-label">Ops</span>
         </button>
-        <button class="nav-btn" data-tab="5" type="button">
+        <button class="nav-btn" data-tab="4" type="button">
           <span class="nav-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none">
               <path d="M5 5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H9l-4 3v-3H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
@@ -1427,10 +1371,10 @@
 
       // Handle Patroli page visibility
       (function(){
-        const patroli_pane = document.querySelector('[data-pane="4"]');
-        const patroli_nav_btn = document.querySelector('[data-tab="4"]');
-        const patroli_ops_pane = document.querySelector('[data-pane="3"]');
-        const patroli_ops_nav_btn = document.querySelector('[data-tab="3"]');
+        const patroli_pane = document.querySelector('[data-pane="3"]');
+        const patroli_nav_btn = document.querySelector('[data-tab="3"]');
+        const patroli_ops_pane = document.querySelector('[data-pane="2"]');
+        const patroli_ops_nav_btn = document.querySelector('[data-tab="2"]');
         
         function updatePatroliVisibility() {
           if (!patroli_pane || !patroli_nav_btn) return;

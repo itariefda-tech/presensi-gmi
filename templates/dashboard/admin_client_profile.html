@@ -176,7 +176,7 @@
   {% if user.role == "hr_superadmin" %}
   <div class="tab-panel" id="tab-billing">
     <div class="form-grid client-profile-billing-panels">
-      <div class="card">
+      <div class="card client-profile-contract-card">
         <div style="font-weight:700; margin-bottom:8px;">Kontrak Aktif</div>
         <form class="stack" method="post" action="{{ url_for('admin.client_contract_save', client_id=client.id) }}">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
@@ -190,7 +190,7 @@
               <input class="input" id="contract-start" type="date" name="start_date" value="{{ active_contract.start_date if active_contract else client.contract_start or '' }}" />
             </div>
             <div class="form-row">
-              <label class="label" for="contract-end">Berakhir</label>
+              <label class="label" for="contract-end">Sampai</label>
               <input class="input" id="contract-end" type="date" name="end_date" value="{{ active_contract.end_date if active_contract else client.contract_end or '' }}" />
             </div>
           </div>
@@ -211,7 +211,7 @@
           </div>
         </form>
       </div>
-      <div class="card">
+      <div class="card client-profile-billing-card">
         <div style="font-weight:700; margin-bottom:8px;">Konfigurasi Billing</div>
         <form class="stack" method="post" action="{{ url_for('admin.client_billing_save', client_id=client.id) }}">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />

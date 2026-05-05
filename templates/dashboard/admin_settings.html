@@ -38,11 +38,6 @@
         <option value="{{ role }}">{{ role|replace('_',' ')|title }}</option>
         {% endfor %}
       </select>
-      <select class="input" name="tier">
-        {% for tier in tier_options %}
-        <option value="{{ tier }}">{{ tier|replace('_',' ')|title }}</option>
-        {% endfor %}
-      </select>
       <input class="input" type="password" name="password" placeholder="Password awal" required />
       <button class="btn primary btn-fixed-100" type="submit">Tambah</button>
     </form>
@@ -55,7 +50,6 @@
           <th>Nama</th>
           <th>Email</th>
           <th>Role</th>
-          <th>Tier</th>
           <th>Status</th>
           <th>Client</th>
           <th>Dibuat</th>
@@ -64,14 +58,13 @@
       </thead>
       <tbody>
         {% if not users %}
-        <tr><td colspan="8" class="muted">Belum ada user.</td></tr>
+        <tr><td colspan="7" class="muted">Belum ada user.</td></tr>
         {% endif %}
         {% for u in users %}
         <tr>
           <td>{{ u.name }}</td>
           <td>{{ u.email }}</td>
           <td>{{ u.role|replace('_',' ')|title }}</td>
-          <td><span class="badge">{{ (u.tier or "pro")|replace('_',' ')|title }}</span></td>
           <td>
             <span class="badge">{% if u.is_active %}Active{% else %}Disabled{% endif %}</span>
             {% if u.must_change_password %}<div class="muted">Must change</div>{% endif %}
@@ -112,14 +105,6 @@
             <select class="input" id="user-role-{{ u.id }}" name="role" data-role-select>
               {% for role in role_options %}
               <option value="{{ role }}" {% if u.role == role %}selected{% endif %}>{{ role|replace('_',' ')|title }}</option>
-              {% endfor %}
-            </select>
-          </div>
-          <div class="form-row">
-            <label class="label" for="user-tier-{{ u.id }}">Tier</label>
-            <select class="input" id="user-tier-{{ u.id }}" name="tier">
-              {% for tier in tier_options %}
-              <option value="{{ tier }}" {% if (u.tier or "pro") == tier %}selected{% endif %}>{{ tier|replace('_',' ')|title }}</option>
               {% endfor %}
             </select>
           </div>

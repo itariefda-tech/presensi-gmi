@@ -2548,28 +2548,6 @@ def create_app() -> Flask:
             ]
         return jsonify(ok=True, data=employees), 200
 
-    @app.route("/api/admin/users/<int:user_id>/tier", methods=["POST"])
-    def admin_user_tier_update_api(user_id: int):
-        user = _current_user()
-        forbidden = _require_api_role(user, {"hr_superadmin"})
-        if forbidden:
-            return forbidden
-        data = _get_json()
-        tier = _normalize_user_tier(data.get("tier"))
-        target = _get_user_by_id(user_id)
-        if not target:
-            return jsonify(ok=False, message="User tidak ditemukan."), 404
-        _update_user_basic(
-            user_id=user_id,
-            name=target["name"] or "",
-            role=target["role"],
-            is_active=int(target["is_active"] or 0),
-            tier=tier,
-            update_tier=True,
-        )
-        return jsonify(ok=True, message="Tier user diperbarui.", data={"user_id": user_id, "tier": tier}), 200
-
-
     @app.route("/api/admin/guard_tour/report", methods=["GET"])
     def api_admin_guard_tour_report():
         """Return guard tour / patrol scan records for a given site and optional date range.
@@ -25046,7 +25024,6 @@ def admin_bp() -> Blueprint:
             supervisor_sites=supervisor_sites,
             registration_codes=registration_codes,
             role_options=ADMIN_ROLE_OPTIONS,
-            tier_options=HR_SETTINGS_TIER_OPTIONS,
             role_permissions=role_permissions,
             permission_labels=ROLE_PERMISSION_LABELS,
             permission_keys=ROLE_PERMISSION_KEYS,
@@ -25232,7 +25209,6 @@ def admin_bp() -> Blueprint:
         name = (request.form.get("name") or "").strip()
         email = (request.form.get("email") or "").strip().lower()
         role = (request.form.get("role") or "admin_asistent").strip()
-        tier = _normalize_user_tier(request.form.get("tier"))
         password = (request.form.get("password") or "").strip()
 
         if not _looks_like_email(email):
@@ -25250,7 +25226,7 @@ def admin_bp() -> Blueprint:
         if len(password) < 6:
             flash("Password awal minimal 6 karakter.")
             return redirect(url_for("admin.settings", tab="users"))
-        _create_user(name=name, email=email, role=role, password=password, tier=tier)
+        _create_user(name=name, email=email, role=role, password=password, tier="pro")
         flash("User berhasil ditambahkan.")
         return redirect(url_for("admin.settings", tab="users"))
 
@@ -25268,7 +25244,6 @@ def admin_bp() -> Blueprint:
         name = (request.form.get("name") or "").strip()
         email = (request.form.get("email") or "").strip().lower()
         role = (request.form.get("role") or "admin_asistent").strip()
-        tier = _normalize_user_tier(request.form.get("tier"))
         is_active = 1 if request.form.get("is_active") == "1" else 0
 
         if not _looks_like_email(email):
@@ -25297,8 +25272,6 @@ def admin_bp() -> Blueprint:
             role=role,
             is_active=is_active,
             email=email,
-            tier=tier,
-            update_tier=True,
         )
         flash("User berhasil diperbarui.")
         return redirect(url_for("admin.settings", tab="users"))

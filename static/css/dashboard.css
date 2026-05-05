@@ -1061,7 +1061,7 @@ html[data-theme="light"] .overview-line-wrap{
   width:14ch;
 }
 .ai-classification-table .ai-col-insight{
-  width:22ch;
+  width:30ch;
 }
 .ai-classification-table .ai-col-recommendation{
   width:30ch;
@@ -1618,8 +1618,9 @@ html[data-theme="light"] .alert{
   grid-template-columns: repeat(4, minmax(160px, 1fr)) !important;
 }
 .client-profile-billing-panels{
-  grid-template-columns: minmax(440px, 1fr) minmax(420px, 1fr) !important;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)) !important;
   margin-top: 12px;
+  align-items: stretch;
 }
 .client-profile-status-card{
   border: 1px solid var(--border);
@@ -1663,13 +1664,31 @@ html[data-theme="light"] .client-profile-status-value{
   grid-template-columns: repeat(2, minmax(236px, 272px)) !important;
 }
 .client-profile-billing-inline-fields{
-  grid-template-columns: repeat(2, minmax(250px, 1fr)) !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
 }
 .client-profile-billing-panels .card,
 .client-profile-billing-panels .form-row,
 .client-profile-contract-dates .form-row,
 .client-profile-billing-inline-fields .form-row{
   min-width: 0;
+}
+.client-profile-billing-panels .card{
+  max-width: 100%;
+  overflow: hidden;
+}
+.client-profile-billing-card .form-row{
+  grid-template-columns: minmax(112px, 140px) minmax(0, 1fr);
+}
+.client-profile-contract-card .form-row{
+  grid-template-columns: minmax(112px, 140px) minmax(0, 1fr);
+}
+.client-profile-contract-dates .form-row{
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 35px;
+}
+.client-profile-billing-inline-fields .form-row{
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 35px;
 }
 .client-profile-billing-panels .input,
 .client-profile-contract-dates .input,
@@ -1680,6 +1699,12 @@ html[data-theme="light"] .client-profile-status-value{
 }
 .client-profile-billing-inline-fields input[type="number"]{
   min-inline-size: 0;
+}
+@media (max-width: 1120px){
+  .client-profile-contract-dates,
+  .client-profile-billing-inline-fields{
+    grid-template-columns: 1fr !important;
+  }
 }
 .client-profile-contract-dates input[type="date"]{
   width: min(100%, 16rem);

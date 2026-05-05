@@ -10,8 +10,9 @@
   .comm-hero h3 { margin:0; font-size:24px; }
   .comm-hero p { margin:0; color:var(--muted); line-height:1.55; max-width:820px; }
   .comm-kpis { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:12px; }
-  .comm-kpi { border:1px solid rgba(255,255,255,.14); border-radius:10px; padding:16px; background:rgba(255,255,255,.035); box-shadow:0 10px 24px rgba(0,0,0,.08); display:grid; gap:6px; min-width:0; }
-  .comm-kpi strong { font-size:22px; }
+  .comm-kpi { min-width:0; }
+  .comm-kpi .kpi-card__value { font-size:22px; }
+  .comm-kpi .kpi-card__meta { font-size:11px; line-height:1.35; }
   .comm-main { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:16px; align-items:start; }
   .comm-card { border:1px solid rgba(255,255,255,.14); border-radius:10px; background:rgba(255,255,255,.035); box-shadow:0 10px 24px rgba(0,0,0,.08); padding:16px; display:grid; gap:14px; min-width:0; }
   .comm-subpanel { border:1px solid rgba(255,255,255,.08); border-radius:8px; background:rgba(255,255,255,.02); padding:14px; display:grid; gap:12px; min-width:0; }
@@ -97,26 +98,26 @@
   </section>
 
   <section class="comm-kpis">
-    <div class="comm-kpi">
-      <span class="muted">Announcement aktif</span>
-      <strong>{{ communication_announcements|length }}</strong>
-      <span class="muted">Scope sesuai akun yang sedang login</span>
-    </div>
-    <div class="comm-kpi">
-      <span class="muted">Incident terbaru</span>
-      <strong>{{ communication_incidents|length }}</strong>
-      <span class="muted">Termasuk room chat incident</span>
-    </div>
-    <div class="comm-kpi">
-      <span class="muted">Aktivitas chat</span>
-      <strong>{{ communication_recent_messages|length }}</strong>
-      <span class="muted">Snapshot pesan terbaru</span>
-    </div>
-    <div class="comm-kpi">
-      <span class="muted">Audit trail</span>
-      <strong>{{ communication_recent_audit|length }}</strong>
-      <span class="muted">Jejak aksi komunikasi terbaru</span>
-    </div>
+    <article class="comm-kpi kpi-card" data-theme="teal">
+      <div class="kpi-card__label">Announcement aktif</div>
+      <div class="kpi-card__value">{{ communication_announcements|length }}</div>
+      <div class="kpi-card__meta">Scope sesuai akun login</div>
+    </article>
+    <article class="comm-kpi kpi-card" data-theme="rose">
+      <div class="kpi-card__label">Incident terbaru</div>
+      <div class="kpi-card__value">{{ communication_incidents|length }}</div>
+      <div class="kpi-card__meta">Termasuk : chat & incident</div>
+    </article>
+    <article class="comm-kpi kpi-card" data-theme="indigo">
+      <div class="kpi-card__label">Aktivitas chat</div>
+      <div class="kpi-card__value">{{ communication_recent_messages|length }}</div>
+      <div class="kpi-card__meta">Snapshot pesan terbaru</div>
+    </article>
+    <article class="comm-kpi kpi-card" data-theme="cyan">
+      <div class="kpi-card__label">Audit trail</div>
+      <div class="kpi-card__value">{{ communication_recent_audit|length }}</div>
+      <div class="kpi-card__meta">Jejak komunikasi terbaru</div>
+    </article>
   </section>
 
   <section class="comm-main">
@@ -395,6 +396,7 @@
     const targetRole = document.getElementById("announcement-target-role");
     const targetSiteWrap = document.getElementById("announcement-target-site-wrap");
     const targetSite = document.getElementById("announcement-target-site");
+    const expiredAtInput = document.getElementById("announcement-expired-at");
     const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute("content") || "";
 
     function showMessage(message, isError) {
@@ -416,6 +418,18 @@
 
     targetType?.addEventListener("change", syncAnnouncementTargetFields);
     syncAnnouncementTargetFields();
+
+    function openExpiredAtPicker() {
+      if (!expiredAtInput || typeof expiredAtInput.showPicker !== "function") return;
+      try {
+        expiredAtInput.showPicker();
+      } catch (_error) {
+        // Native picker can only open from direct user interaction in some browsers.
+      }
+    }
+
+    expiredAtInput?.addEventListener("click", openExpiredAtPicker);
+    expiredAtInput?.addEventListener("focus", openExpiredAtPicker);
 
     form?.addEventListener("submit", async (event) => {
       event.preventDefault();

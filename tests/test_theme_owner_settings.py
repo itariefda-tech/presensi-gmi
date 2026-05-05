@@ -151,8 +151,8 @@ def test_legacy_basic_package_normalizes_to_pro_and_pro_plus_supports_addons(the
     assert presensi._normalize_communication_tier("basic") == "pro"
 
 
-def test_hr_settings_user_tier_hides_basic_and_shows_pro_plus(theme_db, monkeypatch):
-    monkeypatch.setenv("FLASK_SECRET", "test-secret-hr-settings-tier")
+def test_hr_settings_users_tab_hides_tier_controls(theme_db, monkeypatch):
+    monkeypatch.setenv("FLASK_SECRET", "test-secret-hr-settings-users-no-tier")
     conn = sqlite3.connect(theme_db)
     try:
         conn.execute(
@@ -184,5 +184,8 @@ def test_hr_settings_user_tier_hides_basic_and_shows_pro_plus(theme_db, monkeypa
         assert response.status_code == 200
         html = response.get_data(as_text=True)
 
+    assert "<th>Tier</th>" not in html
+    assert 'name="tier"' not in html
+    assert "user-tier-" not in html
     assert ">Basic<" not in html
-    assert ">Pro Plus<" in html
+    assert ">Pro Plus<" not in html

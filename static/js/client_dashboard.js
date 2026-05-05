@@ -1948,9 +1948,7 @@
     try {
       const period = payrollCurrentPeriod();
       const params = new URLSearchParams({ period });
-      const schedule = document.getElementById("clientPayrollScheduleFilter")?.value || "";
       const status = document.getElementById("clientPayrollStatusFilter")?.value || "";
-      if (schedule) params.set("payroll_schedule", schedule);
       if (status) params.set("status", status);
       const payload = await payrollApi(`/api/payroll/list?${params.toString()}`);
       const rows = Array.isArray(payload.data) ? payload.data : [];
@@ -2079,7 +2077,6 @@
     if (!root || payrollState.initialized) return;
     payrollState.initialized = true;
     const periodInput = document.getElementById("clientPayrollPeriod");
-    const scheduleFilter = document.getElementById("clientPayrollScheduleFilter");
     const statusFilter = document.getElementById("clientPayrollStatusFilter");
     const form = document.getElementById("clientPayrollGenerateForm");
     const rows = document.getElementById("clientPayrollRows");
@@ -2097,7 +2094,6 @@
       if (absentRate) absentRate.readOnly = true;
     }
     periodInput?.addEventListener("change", () => payrollLoad({ silent: false }));
-    scheduleFilter?.addEventListener("change", () => payrollLoad({ silent: false }));
     statusFilter?.addEventListener("change", () => payrollLoad({ silent: false }));
     refresh?.addEventListener("click", () => payrollLoad({ silent: false }));
     exportBtn?.addEventListener("click", payrollExportCsv);
