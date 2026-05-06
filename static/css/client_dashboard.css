@@ -65,10 +65,14 @@ html[data-theme="light"] body{
 
 .client-top{
   padding: 20px 18px 8px;
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: flex-start;
-  justify-content: space-between;
   gap: 16px;
+}
+
+.brand{
+  min-width: 0;
 }
 
 .brand-pill{
@@ -104,6 +108,7 @@ html[data-theme="light"] body{
   align-items: flex-end;
   justify-content: flex-start;
   gap: 14px;
+  min-width: 0;
 }
 
 .top-actions-controls{
@@ -2047,8 +2052,10 @@ html[data-theme="light"] .nav-btn.active{
 }
 
 .user-avatar{
-  width: 72px;
-  height: 72px;
+  width: clamp(54px, 17vw, 72px);
+  height: clamp(54px, 17vw, 72px);
+  flex: 0 0 auto;
+  aspect-ratio: 1 / 1;
   border-radius: 50%;
   border: 2px solid #f5c542;
   background: radial-gradient(circle at 30% 30%, #e2e8f0, #94a3b8 55%, #0f172a 100%);
@@ -2062,6 +2069,8 @@ html[data-theme="light"] .nav-btn.active{
   align-items: center;
   margin: 0 auto;
   text-align: center;
+  min-width: clamp(64px, 20vw, 92px);
+  justify-self: center;
 }
 
 .avatar-upload{
@@ -2535,6 +2544,29 @@ body.modal-open{
 }
 
 @media (max-width: 520px){
+  .client-top{
+    gap: 8px;
+    padding: 14px 12px 6px;
+  }
+  .brand-title{
+    font-size: clamp(16px, 4.4vw, 19px);
+  }
+  .brand-pill,
+  .brand-meta,
+  .avatar-name{
+    font-size: 10px;
+  }
+  .avatar-name{
+    max-width: min(120px, 28vw);
+    padding: 5px 9px;
+    letter-spacing: .08em;
+    overflow-wrap: anywhere;
+  }
+  .top-actions-controls{
+    gap: 6px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
   .nav-btn{
     width: 48px;
     height: 48px;

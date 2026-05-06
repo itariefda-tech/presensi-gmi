@@ -444,11 +444,6 @@ function initProfile(){
   const stored = localStorage.getItem(key);
   const img = document.getElementById("profilePhoto");
   if (!img) return;
-  if (img.getAttribute("src")) return;
-  if (stored) {
-    img.src = stored;
-    return;
-  }
   const svg = encodeURIComponent(
     `<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80">
       <rect width="80" height="80" rx="40" fill="#1f2937"/>
@@ -456,7 +451,17 @@ function initProfile(){
       <path d="M16 68c6-12 17-18 24-18s18 6 24 18" fill="#9fb2d0"/>
     </svg>`
   );
-  img.src = `data:image/svg+xml,${svg}`;
+  const fallbackSrc = stored || `data:image/svg+xml,${svg}`;
+  img.addEventListener("error", () => {
+    if (img.src !== fallbackSrc) img.src = fallbackSrc;
+  }, { once: true });
+  if (img.complete && img.naturalWidth === 0) {
+    img.src = fallbackSrc;
+    return;
+  }
+  if (!img.getAttribute("src")) {
+    img.src = fallbackSrc;
+  }
 }
 
 function showPresenceToast(msg, type = "ok"){

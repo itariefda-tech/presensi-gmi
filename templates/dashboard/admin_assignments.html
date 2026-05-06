@@ -67,28 +67,57 @@
 </div>
 
 <div class="card" style="margin-top:12px;">
-  <table class="table table-wide" aria-label="Daftar assignment">
+  <table class="table table-wide assignment-table" aria-label="Daftar assignment">
     <thead>
       <tr>
-        <th>Pegawai</th>
-        <th>Client</th>
-        <th>Site</th>
-        <th>Periode</th>
-        <th>Status</th>
+        <th>Pegawai<br><span class="attendance-head-sub">Periode</span></th>
+        <th>Client<br><span class="attendance-head-sub">Site</span></th>
+        <th>Status<br><span class="attendance-head-sub">Jabatan</span></th>
         <th>Aksi</th>
       </tr>
     </thead>
     <tbody>
       {% if not assignments %}
-      <tr><td colspan="6" class="muted">Belum ada assignment.</td></tr>
+      <tr><td colspan="4" class="muted">Belum ada assignment.</td></tr>
       {% endif %}
       {% for a in assignments %}
       <tr>
-        <td>{{ a.employee_name or a.employee_email }}</td>
-        <td>{{ a.client_name or '-' }}</td>
-        <td>{{ a.site_name or '-' }}</td>
-        <td>{{ a.start_date|ddmmyyyy }}{% if a.end_date %} - {{ a.end_date|ddmmyyyy }}{% endif %}</td>
-        <td>{{ a.status }}</td>
+        <td>
+          <div class="attendance-cell-pair">
+            <div class="attendance-cell-main">
+              <strong>{{ a.employee_name or a.employee_email }}</strong>
+              <span>Pegawai</span>
+            </div>
+            <div class="attendance-cell-sub">
+              <strong>{{ a.start_date|ddmmyyyy }}{% if a.end_date %} - {{ a.end_date|ddmmyyyy }}{% endif %}</strong>
+              <span>Periode</span>
+            </div>
+          </div>
+        </td>
+        <td>
+          <div class="attendance-cell-pair">
+            <div class="attendance-cell-main">
+              <strong>{{ a.client_name or '-' }}</strong>
+              <span>Client</span>
+            </div>
+            <div class="attendance-cell-sub">
+              <strong>{{ a.site_name or '-' }}</strong>
+              <span>Site</span>
+            </div>
+          </div>
+        </td>
+        <td>
+          <div class="attendance-cell-pair">
+            <div class="attendance-cell-main">
+              <strong>{{ a.status }}</strong>
+              <span>Status</span>
+            </div>
+            <div class="attendance-cell-sub">
+              <strong>{{ a.job_title or '-' }}</strong>
+              <span>Jabatan</span>
+            </div>
+          </div>
+        </td>
         <td>
           <details class="dropdown">
             <summary class="btn secondary icon-btn" aria-label="Aksi">

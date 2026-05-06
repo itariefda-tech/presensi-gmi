@@ -194,9 +194,9 @@ button:focus-visible{
   white-space: nowrap;
 }
 .header-top{
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  justify-content: space-between;
   gap: 10px;
   min-width: 0;
   position: relative;
@@ -207,7 +207,6 @@ button:focus-visible{
   z-index: 2;
 }
 .header-col{
-  flex: 1 1 0;
   min-width: 0;
   display: flex;
   align-items: center;
@@ -247,6 +246,7 @@ button:focus-visible{
 .header-center{
   justify-content: center;
   position: relative;
+  min-width: clamp(68px, 22vw, 92px);
 }
 .header-right-stack{
   position: relative;
@@ -387,8 +387,11 @@ button:focus-visible{
 }
 
 .profile-photo{
-  width: 84px;
-  height: 84px;
+  width: clamp(64px, 20vw, 84px);
+  height: clamp(64px, 20vw, 84px);
+  flex: 0 0 auto;
+  display: block;
+  aspect-ratio: 1 / 1;
   border-radius: 50%;
   object-fit: cover;
   border: 2px solid #d4af37;
@@ -398,8 +401,8 @@ button:focus-visible{
   box-shadow: 0 0 0 4px rgba(0,0,0,.15);
 }
 .profile-photo-large{
-  width: 96px;
-  height: 96px;
+  width: clamp(76px, 24vw, 96px);
+  height: clamp(76px, 24vw, 96px);
 }
 .profile-name{
   font-weight: 800;

@@ -1,9 +1,11 @@
 const clientSelect = document.getElementById("qrClientSelect");
+const siteSelect = document.getElementById("qrSiteSelect");
 const statusEl = document.getElementById("qrStatus");
 const expiryEl = document.getElementById("qrExpiry");
 const remainingEl = document.getElementById("qrRemaining");
 const qrImage = document.getElementById("qrCanvas");
 const copyBtn = document.getElementById("btnCopyQr");
+const refreshBtn = document.getElementById("btnRefreshQr");
 const actionButtons = Array.from(document.querySelectorAll("[data-qr-action]"));
 
 let payloads = { IN: "", OUT: "" };
@@ -12,11 +14,43 @@ let activeAction = "IN";
 let windowEnd = 0;
 let serverOffset = 0;
 let tickTimer = null;
+let isFetching = false;
 
 function setStatus(message, isError = false){
   if (!statusEl) return;
   statusEl.textContent = message;
   statusEl.style.color = isError ? "#fb7185" : "";
+}
+
+function clearQr(message, isError = true){
+  payloads = { IN: "", OUT: "" };
+  payloadImages = { IN: "", OUT: "" };
+  windowEnd = 0;
+  if (qrImage) qrImage.removeAttribute("src");
+  if (expiryEl) expiryEl.textContent = "-";
+  if (remainingEl) remainingEl.textContent = "-";
+  setStatus(message, isError);
+}
+
+function setOptionVisibility(option, visible){
+  option.hidden = !visible;
+  option.disabled = !visible;
+}
+
+function updateSiteOptions(resetSite = false){
+  if (!siteSelect) return;
+  const clientId = clientSelect?.value || "";
+  Array.from(siteSelect.options).forEach((option) => {
+    if (!option.value) {
+      setOptionVisibility(option, true);
+      return;
+    }
+    setOptionVisibility(option, !clientId || option.dataset.clientId === clientId);
+  });
+  const selectedOption = siteSelect.selectedOptions[0];
+  if (resetSite || (selectedOption && selectedOption.disabled)) {
+    siteSelect.value = "";
+  }
 }
 
 function setActiveAction(action){
@@ -59,15 +93,23 @@ function updateCountdown(){
 }
 
 async function fetchPayload(){
-  if (!clientSelect) return;
+  if (!clientSelect || isFetching) return;
   const clientId = clientSelect.value;
+  const siteId = siteSelect?.value || "";
   if (!clientId) {
-    setStatus("Pilih client untuk membuat QR.", true);
+    clearQr("Pilih client untuk membuat QR.");
     return;
   }
+  if (!siteId) {
+    clearQr("Pilih site untuk membuat QR.");
+    return;
+  }
+  isFetching = true;
+  if (refreshBtn) refreshBtn.disabled = true;
   setStatus("Memuat QR...");
   try {
-    const res = await fetch(`/dashboard/admin/qr/payload?client_id=${encodeURIComponent(clientId)}`);
+    const params = new URLSearchParams({ client_id: clientId, site_id: siteId });
+    const res = await fetch(`/dashboard/admin/qr/payload?${params.toString()}`);
     const data = await res.json();
     if (!res.ok || !data.ok) {
       setStatus(data?.message || "Gagal memuat QR.", true);
@@ -84,6 +126,9 @@ async function fetchPayload(){
     updateCountdown();
   } catch (err) {
     setStatus("Gagal memuat QR.", true);
+  } finally {
+    isFetching = false;
+    if (refreshBtn) refreshBtn.disabled = false;
   }
 }
 
@@ -92,6 +137,15 @@ actionButtons.forEach((btn) => {
 });
 
 clientSelect?.addEventListener("change", () => {
+  updateSiteOptions(true);
+  clearQr("Pilih site untuk membuat QR.");
+});
+
+siteSelect?.addEventListener("change", () => {
+  fetchPayload();
+});
+
+refreshBtn?.addEventListener("click", () => {
   fetchPayload();
 });
 
@@ -113,5 +167,6 @@ if (tickTimer) clearInterval(tickTimer);
 tickTimer = window.setInterval(updateCountdown, 1000 * 30);
 
 if (clientSelect) {
+  updateSiteOptions(false);
   fetchPayload();
 }

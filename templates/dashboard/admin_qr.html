@@ -19,6 +19,25 @@
         {% endfor %}
       </select>
     </div>
+    <div class="qr-field">
+      <div class="label">Pilih Site</div>
+      <select id="qrSiteSelect" class="input" {% if not sites %}disabled{% endif %}>
+        {% if not sites %}
+        <option value="">Belum ada site</option>
+        {% else %}
+        <option value="">Pilih site</option>
+        {% endif %}
+        {% for site in sites %}
+        <option
+          value="{{ site.id }}"
+          data-client-id="{{ site.client_id or '' }}"
+          {% if selected_site_id and selected_site_id|string == site.id|string %}selected{% endif %}
+        >
+          {{ site.client_name or '-' }} - {{ site.name }}
+        </option>
+        {% endfor %}
+      </select>
+    </div>
     <div class="qr-meta">
       <div class="muted">Berlaku sampai</div>
       <div class="qr-expiry" id="qrExpiry">-</div>
@@ -38,6 +57,7 @@
   <div class="muted" id="qrStatus">Memuat QR...</div>
 
   <div class="qr-actions">
+    <button class="btn primary" type="button" id="btnRefreshQr">Refresh QR</button>
     <button class="btn secondary" type="button" id="btnCopyQr">Salin kode</button>
   </div>
 </div>

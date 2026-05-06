@@ -313,6 +313,7 @@ async function saveDisplaySettings(){
     }
   }
   setDisplaySettingsStatus("Pengaturan tampilan diterapkan.", "success");
+  setOwnerAddonTogglesModalOpen(false);
 }
 
 loadDisplaySettings();
@@ -725,6 +726,7 @@ async function saveOwnerAddons(){
       setTheme("dark");
     }
     setOwnerAddonTogglesStatus(payload.message || "Pengaturan owner tersimpan.", "success");
+    setOwnerAddonTogglesModalOpen(false);
   } catch (err){
     const message = err instanceof Error ? err.message : "Add-on gagal disimpan.";
     setOwnerAddonTogglesStatus(message, "error");

@@ -116,13 +116,10 @@
     <table class="table attendance-report-table" id="attendanceReportTable">
       <thead>
         <tr>
-          <th>Nama Pegawai/Email</th>
-          <th>Tanggal</th>
-          <th>Check-in</th>
-          <th>Check-out</th>
-          <th>Metode</th>
-          <th>Sumber</th>
-          <th>Dicatat</th>
+          <th>Nama Pegawai<br><span class="attendance-head-sub">Email</span></th>
+          <th>Tanggal<br><span class="attendance-head-sub">Metode</span></th>
+          <th>Check-in<br><span class="attendance-head-sub">Check-out</span></th>
+          <th>Sumber<br><span class="attendance-head-sub">Dicatat</span></th>
         </tr>
       </thead>
       <tbody id="attendanceReportBody">
@@ -130,17 +127,53 @@
         {% for r in records %}
         <tr>
           <td>
-            <div class="attendance-name-stack">
-              <span>{{ r.employee }}</span>
-              <span class="muted small">{{ r.email }}</span>
+            <div class="attendance-cell-pair">
+              <div class="attendance-cell-main">
+                <strong>{{ r.employee }}</strong>
+                <span>Nama pegawai</span>
+              </div>
+              <div class="attendance-cell-sub">
+                <strong>{{ r.email }}</strong>
+                <span>Email</span>
+              </div>
             </div>
           </td>
-          <td>{{ r.date|ddmmyyyy }}</td>
-          <td>{{ r.check_in or '-' }}</td>
-          <td>{{ r.check_out or '-' }}</td>
-          <td>{{ r.method }}</td>
-          <td>{{ r.source }}</td>
-          <td>{{ r.created_at|display_datetime }}</td>
+          <td>
+            <div class="attendance-cell-pair">
+              <div class="attendance-cell-main">
+                <strong>{{ r.date|ddmmyyyy }}</strong>
+                <span>Tanggal</span>
+              </div>
+              <div class="attendance-cell-sub">
+                <strong>{{ r.method }}</strong>
+                <span>Metode</span>
+              </div>
+            </div>
+          </td>
+          <td>
+            <div class="attendance-cell-pair">
+              <div class="attendance-cell-main">
+                <strong>{{ r.check_in or '-' }}</strong>
+                <span>Check-in</span>
+              </div>
+              <div class="attendance-cell-sub">
+                <strong>{{ r.check_out or '-' }}</strong>
+                <span>Check-out</span>
+              </div>
+            </div>
+          </td>
+          <td>
+            <div class="attendance-cell-pair">
+              <div class="attendance-cell-main">
+                <strong>{{ r.source }}</strong>
+                <span>Sumber</span>
+              </div>
+              <div class="attendance-cell-sub">
+                <strong>{{ r.created_at|display_datetime }}</strong>
+                <span>Dicatat</span>
+              </div>
+            </div>
+          </td>
         </tr>
         {% endfor %}
         {% endif %}
@@ -167,64 +200,106 @@
     <a class="tab-btn {% if manual_status == 'approved' %}active{% endif %}" href="{{ url_for('admin.attendance', site_id=selected_site.id, mr_status='approved') }}#manual-attendance-requests">Approved</a>
     <a class="tab-btn {% if manual_status == 'rejected' %}active{% endif %}" href="{{ url_for('admin.attendance', site_id=selected_site.id, mr_status='rejected') }}#manual-attendance-requests">Rejected</a>
   </div>
-  <div class="table-wrap">
-    <table class="table" aria-label="Manual attendance requests">
+  <div class="table-wrap manual-attendance-table-wrap">
+    <table class="table manual-attendance-table" aria-label="Manual attendance requests">
       <thead>
         <tr>
-          <th>ID</th>
-          <th>Pegawai</th>
-          <th>Tanggal</th>
-          <th>Waktu</th>
-          <th>Tipe</th>
-          <th>Alasan</th>
-          <th>Diajukan Oleh</th>
-          <th>Diajukan</th>
-          <th>Status</th>
-          {% if manual_status == 'pending' and can_approve_manual %}<th>Aksi</th>{% endif %}
+          <th>ID<br><span class="attendance-head-sub">Pegawai</span></th>
+          <th>Tanggal<br><span class="attendance-head-sub">Waktu</span></th>
+          <th>Tipe<br><span class="attendance-head-sub">Alasan</span></th>
+          <th>Diajukan Oleh<br><span class="attendance-head-sub">Diajukan</span></th>
+          <th>Status<br><span class="attendance-head-sub">Aksi</span></th>
         </tr>
       </thead>
       <tbody>
         {% if not manual_items %}
-        <tr><td colspan="{% if manual_status == 'pending' and can_approve_manual %}10{% else %}9{% endif %}" class="muted">Belum ada manual attendance request untuk site ini.</td></tr>
+        <tr><td colspan="5" class="muted">Belum ada manual attendance request untuk site ini.</td></tr>
         {% endif %}
         {% set manual_next_url = url_for('admin.attendance', site_id=selected_site.id, mr_status=manual_status) ~ '#manual-attendance-requests' %}
         {% for r in manual_items %}
         <tr>
-          <td>{{ r.id }}</td>
           <td>
-            <div>{{ r.employee_name or r.employee_email }}</div>
-            <div class="muted">{{ r.employee_email }}</div>
-          </td>
-          <td>{{ r.date|ddmmyyyy }}</td>
-          <td>{{ r.time }}</td>
-          <td><span class="badge">{{ r.action }}</span></td>
-          <td>{{ r.reason }}</td>
-          <td>
-            <div>{{ r.created_by_email or r.created_by_user_id }}</div>
-            <div class="muted">{{ r.created_by_role|title }}</div>
-          </td>
-          <td>{{ r.created_at|display_datetime }}</td>
-          <td><span class="badge {{ r.status|lower }}">{{ r.status }}</span></td>
-          {% if manual_status == 'pending' and can_approve_manual %}
-          <td>
-            <div class="inline">
-              <form method="post" action="{{ url_for('admin.manual_attendance_approve', request_id=r.id) }}">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-                <input type="hidden" name="site_id" value="{{ selected_site.id }}" />
-                <input type="hidden" name="next" value="{{ manual_next_url }}" />
-                <input class="input" type="text" name="note" placeholder="Catatan (opsional)" />
-                <button class="btn primary" type="submit">Approve</button>
-              </form>
-              <form method="post" action="{{ url_for('admin.manual_attendance_reject', request_id=r.id) }}">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-                <input type="hidden" name="site_id" value="{{ selected_site.id }}" />
-                <input type="hidden" name="next" value="{{ manual_next_url }}" />
-                <input class="input" type="text" name="note" placeholder="Alasan tolak" required />
-                <button class="btn secondary" type="submit">Reject</button>
-              </form>
+            <div class="attendance-cell-pair">
+              <div class="attendance-cell-main">
+                <strong>#{{ r.id }}</strong>
+                <span>ID</span>
+              </div>
+              <div class="attendance-cell-sub">
+                <strong>{{ r.employee_name or r.employee_email }}</strong>
+                <span>{{ r.employee_email }}</span>
+              </div>
             </div>
           </td>
-          {% endif %}
+          <td>
+            <div class="attendance-cell-pair">
+              <div class="attendance-cell-main">
+                <strong>{{ r.date|ddmmyyyy }}</strong>
+                <span>Tanggal</span>
+              </div>
+              <div class="attendance-cell-sub">
+                <strong>{{ r.time }}</strong>
+                <span>Waktu</span>
+              </div>
+            </div>
+          </td>
+          <td class="manual-attendance-reason-cell">
+            <div class="attendance-cell-pair">
+              <div class="attendance-cell-main">
+                <strong><span class="badge">{{ r.action }}</span></strong>
+                <span>Tipe</span>
+              </div>
+              <div class="attendance-cell-sub">
+                <strong class="manual-attendance-reason">{{ r.reason }}</strong>
+                <span>Alasan</span>
+              </div>
+            </div>
+          </td>
+          <td>
+            <div class="attendance-cell-pair">
+              <div class="attendance-cell-main">
+                <strong>{{ r.created_by_email or r.created_by_user_id }}</strong>
+                <span>{{ r.created_by_role|title }}</span>
+              </div>
+              <div class="attendance-cell-sub">
+                <strong>{{ r.created_at|display_datetime }}</strong>
+                <span>Diajukan</span>
+              </div>
+            </div>
+          </td>
+          <td>
+            <div class="attendance-cell-pair manual-attendance-cell-actions">
+              <div class="attendance-cell-main">
+                <strong><span class="badge {{ r.status|lower }}">{{ r.status }}</span></strong>
+                <span>Status</span>
+              </div>
+              {% if manual_status == 'pending' and can_approve_manual %}
+              <div class="attendance-cell-sub">
+                <div class="inline manual-attendance-actions">
+                  <form method="post" action="{{ url_for('admin.manual_attendance_approve', request_id=r.id) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                    <input type="hidden" name="site_id" value="{{ selected_site.id }}" />
+                    <input type="hidden" name="next" value="{{ manual_next_url }}" />
+                    <input class="input" type="text" name="note" placeholder="Catatan (opsional)" />
+                    <button class="btn primary" type="submit">Approve</button>
+                  </form>
+                  <form method="post" action="{{ url_for('admin.manual_attendance_reject', request_id=r.id) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                    <input type="hidden" name="site_id" value="{{ selected_site.id }}" />
+                    <input type="hidden" name="next" value="{{ manual_next_url }}" />
+                    <input class="input" type="text" name="note" placeholder="Alasan tolak" required />
+                    <button class="btn secondary" type="submit">Reject</button>
+                  </form>
+                </div>
+                <span>Aksi</span>
+              </div>
+              {% else %}
+              <div class="attendance-cell-sub">
+                <strong>-</strong>
+                <span>Aksi</span>
+              </div>
+              {% endif %}
+            </div>
+          </td>
         </tr>
         {% endfor %}
       </tbody>

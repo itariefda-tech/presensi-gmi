@@ -2300,7 +2300,7 @@ def create_app() -> Flask:
             if not qr_data:
                 print(f"[CHECKIN] Missing QR data")
                 return jsonify(ok=False, message="QR code wajib di-scan."), 400
-            ok, msg = _validate_qr_data(qr_data, site["client_id"], "IN")
+            ok, msg = _validate_qr_data(qr_data, site["client_id"], "IN", _row_get(site, "id"))
             if not ok:
                 print(f"[CHECKIN] Invalid QR: {msg}")
                 return jsonify(ok=False, message=msg), 400
@@ -2312,7 +2312,7 @@ def create_app() -> Flask:
         if method == "qr":
             if not qr_data:
                 return jsonify(ok=False, message="QR code wajib di-scan."), 400
-            ok, msg = _validate_qr_data(qr_data, site["client_id"], "IN")
+            ok, msg = _validate_qr_data(qr_data, site["client_id"], "IN", _row_get(site, "id"))
             if not ok:
                 return jsonify(ok=False, message=msg), 400
         selfie_path = None
@@ -2424,7 +2424,7 @@ def create_app() -> Flask:
         if method == "qr":
             if not qr_data:
                 return jsonify(ok=False, message="QR code wajib di-scan."), 400
-            ok, msg = _validate_qr_data(qr_data, site["client_id"], "OUT")
+            ok, msg = _validate_qr_data(qr_data, site["client_id"], "OUT", _row_get(site, "id"))
             if not ok:
                 return jsonify(ok=False, message=msg), 400
         selfie_path = None
@@ -23639,10 +23639,12 @@ def _client_patrol_dashboard_payload(
     }
 
 
-def _qr_secret_for_client(client_id: int | None) -> str:
+def _qr_secret_for_client(client_id: int | None, site_id: int | None = None) -> str:
     base = (os.environ.get("QR_SECRET") or "").strip()
     if not base:
         return ""
+    if site_id:
+        return hmac.new(base.encode("utf-8"), f"client:{client_id or 0}:site:{site_id}".encode("utf-8"), hashlib.sha256).hexdigest()
     if not client_id:
         return base
     return hmac.new(base.encode("utf-8"), f"client:{client_id}".encode("utf-8"), hashlib.sha256).hexdigest()
@@ -23652,18 +23654,25 @@ def _qr_window_start(ts: int, window_seconds: int = QR_WINDOW_SECONDS) -> int:
     return (ts // window_seconds) * window_seconds
 
 
-def _build_qr_payload(client_id: int | None, action: str) -> str:
-    secret = _qr_secret_for_client(client_id)
+def _build_qr_payload(client_id: int | None, action: str, site_id: int | None = None) -> str:
+    secret = _qr_secret_for_client(client_id, site_id)
     if not secret:
         raise ValueError("QR secret tidak tersedia.")
     action_norm = action.upper().strip()
     now_ts = int(datetime.now(timezone.utc).timestamp())
     window_ts = _qr_window_start(now_ts)
-    nonce_src = f"{window_ts}|{action_norm}|{client_id or 0}"
+    nonce_src = f"{window_ts}|{action_norm}|{client_id or 0}|{site_id or 0}"
     nonce = hmac.new(secret.encode("utf-8"), nonce_src.encode("utf-8"), hashlib.sha256).hexdigest()[:12]
-    data = f"{window_ts}|{nonce}|{action_norm}".encode("utf-8")
+    data_parts = [str(window_ts), nonce, action_norm]
+    if site_id:
+        data_parts.append(str(site_id))
+    data = "|".join(data_parts).encode("utf-8")
     sig = hmac.new(secret.encode("utf-8"), data, hashlib.sha256).hexdigest()
-    return f"{DEMO_QR_PREFIX}|{window_ts}|{nonce}|{action_norm}|{sig}"
+    payload_parts = [DEMO_QR_PREFIX, str(window_ts), nonce, action_norm]
+    if site_id:
+        payload_parts.append(str(site_id))
+    payload_parts.append(sig)
+    return "|".join(payload_parts)
 
 
 def _qr_image_base64(payload: str) -> str:
@@ -23684,25 +23693,37 @@ def _validate_qr_data(
     qr_data: str,
     client_id: int | None = None,
     action: str | None = None,
+    site_id: int | None = None,
 ) -> tuple[bool, str]:
     payload = (qr_data or "").strip()
     if not payload:
         return False, "QR code wajib di-scan."
-    secret = _qr_secret_for_client(client_id)
-    if not secret:
-        return False, "QR tidak dapat diverifikasi."
     parts = payload.split("|")
-    if len(parts) not in {4, 5}:
+    if len(parts) not in {4, 5, 6}:
         return False, "QR tidak valid."
     if len(parts) == 4:
         prefix, ts_raw, nonce, sig = parts
         action_raw = ""
+        payload_site_id = None
+    elif len(parts) == 6:
+        prefix, ts_raw, nonce, action_raw, site_raw, sig = parts
+        if not site_raw.isdigit():
+            return False, "QR site tidak valid."
+        payload_site_id = int(site_raw)
     else:
         prefix, ts_raw, nonce, action_raw, sig = parts
+        payload_site_id = None
     if prefix.upper() != DEMO_QR_PREFIX:
         return False, "QR tidak dikenali."
     if not ts_raw.isdigit():
         return False, "QR tidak valid."
+    if site_id and payload_site_id is None:
+        return False, "QR tidak sesuai site."
+    if site_id and payload_site_id and int(payload_site_id) != int(site_id):
+        return False, "QR tidak sesuai site."
+    secret = _qr_secret_for_client(client_id, payload_site_id)
+    if not secret:
+        return False, "QR tidak dapat diverifikasi."
     ts = int(ts_raw)
     now = int(datetime.now(timezone.utc).timestamp())
     if abs(now - ts) > QR_WINDOW_SECONDS:
@@ -23710,6 +23731,8 @@ def _validate_qr_data(
     data_parts = [ts_raw, nonce]
     if action_raw:
         data_parts.append(action_raw.upper())
+    if payload_site_id:
+        data_parts.append(str(payload_site_id))
     data = "|".join(data_parts).encode("utf-8")
     expected = hmac.new(secret.encode("utf-8"), data, hashlib.sha256).hexdigest()
     if not hmac.compare_digest(expected, sig):
@@ -24275,14 +24298,19 @@ def admin_bp() -> Blueprint:
         if client_scope:
             client_row = _get_client_by_id(client_scope)
             clients = [dict(client_row)] if client_row else []
+            sites = _list_sites_by_client(client_scope)
         else:
             clients = _clients()
+            sites = _list_sites()
         selected_client_id = request.args.get("client_id")
+        selected_site_id = request.args.get("site_id")
         return render_template(
             "dashboard/admin_qr.html",
             user=user,
             clients=clients,
+            sites=sites,
             selected_client_id=selected_client_id,
+            selected_site_id=selected_site_id,
         )
 
     @bp.route("/qr/payload", methods=["GET"])
@@ -24292,16 +24320,33 @@ def admin_bp() -> Blueprint:
             return jsonify(ok=False, message="Unauthorized."), 403
         if not _is_pro(user):
             return _pro_required_response("QR attendance")
-        client_id = int(request.args.get("client_id") or 0) or None
+        try:
+            client_id = int(request.args.get("client_id") or 0) or None
+            site_id = int(request.args.get("site_id") or 0) or None
+        except (TypeError, ValueError):
+            return jsonify(ok=False, message="Filter QR tidak valid."), 400
+        if not site_id:
+            return jsonify(ok=False, message="Site wajib dipilih untuk QR attendance."), 400
+        site = _get_site_by_id(site_id)
+        if not site:
+            return jsonify(ok=False, message="Site tidak ditemukan."), 404
+        site_client_id = int(_row_get(site, "client_id") or 0) or None
+        if not site_client_id:
+            return jsonify(ok=False, message="Site belum terhubung dengan client."), 400
+        if client_id and site_client_id and int(client_id) != int(site_client_id):
+            return jsonify(ok=False, message="Site tidak berada pada client terpilih."), 400
+        if not client_id:
+            client_id = site_client_id
         if user.role == "client_admin":
             _require_client_admin_client(user, client_id)
+            _require_client_admin_site(user, site_id)
         if client_id:
             client = _get_client_by_id(client_id)
             if not client:
                 return jsonify(ok=False, message="Client tidak ditemukan."), 404
         try:
-            payload_in = _build_qr_payload(client_id, "IN")
-            payload_out = _build_qr_payload(client_id, "OUT")
+            payload_in = _build_qr_payload(client_id, "IN", site_id)
+            payload_out = _build_qr_payload(client_id, "OUT", site_id)
         except ValueError as err:
             return jsonify(ok=False, message=str(err)), 400
         now_ts = int(datetime.now(timezone.utc).timestamp())

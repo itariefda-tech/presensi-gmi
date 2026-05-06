@@ -25,7 +25,21 @@
       <div class="kpi-card__meta" id="kpiCoordsMeta">{{ card.meta }}</div>
       {% endif %}
       {% else %}
-      <div class="kpi-card__label">{{ card.label }}</div>
+      {% set icon_variant = loop.index0 % 4 %}
+      <div class="kpi-card__header kpi-card__header--decor">
+        <div class="kpi-card__label">{{ card.label }}</div>
+        <span class="kpi-card__decor-icon" aria-hidden="true">
+          {% if icon_variant == 0 %}
+          <svg viewBox="0 0 24 24" fill="none"><path d="M4 17.5 9 12l4 3 7-8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M16 7h4v4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          {% elif icon_variant == 1 %}
+          <svg viewBox="0 0 24 24" fill="none"><path d="M12 3 20 8v8l-8 5-8-5V8l8-5Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M8 11.5 12 9l4 2.5V16l-4 2.5L8 16v-4.5Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+          {% elif icon_variant == 2 %}
+          <svg viewBox="0 0 24 24" fill="none"><circle cx="7" cy="16" r="2.4" stroke="currentColor" stroke-width="1.7"/><circle cx="17" cy="8" r="2.4" stroke="currentColor" stroke-width="1.7"/><path d="M9 14.5 15 9.5M5 8h5M14 16h5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+          {% else %}
+          <svg viewBox="0 0 24 24" fill="none"><path d="M5 18V8m4 10V5m4 13v-7m4 7V9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M4 19h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          {% endif %}
+        </span>
+      </div>
       <div class="kpi-card__value">{{ card.value }}</div>
       {% if card.meta %}
       <div class="kpi-card__meta">{{ card.meta }}</div>

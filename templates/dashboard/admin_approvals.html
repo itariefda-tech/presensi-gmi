@@ -14,22 +14,18 @@
   <div class="tab-panel active" id="tab-attendance">
     <div id="attendanceAlert" class="alert info" style="display:none;"></div>
     <div class="table-wrap">
-      <table class="table" aria-label="Manual attendance pending">
+      <table class="table approval-table approval-attendance-table" aria-label="Manual attendance pending">
         <thead>
           <tr>
-            <th>Diajukan</th>
-            <th>Pegawai</th>
-            <th>Tanggal</th>
-            <th>Waktu</th>
-            <th>Aksi</th>
-            <th>Alasan</th>
-            <th>Status</th>
-            {% if can_approve_manual %}<th>Approve</th>{% endif %}
+            <th>Diajukan<br><span class="attendance-head-sub">Pegawai</span></th>
+            <th>Tanggal<br><span class="attendance-head-sub">Waktu</span></th>
+            <th>Aksi<br><span class="attendance-head-sub">Alasan</span></th>
+            <th>Status<br><span class="attendance-head-sub">Approve</span></th>
           </tr>
         </thead>
         <tbody id="attendanceRows" data-can-approve-manual="{{ '1' if can_approve_manual else '0' }}" data-limit="200">
           <tr>
-            <td colspan="{% if can_approve_manual %}8{% else %}7{% endif %}" class="muted">
+            <td colspan="4" class="muted">
               <span class="spinner" aria-hidden="true"></span>
               Memuat data...
             </td>
@@ -43,21 +39,18 @@
   <div class="tab-panel" id="tab-leave">
     <div id="leaveAlert" class="alert info" style="display:none;"></div>
     <div class="table-wrap">
-      <table class="table" aria-label="Leave pending">
+      <table class="table approval-table approval-leave-table" aria-label="Leave pending">
         <thead>
           <tr>
-            <th>Diajukan</th>
-            <th>Pegawai</th>
-            <th>Tipe</th>
-            <th>Tanggal</th>
-            <th>Alasan</th>
-            <th>Status</th>
-            {% if can_approve_leave %}<th>Approve</th>{% endif %}
+            <th>Diajukan<br><span class="attendance-head-sub">Pegawai</span></th>
+            <th>Tipe<br><span class="attendance-head-sub">Alasan</span></th>
+            <th>Tanggal<br><span class="attendance-head-sub">Status</span></th>
+            <th>Approve<br><span class="attendance-head-sub">Aksi</span></th>
           </tr>
         </thead>
         <tbody id="leaveRows" data-can-approve-leave="{{ '1' if can_approve_leave else '0' }}" data-limit="200">
           <tr>
-            <td colspan="{% if can_approve_leave %}7{% else %}6{% endif %}" class="muted">
+            <td colspan="4" class="muted">
               <span class="spinner" aria-hidden="true"></span>
               Memuat data...
             </td>
@@ -120,6 +113,14 @@
   
   // Load initial data
   loadAttendanceData();
+
+  function htmlAttr(value) {
+    return String(value || '-')
+      .replace(/&/g, '&amp;')
+      .replace(/"/g, '&quot;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
   
   // Functions
   function loadAttendanceData() {
@@ -156,45 +157,126 @@
   
   function renderAttendanceTable(data, tbody, canApprove) {
     if (!data || data.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="8" class="muted">Tidak ada pending manual attendance.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="4" class="muted">Tidak ada pending manual attendance.</td></tr>';
       return;
     }
     
     tbody.innerHTML = data.map(item => `
       <tr>
-        <td>${formatDateTime(item.created_at)}</td>
-        <td>${item.employee_name}<br><small class="muted">${item.employee_email}</small></td>
-        <td>${formatDate(item.date)}</td>
-        <td>${item.time}</td>
-        <td>${item.action}</td>
-        <td>${item.reason || '-'}</td>
-        <td><span class="badge pending">${item.status}</span></td>
-        ${canApprove ? `<td><button class="btn small primary" onclick="showApprovalModal('attendance', ${item.id}, '${item.employee_name}')">Approve</button></td>` : ''}
+        <td>
+          <div class="attendance-cell-pair">
+            <div class="attendance-cell-main">
+              <strong>${formatDateTime(item.created_at)}</strong>
+              <span>Diajukan</span>
+            </div>
+            <div class="attendance-cell-sub">
+              <strong>${item.employee_name || item.employee_email || '-'}</strong>
+              <span>${item.employee_email || '-'}</span>
+            </div>
+          </div>
+        </td>
+        <td>
+          <div class="attendance-cell-pair">
+            <div class="attendance-cell-main">
+              <strong>${formatDate(item.date)}</strong>
+              <span>Tanggal</span>
+            </div>
+            <div class="attendance-cell-sub">
+              <strong>${item.time || '-'}</strong>
+              <span>Waktu</span>
+            </div>
+          </div>
+        </td>
+        <td class="approval-reason-cell">
+          <div class="attendance-cell-pair">
+            <div class="attendance-cell-main">
+              <strong>${item.action || '-'}</strong>
+              <span>Aksi</span>
+            </div>
+            <div class="attendance-cell-sub">
+              <strong class="approval-reason">${item.reason || '-'}</strong>
+              <span>Alasan</span>
+            </div>
+          </div>
+        </td>
+        <td>
+          <div class="attendance-cell-pair approval-cell-actions">
+            <div class="attendance-cell-main">
+              <strong><span class="badge pending">${item.status}</span></strong>
+              <span>Status</span>
+            </div>
+            <div class="attendance-cell-sub">
+              ${canApprove ? `<button class="btn small primary approval-open" data-approval-type="attendance" data-approval-id="${item.id}" data-approval-name="${htmlAttr(item.employee_name || item.employee_email || '-')}">Approve</button>` : '<strong>-</strong>'}
+              <span>Approve</span>
+            </div>
+          </div>
+        </td>
       </tr>
     `).join('');
   }
   
   function renderLeaveTable(data, tbody, canApprove) {
     if (!data || data.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="6" class="muted">Tidak ada pending leave requests.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="4" class="muted">Tidak ada pending leave requests.</td></tr>';
       return;
     }
     
     tbody.innerHTML = data.map(item => `
       <tr>
-        <td>${formatDateTime(item.created_at)}</td>
-        <td>${item.employee_email}</td>
-        <td><span class="badge">${item.type}</span></td>
-        <td>${formatDateRange(item.date_from, item.date_to)}</td>
-        <td>${item.reason}</td>
-        <td><span class="badge pending">${item.status}</span></td>
-        ${canApprove ? `<td><button class="btn small primary" onclick="showApprovalModal('leave', ${item.id}, '${item.employee_email}')">Approve</button></td>` : ''}
+        <td>
+          <div class="attendance-cell-pair">
+            <div class="attendance-cell-main">
+              <strong>${formatDateTime(item.created_at)}</strong>
+              <span>Diajukan</span>
+            </div>
+            <div class="attendance-cell-sub">
+              <strong>${item.employee_email || '-'}</strong>
+              <span>Pegawai</span>
+            </div>
+          </div>
+        </td>
+        <td class="approval-reason-cell">
+          <div class="attendance-cell-pair">
+            <div class="attendance-cell-main">
+              <strong><span class="badge">${item.type}</span></strong>
+              <span>Tipe</span>
+            </div>
+            <div class="attendance-cell-sub">
+              <strong class="approval-reason">${item.reason || '-'}</strong>
+              <span>Alasan</span>
+            </div>
+          </div>
+        </td>
+        <td>
+          <div class="attendance-cell-pair">
+            <div class="attendance-cell-main">
+              <strong>${formatDateRange(item.date_from, item.date_to)}</strong>
+              <span>Tanggal</span>
+            </div>
+            <div class="attendance-cell-sub">
+              <strong><span class="badge pending">${item.status}</span></strong>
+              <span>Status</span>
+            </div>
+          </div>
+        </td>
+        <td>
+          <div class="attendance-cell-pair approval-cell-actions">
+            <div class="attendance-cell-main">
+              ${canApprove ? `<button class="btn small primary approval-open" data-approval-type="leave" data-approval-id="${item.id}" data-approval-name="${htmlAttr(item.employee_email || '-')}">Approve</button>` : '<strong>-</strong>'}
+              <span>Approve</span>
+            </div>
+            <div class="attendance-cell-sub">
+              <strong>${canApprove ? 'Review' : '-'}</strong>
+              <span>Aksi</span>
+            </div>
+          </div>
+        </td>
       </tr>
     `).join('');
   }
   
   function showError(tbody, message) {
-    tbody.innerHTML = `<tr><td colspan="8" class="muted">${message}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="4" class="muted">${message}</td></tr>`;
   }
   
   function formatDateTime(dateStr) {
@@ -232,6 +314,16 @@
     modal.setAttribute('aria-hidden', 'false');
     modal.classList.add('show');
   };
+
+  document.addEventListener('click', (event) => {
+    const button = event.target.closest('.approval-open');
+    if (!button) return;
+    window.showApprovalModal(
+      button.dataset.approvalType,
+      parseInt(button.dataset.approvalId, 10),
+      button.dataset.approvalName || '-'
+    );
+  });
   
   // Modal close
   document.getElementById('btnApprovalCancel').addEventListener('click', () => {
