@@ -111,6 +111,7 @@ const kpiLocationCoords = document.getElementById("kpiLocationCoords");
 const kpiMasukValue = document.getElementById("kpiMasukValue");
 const kpiMasukMeta = document.getElementById("kpiMasukMeta");
 const presenceMethodLabel = document.getElementById("presenceMethodLabel");
+const presenceMethodLabelTrack = presenceMethodLabel?.querySelector(".presence-method-label-track");
 const netStatusBadge = document.getElementById("netStatusHeader");
 const netStatusLabel = netStatusBadge?.querySelector(".network-label");
 const netStatusAlert = document.getElementById("netStatusAlert");
@@ -636,10 +637,23 @@ function patrolOpsStatusLabel(status){
   return "Open";
 }
 
-function setPatrolOpsCategory(category){
+function setPatrolOpsQuickState(category, emergencyMode = false){
+  patrolOpsQuickButtons.forEach((button) => {
+    const active = !emergencyMode && (button.dataset.patrolOpsQuick || "activity") === category;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", active ? "true" : "false");
+  });
+  if (btnPatrolOpsEmergency) {
+    btnPatrolOpsEmergency.classList.toggle("is-active", Boolean(emergencyMode));
+    btnPatrolOpsEmergency.setAttribute("aria-pressed", emergencyMode ? "true" : "false");
+  }
+}
+
+function setPatrolOpsCategory(category, options = {}){
   const normalized = ["activity", "gate", "incident", "handover"].includes(category)
     ? category
     : "activity";
+  const emergencyMode = Boolean(options.emergency);
   if (patrolOpsCategory) patrolOpsCategory.value = normalized;
   patrolOpsGateDirection?.classList.toggle("is-hidden", normalized !== "gate");
   patrolOpsVehiclePlate?.classList.toggle("is-hidden", normalized !== "gate");
@@ -647,6 +661,7 @@ function setPatrolOpsCategory(category){
   patrolOpsIncidentSeverity?.classList.toggle("is-hidden", normalized !== "incident");
   patrolOpsHandoverChecklist?.classList.toggle("is-hidden", normalized !== "handover");
   patrolOpsEventType?.classList.toggle("is-hidden", normalized === "handover");
+  setPatrolOpsQuickState(normalized, emergencyMode);
   if (patrolOpsNote) {
     const placeholders = {
       activity: "Tulis catatan singkat",
@@ -1302,7 +1317,7 @@ function initPatrolOps(){
     });
   });
   btnPatrolOpsEmergency?.addEventListener("click", () => {
-    setPatrolOpsCategory("incident");
+    setPatrolOpsCategory("incident", { emergency: true });
     if (patrolOpsIncidentSeverity) patrolOpsIncidentSeverity.value = "critical";
     if (patrolOpsEventType) patrolOpsEventType.value = "emergency";
     if (patrolOpsNote && !patrolOpsNote.value.trim()) {
@@ -2113,7 +2128,9 @@ function setMethod(value){
     stopScan();
     if (qrVideo) qrVideo.style.display = "none";
   }
-  if (presenceMethodLabel) {
+  if (presenceMethodLabelTrack) {
+    presenceMethodLabelTrack.textContent = `Metode ${label}`;
+  } else if (presenceMethodLabel) {
     presenceMethodLabel.textContent = `Metode ${label}`;
   }
   refreshAbsentKpi();

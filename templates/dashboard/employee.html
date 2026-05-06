@@ -193,7 +193,9 @@
               <button class="chip" type="button" data-mode="gps" aria-pressed="false">GPS</button>
               <button class="chip" type="button" data-mode="qr" aria-pressed="false">QR</button>
             </div>
-            <div class="presence-method-label-pro" id="presenceMethodLabel">Metode GPS+SELFIE</div>
+            <div class="presence-method-label-pro" id="presenceMethodLabel">
+              <span class="presence-method-label-track">Metode GPS+SELFIE</span>
+            </div>
 
             <div class="presence-tools">
               <select id="attMethod" class="input hidden">
@@ -493,7 +495,6 @@
             <div class="card-header">
               <div>
                 <h4>Patroli Ops</h4>
-                <div class="muted">Catatan, gate log, insiden, dan handover</div>
               </div>
             </div>
             <form class="patrol-note-form" id="patrolOpsForm">
@@ -556,19 +557,18 @@
         </section>
 
         <section class="swipe-pane" data-pane="4" aria-label="Komunikasi Operasional">
-          <div class="card mobile-card">
-            <div class="panel-head">
-              <div>
-                <div style="font-weight:700;">Komunikasi</div>
-                <div class="panel-sub">Chat site, room role, private supervisor, incident, dan pengumuman operasional.</div>
+          <div class="card mobile-card employee-comm-shell">
+            <div class="employee-comm-topbar">
+              <div class="employee-comm-topline">
+                <div class="employee-comm-kicker">Komunikasi</div>
+                <span class="panel-badge employee-comm-counter" id="employeeChatUnreadBadge">0 unread</span>
               </div>
-              <span class="panel-badge" id="employeeChatUnreadBadge">0 unread</span>
             </div>
-            <div class="stack" style="gap:12px;">
-              <div class="card" style="margin:0;">
-                <div style="display:flex; justify-content:space-between; gap:12px; align-items:flex-start; margin-bottom:8px;">
-                  <div style="font-weight:700;">Chat Rooms</div>
-                  <div class="mode-chips" id="employeeChatRoomTabs" role="tablist" aria-label="Kategori room chat" style="flex-wrap:wrap;">
+            <div class="employee-comm-stack">
+              <div class="employee-comm-card employee-chat-room-panel">
+                <div class="employee-comm-head">
+                  <div class="employee-comm-title">Room</div>
+                  <div class="mode-chips employee-comm-tabs" id="employeeChatRoomTabs" role="tablist" aria-label="Kategori room chat">
                     <button class="chip active" type="button" data-room-filter="all" aria-pressed="true">Semua</button>
                     <button class="chip" type="button" data-room-filter="private" aria-pressed="false">Private</button>
                     <button class="chip" type="button" data-room-filter="site" aria-pressed="false">Site</button>
@@ -577,46 +577,56 @@
                     <button class="chip" type="button" data-room-filter="incident" aria-pressed="false">Incident</button>
                   </div>
                 </div>
-                <div class="story-list" id="employeeChatRoomList">
+                <div class="story-list employee-chat-room-list" id="employeeChatRoomList">
                   <div class="muted">Memuat room chat...</div>
                 </div>
               </div>
-              <div class="card" style="margin:0;">
-                <div style="font-weight:700; margin-bottom:8px;" id="employeeChatRoomTitle">Percakapan</div>
-                <div class="card" style="margin:0 0 12px 0; background:rgba(255,255,255,.02);">
-                  <div style="display:flex; justify-content:space-between; gap:12px; align-items:flex-start; margin-bottom:8px;">
-                    <div style="font-weight:700;">Thread Diskusi</div>
+              <div class="employee-comm-card employee-chat-stage-card">
+                <div class="employee-chat-stage-head">
+                  <div class="employee-chat-stage-title" id="employeeChatRoomTitle"></div>
+                </div>
+                <div class="employee-chat-thread-card">
+                  <div class="employee-comm-head">
+                    <div class="employee-comm-title">Thread</div>
                     <span class="panel-badge" id="employeeThreadBadge">0 topic</span>
                   </div>
-                  <div class="story-list" id="employeeThreadList" style="max-height:220px; overflow:auto;">
-                    <div class="muted">Pilih room untuk melihat topik diskusi.</div>
+                  <div class="story-list employee-thread-list" id="employeeThreadList">
+                    <div class="muted"></div>
                   </div>
-                  <form id="employeeThreadCreateForm" class="stack" style="margin-top:12px;">
+                  <form id="employeeThreadCreateForm" class="stack employee-thread-form">
                     <input class="input" id="employeeThreadTitleInput" type="text" maxlength="160" placeholder="Buat topik baru untuk room ini" />
                     <button class="btn secondary full" id="employeeThreadCreateButton" type="submit">Buat Thread</button>
                   </form>
                 </div>
-                <div class="story-list" id="employeeChatMessageList" style="max-height:320px; overflow:auto;">
-                  <div class="muted">Pilih room untuk melihat percakapan.</div>
+                <div class="story-list employee-chat-message-list" id="employeeChatMessageList">
+                  <div class="muted"></div>
                 </div>
-                <form id="employeeChatSendForm" class="stack" style="margin-top:12px;">
+                <form id="employeeChatSendForm" class="stack employee-chat-send-form">
                   <textarea class="input" id="employeeChatMessageInput" rows="3" placeholder="Tulis pesan operasional"></textarea>
                   <button class="btn primary full" id="employeeChatSendButton" type="submit">Kirim Pesan</button>
                 </form>
                 <div class="presence-toast" id="employeeChatToast" role="status" aria-live="polite"></div>
               </div>
-              <div class="card" style="margin:0;">
-                <div style="display:flex; justify-content:space-between; gap:12px; align-items:flex-start; margin-bottom:8px;">
-                  <div style="font-weight:700;">Pengumuman</div>
-                  <span class="panel-badge" id="employeeAnnouncementBadge">0 unread</span>
+              <div class="employee-comm-meta-grid">
+                <div class="employee-comm-card employee-comm-side-card">
+                  <div class="employee-comm-head">
+                    <div class="employee-comm-title">Pengumuman</div>
+                    <span class="panel-badge" id="employeeAnnouncementBadge">0 unread</span>
+                  </div>
+                  <div class="story-list employee-comm-feed-list" id="employeeAnnouncementList">
+                    <div class="muted">Memuat pengumuman...</div>
+                  </div>
                 </div>
-                <div class="story-list" id="employeeAnnouncementList">
-                  <div class="muted">Memuat pengumuman...</div>
+                <div class="employee-comm-card employee-comm-side-card">
+                  <div class="employee-comm-title employee-comm-side-title">Incident Aktif</div>
+                  <div class="story-list employee-comm-feed-list" id="employeeIncidentList">
+                    <div class="muted">Memuat incident...</div>
+                  </div>
                 </div>
               </div>
-              <div class="card" style="margin:0;">
-                <div style="font-weight:700; margin-bottom:8px;">Laporkan Kejadian</div>
-                <form id="employeeIncidentForm" class="stack">
+              <div class="employee-comm-card employee-comm-report-card">
+                <div class="employee-comm-title employee-comm-side-title">Laporkan Kejadian</div>
+                <form id="employeeIncidentForm" class="stack employee-incident-form">
                   <div class="form-row" style="margin:0;">
                     <label class="label" for="employee-incident-title">Judul</label>
                     <input class="input" id="employee-incident-title" type="text" name="title" maxlength="160" placeholder="Contoh: Alarm gate sisi timur aktif" required />
@@ -631,13 +641,7 @@
                   </div>
                   <button class="btn primary full" id="employeeIncidentSubmit" type="submit">Laporkan Kejadian</button>
                 </form>
-                <div class="muted" id="employeeIncidentStatus" style="margin-top:8px;">Laporan otomatis membuat room incident agar supervisor bisa follow-up cepat.</div>
-              </div>
-              <div class="card" style="margin:0;">
-                <div style="font-weight:700; margin-bottom:8px;">Incident Aktif</div>
-                <div class="story-list" id="employeeIncidentList">
-                  <div class="muted">Memuat incident...</div>
-                </div>
+                <div class="muted employee-incident-status" id="employeeIncidentStatus">Laporan otomatis membuat room incident agar supervisor bisa follow-up cepat.</div>
               </div>
             </div>
           </div>
@@ -934,6 +938,28 @@
         return roomsCache.filter((room) => String(room.type || "").toLowerCase() === selectedRoomFilter);
       }
 
+      function roomTypeLabel(type) {
+        const normalized = String(type || "").toLowerCase();
+        return {
+          private: "Private",
+          site: "Site",
+          shift: "Shift",
+          role: "Role",
+          incident: "Incident",
+        }[normalized] || "Room";
+      }
+
+      function roomAvatarClass(type) {
+        const normalized = String(type || "").toLowerCase();
+        return ["private", "site", "shift", "role", "incident"].includes(normalized) ? normalized : "other";
+      }
+
+      function roomAvatarText(room) {
+        const source = String(room?.name || room?.type || "RM").trim();
+        const parts = source.split(/\s+/).filter(Boolean).slice(0, 2);
+        return (parts.map((part) => part.charAt(0).toUpperCase()).join("") || "RM").slice(0, 2);
+      }
+
       function renderRooms(rooms) {
         if (!roomList) return;
         if (!rooms.length) {
@@ -941,13 +967,19 @@
           return;
         }
         roomList.innerHTML = rooms.map((room) => `
-          <button type="button" class="story-item" data-room-id="${room.id}" style="width:100%; text-align:left; border:1px solid rgba(255,255,255,.08); background:${selectedRoomId === room.id ? 'rgba(255,255,255,.08)' : 'rgba(255,255,255,.03)'};">
-            <div style="display:flex; justify-content:space-between; gap:12px; align-items:flex-start;">
-              <div style="font-weight:700;">${escapeHtml(room.name)}</div>
-              <span class="panel-badge">${escapeHtml(room.type || "room")}</span>
+          <button type="button" class="employee-chat-room${selectedRoomId === room.id ? ' is-active' : ''}" data-room-id="${room.id}">
+            <div class="employee-chat-avatar ${roomAvatarClass(room.type)}">${escapeHtml(roomAvatarText(room))}</div>
+            <div class="employee-chat-room-copy">
+              <div class="employee-chat-room-head">
+                <div class="employee-chat-room-name">${escapeHtml(room.name)}</div>
+                <div class="employee-chat-room-time">${escapeHtml(room.last_message_at || "-")}</div>
+              </div>
+              <div class="employee-chat-room-preview">${escapeHtml(room.last_message_preview || "Belum ada pesan.")}</div>
+              <div class="employee-chat-room-meta">
+                <span class="employee-chat-room-type">${escapeHtml(roomTypeLabel(room.type))}</span>
+                ${Number(room.unread_count || 0) > 0 ? `<span class="employee-chat-room-unread">${Number(room.unread_count || 0)}</span>` : ""}
+              </div>
             </div>
-            <div class="muted">${escapeHtml(room.last_message_preview || 'Belum ada pesan.')}</div>
-            <div class="muted">${Number(room.unread_count || 0)} unread</div>
           </button>
         `).join("");
         roomList.querySelectorAll("[data-room-id]").forEach((button) => {
@@ -960,7 +992,6 @@
           });
         });
       }
-
       function renderMessages(messages) {
         if (!messageList) return;
         const visibleMessages = selectedThreadId
@@ -973,16 +1004,16 @@
         messageList.innerHTML = visibleMessages.map((item) => {
           const mine = item.sender_email === document.body.dataset.email;
           return `
-            <div class="story-item" style="border:1px solid rgba(255,255,255,.08); background:${mine ? 'rgba(31,80,56,.28)' : 'rgba(255,255,255,.03)'};">
-              <div style="display:flex; justify-content:space-between; gap:12px; align-items:flex-start;">
-                <div style="font-weight:700;">${mine ? 'Anda' : escapeHtml(item.sender_email)}</div>
-                <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <div class="employee-chat-bubble${mine ? ' is-mine' : ''}">
+              <div class="employee-chat-bubble-head">
+                <div class="employee-chat-bubble-sender">${mine ? 'Anda' : escapeHtml(item.sender_email)}</div>
+                <div class="employee-chat-bubble-meta">
                   ${item.thread_id ? `<span class="panel-badge">Thread #${Number(item.thread_id)}</span>` : ""}
                   ${mine ? `<button type="button" class="btn secondary" data-delete-message-id="${Number(item.id || 0)}" style="min-height:32px; padding:0 10px;">Hapus</button>` : ""}
                 </div>
               </div>
-              <div style="margin-top:4px; line-height:1.5;">${escapeHtml(item.message)}</div>
-              <div class="muted" style="margin-top:6px;">${escapeHtml(item.created_at || '-')}</div>
+              <div class="employee-chat-bubble-text">${escapeHtml(item.message)}</div>
+              <div class="employee-chat-bubble-time">${escapeHtml(item.created_at || '-')}</div>
             </div>
           `;
         }).join("");
@@ -1004,7 +1035,6 @@
         });
         messageList.scrollTop = messageList.scrollHeight;
       }
-
       function renderThreads(threads) {
         if (!threadList) return;
         if (threadBadge) {
@@ -1015,17 +1045,17 @@
           return;
         }
         threadList.innerHTML = `
-          <button type="button" class="story-item" data-thread-id="0" style="width:100%; text-align:left; border:1px solid rgba(255,255,255,.08); background:${selectedThreadId === 0 ? 'rgba(255,255,255,.08)' : 'rgba(255,255,255,.03)'};">
-            <div style="font-weight:700;">Semua pesan</div>
-            <div class="muted">Tampilkan seluruh percakapan room</div>
+          <button type="button" class="employee-thread-item${selectedThreadId === 0 ? ' is-active' : ''}" data-thread-id="0">
+            <div class="employee-thread-title">Semua pesan</div>
+            <div class="employee-thread-meta">Tampilkan seluruh percakapan room</div>
           </button>
         ` + threads.map((thread) => `
-          <button type="button" class="story-item" data-thread-id="${Number(thread.id || 0)}" style="width:100%; text-align:left; border:1px solid rgba(255,255,255,.08); background:${selectedThreadId === Number(thread.id || 0) ? 'rgba(255,255,255,.08)' : 'rgba(255,255,255,.03)'};">
-            <div style="display:flex; justify-content:space-between; gap:12px; align-items:flex-start;">
-              <div style="font-weight:700;">${escapeHtml(thread.title)}</div>
+          <button type="button" class="employee-thread-item${selectedThreadId === Number(thread.id || 0) ? ' is-active' : ''}" data-thread-id="${Number(thread.id || 0)}">
+            <div class="employee-thread-title-row">
+              <div class="employee-thread-title">${escapeHtml(thread.title)}</div>
               ${Number(thread.is_locked || 0) === 1 ? '<span class="panel-badge">Locked</span>' : ""}
             </div>
-            <div class="muted">${Number(thread.reply_count || 0)} reply • ${escapeHtml(thread.last_reply_at || thread.created_at || "-")}</div>
+            <div class="employee-thread-meta">${Number(thread.reply_count || 0)} reply - ${escapeHtml(thread.last_reply_at || thread.created_at || "-")}</div>
           </button>
         `).join("");
         threadList.querySelectorAll("[data-thread-id]").forEach((button) => {
@@ -1036,7 +1066,6 @@
           });
         });
       }
-
       function renderAnnouncements(items) {
         if (!announcementList) return;
         if (!items.length) {
@@ -1044,13 +1073,13 @@
           return;
         }
         announcementList.innerHTML = items.map((item) => `
-          <button type="button" class="story-item" data-announcement-id="${item.id}" style="width:100%; text-align:left; border:1px solid rgba(255,255,255,.08); background:${item.read_at ? 'rgba(255,255,255,.03)' : 'rgba(91,58,24,.22)'};">
-            <div style="display:flex; justify-content:space-between; gap:12px; align-items:flex-start;">
-              <div style="font-weight:700;">${escapeHtml(item.title)}</div>
+          <button type="button" class="employee-comm-feed-item${item.read_at ? '' : ' is-unread'}" data-announcement-id="${item.id}">
+            <div class="employee-comm-feed-head">
+              <div class="employee-comm-feed-title">${escapeHtml(item.title)}</div>
               ${item.is_mandatory ? '<span class="badge">Mandatory</span>' : ''}
             </div>
-            <div style="margin-top:6px; line-height:1.5;">${escapeHtml(item.message)}</div>
-            <div class="muted" style="margin-top:6px;">${escapeHtml(item.created_at || '-')}</div>
+            <div class="employee-comm-feed-text">${escapeHtml(item.message)}</div>
+            <div class="employee-comm-feed-meta">${escapeHtml(item.created_at || '-')}</div>
           </button>
         `).join("");
         announcementList.querySelectorAll("[data-announcement-id]").forEach((button) => {
@@ -1069,7 +1098,6 @@
           });
         });
       }
-
       function renderIncidents(items) {
         if (!incidentList) return;
         if (!items.length) {
@@ -1077,13 +1105,13 @@
           return;
         }
         incidentList.innerHTML = items.map((item) => `
-          <button type="button" class="story-item" data-incident-room-id="${Number(item.chat_room_id || 0)}" style="width:100%; text-align:left; border:1px solid rgba(255,255,255,.08); background:rgba(255,255,255,.03);">
-            <div style="display:flex; justify-content:space-between; gap:12px; align-items:flex-start;">
-              <div style="font-weight:700;">${escapeHtml(item.title)}</div>
+          <button type="button" class="employee-comm-feed-item" data-incident-room-id="${Number(item.chat_room_id || 0)}">
+            <div class="employee-comm-feed-head">
+              <div class="employee-comm-feed-title">${escapeHtml(item.title)}</div>
               <span class="panel-badge">${escapeHtml(String(item.status || "open").toUpperCase())}</span>
             </div>
-            <div style="margin-top:6px; line-height:1.5;">${escapeHtml(item.description)}</div>
-            <div class="muted" style="margin-top:6px;">${escapeHtml(item.created_at || "-")}${item.photo_path ? " • Foto terlampir" : ""}</div>
+            <div class="employee-comm-feed-text">${escapeHtml(item.description)}</div>
+            <div class="employee-comm-feed-meta">${escapeHtml(item.created_at || "-")}${item.photo_path ? " - Foto terlampir" : ""}</div>
           </button>
         `).join("");
         incidentList.querySelectorAll("[data-incident-room-id]").forEach((button) => {
@@ -1100,7 +1128,6 @@
           });
         });
       }
-
       function applyRoomTabs() {
         roomTabs?.querySelectorAll("[data-room-filter]").forEach((button) => {
           const active = button.dataset.roomFilter === selectedRoomFilter;
@@ -1390,5 +1417,3 @@
   </script>
 </body>
 </html>
-
-
