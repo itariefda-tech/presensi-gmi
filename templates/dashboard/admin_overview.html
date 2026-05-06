@@ -25,18 +25,20 @@
       <div class="kpi-card__meta" id="kpiCoordsMeta">{{ card.meta }}</div>
       {% endif %}
       {% else %}
-      {% set icon_variant = loop.index0 % 4 %}
+      {% set icon_variant = card.theme %}
       <div class="kpi-card__header kpi-card__header--decor">
         <div class="kpi-card__label">{{ card.label }}</div>
         <span class="kpi-card__decor-icon" aria-hidden="true">
-          {% if icon_variant == 0 %}
-          <svg viewBox="0 0 24 24" fill="none"><path d="M4 17.5 9 12l4 3 7-8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M16 7h4v4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          {% elif icon_variant == 1 %}
-          <svg viewBox="0 0 24 24" fill="none"><path d="M12 3 20 8v8l-8 5-8-5V8l8-5Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M8 11.5 12 9l4 2.5V16l-4 2.5L8 16v-4.5Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
-          {% elif icon_variant == 2 %}
-          <svg viewBox="0 0 24 24" fill="none"><circle cx="7" cy="16" r="2.4" stroke="currentColor" stroke-width="1.7"/><circle cx="17" cy="8" r="2.4" stroke="currentColor" stroke-width="1.7"/><path d="M9 14.5 15 9.5M5 8h5M14 16h5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+          {% if icon_variant == "slate" %}
+          <svg viewBox="0 0 24 24" fill="none"><path d="M5 17.5 9.5 12.5l3.2 2.8L19 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M15 8h4v4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          {% elif icon_variant == "amber" %}
+          <svg viewBox="0 0 24 24" fill="none"><path d="M6 7.5h12M6 12h12M6 16.5h8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M18.5 15.5 21 18l-2.5 2.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          {% elif icon_variant == "teal" %}
+          <svg viewBox="0 0 24 24" fill="none"><circle cx="8" cy="8" r="2.3" stroke="currentColor" stroke-width="1.7"/><circle cx="16" cy="8" r="2.3" stroke="currentColor" stroke-width="1.7"/><path d="M5.5 17c.8-2.7 2.9-4 5.1-4s4.2 1.3 5 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M14.2 17c.5-1.8 1.9-2.8 3.3-2.8 1.4 0 2.8 1 3.3 2.8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+          {% elif icon_variant == "indigo" %}
+          <svg viewBox="0 0 24 24" fill="none"><path d="M6 18.5V11m6 7.5V6.5m6 12V9.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M4.5 19.5h15" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="m14.5 6.5 3-3 3 3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
           {% else %}
-          <svg viewBox="0 0 24 24" fill="none"><path d="M5 18V8m4 10V5m4 13v-7m4 7V9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M4 19h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          <svg viewBox="0 0 24 24" fill="none"><path d="M7.5 6.5h9a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.8"/><path d="M9 12h6M12 9v6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
           {% endif %}
         </span>
       </div>
@@ -158,25 +160,39 @@
 <div class="card" style="margin-top:16px;">
   <div style="font-weight:700; margin-bottom:8px;">Summary per Client</div>
   <div class="table-wrap">
-    <table class="table" aria-label="Ringkasan client">
+    <table class="table overview-summary-table" aria-label="Ringkasan client">
       <thead>
         <tr>
-          <th>Client</th>
-          <th>Telat</th>
-          <th>Absen</th>
-          <th>Leave Pending</th>
+          <th>Client<br><span class="attendance-head-sub">Telat</span></th>
+          <th>Absen<br><span class="attendance-head-sub">Leave Pending</span></th>
         </tr>
       </thead>
       <tbody>
         {% if not client_summaries %}
-        <tr><td colspan="4" class="muted">Belum ada data.</td></tr>
+        <tr><td colspan="2" class="muted">Belum ada data.</td></tr>
         {% endif %}
         {% for item in client_summaries %}
         <tr>
-          <td>{{ item.client_name }}</td>
-          <td>{{ item.late_count }}</td>
-          <td>{{ item.absent_count }}</td>
-          <td>{{ item.leave_pending_count }}</td>
+          <td>
+            <div class="attendance-cell-pair">
+              <div class="attendance-cell-main">
+                <strong>{{ item.client_name }}</strong>
+              </div>
+              <div class="attendance-cell-sub">
+                <strong>{{ item.late_count }}</strong>
+              </div>
+            </div>
+          </td>
+          <td>
+            <div class="attendance-cell-pair">
+              <div class="attendance-cell-main">
+                <strong>{{ item.absent_count }}</strong>
+              </div>
+              <div class="attendance-cell-sub">
+                <strong>{{ item.leave_pending_count }}</strong>
+              </div>
+            </div>
+          </td>
         </tr>
         {% endfor %}
       </tbody>
@@ -235,33 +251,52 @@
 <div class="card" style="margin-top:12px;">
   <div style="font-weight:700; margin-bottom:8px;">Audit Log (Policy/Assignment)</div>
   <div class="table-wrap">
-    <table class="table" aria-label="Audit log">
+    <table class="table overview-audit-table" aria-label="Audit log">
       <thead>
         <tr>
-          <th>Waktu</th>
-          <th>Entitas</th>
-          <th>Aksi</th>
-          <th>Pelaku</th>
-          <th>Ringkas</th>
-          <th>Detail</th>
+          <th>Waktu<br><span class="attendance-head-sub">Entitas</span></th>
+          <th>Aksi<br><span class="attendance-head-sub">Pelaku</span></th>
+          <th>Ringkas<br><span class="attendance-head-sub">Detail</span></th>
         </tr>
       </thead>
       <tbody>
         {% if not audit_logs %}
-        <tr><td colspan="6" class="muted">Belum ada audit log.</td></tr>
+        <tr><td colspan="3" class="muted">Belum ada audit log.</td></tr>
         {% endif %}
         {% for log in audit_logs %}
         <tr>
-          <td>{{ log.created_at|display_datetime }}</td>
-          <td>{{ log.entity_type }} #{{ log.entity_id or '-' }}</td>
-          <td>{{ log.action }}</td>
-          <td>{{ log.actor_email }}</td>
-          <td>{{ log.summary }}</td>
           <td>
-            <details>
-              <summary class="btn secondary">Detail</summary>
-              <pre style="white-space:pre-wrap; margin-top:8px;">{{ log.details_json }}</pre>
-            </details>
+            <div class="attendance-cell-pair">
+              <div class="attendance-cell-main">
+                <strong>{{ log.created_at|display_datetime }}</strong>
+              </div>
+              <div class="attendance-cell-sub">
+                <strong>{{ log.entity_type }} #{{ log.entity_id or '-' }}</strong>
+              </div>
+            </div>
+          </td>
+          <td>
+            <div class="attendance-cell-pair">
+              <div class="attendance-cell-main">
+                <strong>{{ log.action }}</strong>
+              </div>
+              <div class="attendance-cell-sub">
+                <strong>{{ log.actor_email }}</strong>
+              </div>
+            </div>
+          </td>
+          <td>
+            <div class="attendance-cell-pair">
+              <div class="attendance-cell-main">
+                <strong>{{ log.summary }}</strong>
+              </div>
+              <div class="attendance-cell-sub">
+                <details>
+                  <summary class="btn secondary">Detail</summary>
+                  <pre style="white-space:pre-wrap; margin-top:8px;">{{ log.details_json }}</pre>
+                </details>
+              </div>
+            </div>
           </td>
         </tr>
         {% endfor %}

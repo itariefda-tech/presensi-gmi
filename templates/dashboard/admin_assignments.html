@@ -86,11 +86,9 @@
           <div class="attendance-cell-pair">
             <div class="attendance-cell-main">
               <strong>{{ a.employee_name or a.employee_email }}</strong>
-              <span>Pegawai</span>
             </div>
             <div class="attendance-cell-sub">
               <strong>{{ a.start_date|ddmmyyyy }}{% if a.end_date %} - {{ a.end_date|ddmmyyyy }}{% endif %}</strong>
-              <span>Periode</span>
             </div>
           </div>
         </td>
@@ -98,11 +96,9 @@
           <div class="attendance-cell-pair">
             <div class="attendance-cell-main">
               <strong>{{ a.client_name or '-' }}</strong>
-              <span>Client</span>
             </div>
             <div class="attendance-cell-sub">
               <strong>{{ a.site_name or '-' }}</strong>
-              <span>Site</span>
             </div>
           </div>
         </td>
@@ -110,11 +106,9 @@
           <div class="attendance-cell-pair">
             <div class="attendance-cell-main">
               <strong>{{ a.status }}</strong>
-              <span>Status</span>
             </div>
             <div class="attendance-cell-sub">
               <strong>{{ a.job_title or '-' }}</strong>
-              <span>Jabatan</span>
             </div>
           </div>
         </td>

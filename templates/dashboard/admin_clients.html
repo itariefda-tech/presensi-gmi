@@ -67,18 +67,18 @@
     </form>
   </div>
 </div>
-<div class="card" style="margin-top:12px;">
+  <div class="card" style="margin-top:12px;">
   {% if not can_view %}
   <div class="muted">Anda tidak memiliki akses melihat daftar client.</div>
   {% else %}
-  <table class="table table-wide" aria-label="Daftar client">
+  <table class="table table-wide client-list-table" aria-label="Daftar client">
     <thead>
       <tr>
-        <th>Nama Perusahaan</th>
-        <th>Email</th>
-        <th>Telp Kantor</th>
-        <th>Nama PIC</th>
-        <th>Status</th>
+        <th>Nama Perusahaan<br><span class="attendance-head-sub">Alamat</span></th>
+        <th>Nama Legal<br><span class="attendance-head-sub">Email Kantor</span></th>
+        <th>Nama PIC<br><span class="attendance-head-sub">Jabatan PIC</span></th>
+        <th>No Telp Kantor<br><span class="attendance-head-sub">No HP PIC</span></th>
+        <th>Status<br><span class="attendance-head-sub">Keterangan</span></th>
         <th>Aksi</th>
       </tr>
     </thead>
@@ -88,11 +88,56 @@
       {% endif %}
       {% for c in clients %}
       <tr>
-        <td>{{ c.name }}</td>
-        <td>{{ c.office_email }}</td>
-        <td>{{ c.office_phone }}</td>
-        <td>{{ c.pic_name }}</td>
-        <td>{% if c.is_active %}Aktif{% else %}Non Aktif{% endif %}</td>
+        <td>
+          <div class="attendance-cell-pair">
+            <div class="attendance-cell-main">
+              <strong>{{ c.name }}</strong>
+            </div>
+            <div class="attendance-cell-sub">
+              <strong>{{ c.address or "-" }}</strong>
+            </div>
+          </div>
+        </td>
+        <td>
+          <div class="attendance-cell-pair">
+            <div class="attendance-cell-main">
+              <strong>{{ c.legal_name or "-" }}</strong>
+            </div>
+            <div class="attendance-cell-sub">
+              <strong>{{ c.office_email or "-" }}</strong>
+            </div>
+          </div>
+        </td>
+        <td>
+          <div class="attendance-cell-pair">
+            <div class="attendance-cell-main">
+              <strong>{{ c.pic_name or "-" }}</strong>
+            </div>
+            <div class="attendance-cell-sub">
+              <strong>{{ c.pic_title or "-" }}</strong>
+            </div>
+          </div>
+        </td>
+        <td>
+          <div class="attendance-cell-pair">
+            <div class="attendance-cell-main">
+              <strong>{{ c.office_phone or "-" }}</strong>
+            </div>
+            <div class="attendance-cell-sub">
+              <strong>{{ c.pic_phone or "-" }}</strong>
+            </div>
+          </div>
+        </td>
+        <td>
+          <div class="attendance-cell-pair">
+            <div class="attendance-cell-main">
+              <strong>{% if c.is_active %}Aktif{% else %}Non Aktif{% endif %}</strong>
+            </div>
+            <div class="attendance-cell-sub">
+              <strong>{{ c.notes or "-" }}</strong>
+            </div>
+          </div>
+        </td>
         <td>
           {% if can_actions %}
           <details class="dropdown">

@@ -204,16 +204,24 @@ def create_app() -> Flask:
     def _inject_notifications():
         user = _current_user()
         if not user:
-            return {"pending_leave_count": 0, "pending_manual_count": 0}
+            return {
+                "pending_leave_count": 0,
+                "pending_manual_count": 0,
+                "communication_alert_count": 0,
+                "communication_alert_active": False,
+            }
         pending_leave_count = 0
         pending_manual_count = 0
         if _can_approve_leave(user):
             pending_leave_count = len(_list_leave_pending(user))
         if _can_approve_manual(user):
             pending_manual_count = len(_fetch_manual_requests("pending", user))
+        communication_alert = _communication_alert_summary(user)
         return {
             "pending_leave_count": pending_leave_count,
             "pending_manual_count": pending_manual_count,
+            "communication_alert_count": int(communication_alert.get("count") or 0),
+            "communication_alert_active": bool(communication_alert.get("active")),
         }
 
     @app.context_processor
@@ -8410,6 +8418,32 @@ def _communication_recent_audit(limit: int = 40) -> list[dict]:
         return [dict(row) for row in rows]
     finally:
         conn.close()
+
+
+def _communication_alert_summary(user: User | None) -> dict:
+    if not user:
+        return {"active": False, "count": 0}
+    if user.role not in {"hr_superadmin", "manager_operational", "supervisor", "admin_asistent"}:
+        return {"active": False, "count": 0}
+    unread_total = 0
+    announcement_total = 0
+    incident_total = 0
+    try:
+        unread_total = sum(int(room.get("unread_count") or 0) for room in _chat_list_for_user(user, ensure_defaults=False))
+    except Exception:
+        unread_total = 0
+    try:
+        if _communication_feature_available(user, "announcement"):
+            announcement_total = len(_list_announcements_for_user(user, include_all=True))
+    except Exception:
+        announcement_total = 0
+    try:
+        if _communication_feature_available(user, "incident"):
+            incident_total = len(_list_incidents_for_user(user, include_all=user.role in ADMIN_ROLES))
+    except Exception:
+        incident_total = 0
+    total = unread_total + announcement_total + incident_total
+    return {"active": total > 0, "count": total}
 
 
 def _communication_site_id_for_user(user: User | None) -> int | None:

@@ -44,33 +44,52 @@
   </div>
 
   <div class="table-wrap">
-    <table class="table" aria-label="User list">
+    <table class="table settings-user-table" aria-label="User list">
       <thead>
         <tr>
-          <th>Nama</th>
-          <th>Email</th>
-          <th>Role</th>
-          <th>Status</th>
-          <th>Client</th>
-          <th>Dibuat</th>
+          <th>Nama<br><span class="attendance-head-sub">Email</span></th>
+          <th>Role<br><span class="attendance-head-sub">Client</span></th>
+          <th>Status<br><span class="attendance-head-sub">Dibuat</span></th>
           <th>Aksi</th>
         </tr>
       </thead>
       <tbody>
         {% if not users %}
-        <tr><td colspan="7" class="muted">Belum ada user.</td></tr>
+        <tr><td colspan="4" class="muted">Belum ada user.</td></tr>
         {% endif %}
         {% for u in users %}
         <tr>
-          <td>{{ u.name }}</td>
-          <td>{{ u.email }}</td>
-          <td>{{ u.role|replace('_',' ')|title }}</td>
           <td>
-            <span class="badge">{% if u.is_active %}Active{% else %}Disabled{% endif %}</span>
-            {% if u.must_change_password %}<div class="muted">Must change</div>{% endif %}
+            <div class="attendance-cell-pair">
+              <div class="attendance-cell-main">
+                <strong>{{ u.name }}</strong>
+              </div>
+              <div class="attendance-cell-sub">
+                <strong>{{ u.email }}</strong>
+              </div>
+            </div>
           </td>
-          <td>{{ u.client_name or "-" }}</td>
-          <td>{{ u.created_at|display_datetime or "-" }}</td>
+          <td>
+            <div class="attendance-cell-pair">
+              <div class="attendance-cell-main">
+                <strong>{{ u.role|replace('_',' ')|title }}</strong>
+              </div>
+              <div class="attendance-cell-sub">
+                <strong>{{ u.client_name or "-" }}</strong>
+              </div>
+            </div>
+          </td>
+          <td>
+            <div class="attendance-cell-pair">
+              <div class="attendance-cell-main">
+                <strong>{% if u.is_active %}Active{% else %}Disabled{% endif %}</strong>
+              </div>
+              <div class="attendance-cell-sub">
+                <strong>{{ u.created_at|display_datetime or "-" }}</strong>
+                {% if u.must_change_password %}<span>Must change</span>{% endif %}
+              </div>
+            </div>
+          </td>
           <td>
             <div class="inline">
               <button class="btn secondary" type="button" data-modal-open="user-edit-modal-{{ u.id }}">Edit</button>
@@ -669,27 +688,50 @@
       <button class="btn primary" type="submit">Buat Kode</button>
     </form>
     <div class="table-wrap" style="margin-top:12px;">
-      <table class="table" aria-label="Kode pendaftaran pegawai">
+      <table class="table registration-code-table" aria-label="Kode pendaftaran pegawai">
         <thead>
           <tr>
-            <th>Kode</th>
-            <th>Jumlah Pendaftar</th>
-            <th>Terpakai</th>
-            <th>Sisa Kuota</th>
-            <th>Dibuat</th>
+            <th>Kode<br><span class="attendance-head-sub">Dibuat</span></th>
+            <th>Jumlah<br><span class="attendance-head-sub">Terpakai</span></th>
+            <th>Sisa Kuota<br><span class="attendance-head-sub">Status</span></th>
           </tr>
         </thead>
         <tbody>
           {% if not registration_codes %}
-          <tr><td colspan="5" class="muted">Belum ada kode.</td></tr>
+          <tr><td colspan="3" class="muted">Belum ada kode.</td></tr>
           {% endif %}
           {% for code in registration_codes %}
           <tr>
-            <td>{{ code.code }}</td>
-            <td>{{ code.registrant_count }}</td>
-            <td>{{ code.used_count or 0 }}</td>
-            <td>{{ (code.registrant_count or 0) - (code.used_count or 0) }}</td>
-            <td>{{ code.created_at|display_datetime or "-" }}</td>
+            <td>
+              <div class="attendance-cell-pair">
+                <div class="attendance-cell-main">
+                  <strong>{{ code.code }}</strong>
+                </div>
+                <div class="attendance-cell-sub">
+                  <strong>{{ code.created_at|display_datetime or "-" }}</strong>
+                </div>
+              </div>
+            </td>
+            <td>
+              <div class="attendance-cell-pair">
+                <div class="attendance-cell-main">
+                  <strong>{{ code.registrant_count }}</strong>
+                </div>
+                <div class="attendance-cell-sub">
+                  <strong>{{ code.used_count or 0 }}</strong>
+                </div>
+              </div>
+            </td>
+            <td>
+              <div class="attendance-cell-pair">
+                <div class="attendance-cell-main">
+                  <strong>{{ (code.registrant_count or 0) - (code.used_count or 0) }}</strong>
+                </div>
+                <div class="attendance-cell-sub">
+                  <strong>{% if ((code.registrant_count or 0) - (code.used_count or 0)) > 0 %}Tersedia{% else %}Penuh{% endif %}</strong>
+                </div>
+              </div>
+            </td>
           </tr>
           {% endfor %}
         </tbody>

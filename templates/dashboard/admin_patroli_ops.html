@@ -1,6 +1,6 @@
 {% extends "dashboard/base.html" %}
 {% set active = "patroli_ops" %}
-{% set heading = "Patroli Notes & Report" %}
+{% set heading = "Patroli Operasional Report" %}
 {% set subtitle = "Catatan operasional lapangan terpisah dari Guard Tour" %}
 
 {% block body %}
@@ -8,7 +8,7 @@
   <article class="card">
     <div class="card-header-actions">
       <div>
-        <h3>Patroli Notes & Report</h3>
+      <h3>Patroli Operasional</h3>
         <div class="panel-sub">Catatan, gate log, insiden, dan handover dari pegawai site.</div>
       </div>
       <div class="header-actions">
@@ -33,28 +33,52 @@
 
   <div class="patrol-ops-kpis">
     <article class="card patrol-ops-kpi">
-      <div class="patrol-ops-kpi-icon" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none"><path d="M5 6h14M5 12h14M5 18h9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      <div class="patrol-ops-kpi-body">
+        <div class="patrol-ops-kpi-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M5 6h14M5 12h14M5 18h9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </div>
+        <div class="patrol-ops-kpi-copy">
+          <span>Total</span>
+          <strong id="patrolOpsTotal">0</strong>
+        </div>
       </div>
-      <div class="patrol-ops-kpi-copy"><span>Total</span><strong id="patrolOpsTotal">0</strong></div>
+      <small class="patrol-ops-kpi-note">Semua catatan patroli dalam periode aktif.</small>
     </article>
     <article class="card patrol-ops-kpi">
-      <div class="patrol-ops-kpi-icon" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none"><path d="M12 4 21 20H3L12 4Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M12 9v5M12 17h.01" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>
+      <div class="patrol-ops-kpi-body">
+        <div class="patrol-ops-kpi-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M12 4 21 20H3L12 4Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M12 9v5M12 17h.01" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>
+        </div>
+        <div class="patrol-ops-kpi-copy">
+          <span>Critical</span>
+          <strong id="patrolOpsCritical">0</strong>
+        </div>
       </div>
-      <div class="patrol-ops-kpi-copy"><span>Critical</span><strong id="patrolOpsCritical">0</strong></div>
+      <small class="patrol-ops-kpi-note">Insiden prioritas tinggi yang perlu perhatian cepat.</small>
     </article>
     <article class="card patrol-ops-kpi">
-      <div class="patrol-ops-kpi-icon" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.7"/><path d="M12 7v5l3 2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <div class="patrol-ops-kpi-body">
+        <div class="patrol-ops-kpi-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.7"/><path d="M12 7v5l3 2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+        <div class="patrol-ops-kpi-copy">
+          <span>Open</span>
+          <strong id="patrolOpsOpen">0</strong>
+        </div>
       </div>
-      <div class="patrol-ops-kpi-copy"><span>Open</span><strong id="patrolOpsOpen">0</strong></div>
+      <small class="patrol-ops-kpi-note">Aktivitas yang masih terbuka dan belum ditutup.</small>
     </article>
     <article class="card patrol-ops-kpi">
-      <div class="patrol-ops-kpi-icon" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.7"/><path d="m8.5 12.2 2.2 2.2 4.8-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <div class="patrol-ops-kpi-body">
+        <div class="patrol-ops-kpi-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.7"/><path d="m8.5 12.2 2.2 2.2 4.8-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+        <div class="patrol-ops-kpi-copy">
+          <span>Resolved</span>
+          <strong id="patrolOpsResolved">0</strong>
+        </div>
       </div>
-      <div class="patrol-ops-kpi-copy"><span>Resolved</span><strong id="patrolOpsResolved">0</strong></div>
+      <small class="patrol-ops-kpi-note">Laporan yang sudah selesai ditindaklanjuti.</small>
     </article>
   </div>
 
@@ -176,6 +200,14 @@
 }
 .patrol-ops-kpi {
   display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.5rem;
+  justify-content: flex-start;
+  padding: 7px 1rem;
+}
+.patrol-ops-kpi-body {
+  display: flex;
   align-items: center;
   gap: 1rem;
   justify-content: flex-start;
@@ -199,6 +231,15 @@
   min-width: 0;
   text-align: center;
 }
+.patrol-ops-kpi-note {
+  color: var(--muted);
+  display: block;
+  font-size: 0.76rem;
+  font-weight: 500;
+  line-height: 1.35;
+  margin-top: 0.1rem;
+  text-align: center;
+}
 .patrol-ops-kpi span {
   color: var(--muted);
   display: block;
@@ -215,24 +256,21 @@ html[data-theme="light"] .patrol-ops-kpis {
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
 }
 html[data-theme="light"] .patrol-ops-kpi {
-  align-items: center;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   border: 0;
   border-radius: 12px;
   box-shadow: 0 4px 6px rgba(0,0,0,0.1);
   color: #fff;
-  display: flex;
-  gap: 1rem;
-  justify-content: flex-start;
-  min-height: 118px;
-  padding: 1.5rem;
+  min-height: 96px;
+  padding: 7px 1rem;
   transition: transform 0.2s;
 }
 html[data-theme="light"] .patrol-ops-kpi:hover {
   transform: translateY(-2px);
 }
 html[data-theme="light"] .patrol-ops-kpi span,
-html[data-theme="light"] .patrol-ops-kpi strong {
+html[data-theme="light"] .patrol-ops-kpi strong,
+html[data-theme="light"] .patrol-ops-kpi-note {
   color: #fff;
 }
 html[data-theme="light"] .patrol-ops-kpi-icon {

@@ -1,7 +1,7 @@
 {% extends "dashboard/base.html" %}
 {% set active = "employees" %}
-{% set heading = "Daftar Pegawai Outsource" %}
-{% set subtitle = "Satpam, cleaning service, operator, supir, dll" %}
+{% set heading = "Daftar Pegawai" %}
+{% set subtitle = "" %}
 
 {% block body %}
 {% set can_add = permissions.manage_employees_add %}
@@ -76,49 +76,83 @@
   {% if not can_view %}
   <div class="muted">Anda tidak memiliki akses melihat daftar pegawai.</div>
   {% else %}
-  <table class="table table-wide" aria-label="Daftar pegawai outsource">
+  <table class="table table-wide employee-list-table" aria-label="Daftar pegawai">
     <thead>
       <tr>
-        <th>Nama</th>
-        <th>No HP</th>
-        <th>Jenis Kelamin</th>
-        <th>Email</th>
-        <th>Status</th>
+        <th>Nama<br><span class="attendance-head-sub">NIK</span></th>
+        <th>Email<br><span class="attendance-head-sub">No HP</span></th>
+        <th>Jenis Kelamin<br><span class="attendance-head-sub">Alamat</span></th>
+        <th>Status<br><span class="attendance-head-sub">Keterangan</span></th>
         <th>Aksi</th>
       </tr>
     </thead>
     <tbody>
       {% if not employees %}
-      <tr><td colspan="6" class="muted">Belum ada pegawai.</td></tr>
+      <tr><td colspan="5" class="muted">Belum ada pegawai.</td></tr>
       {% endif %}
       {% for e in employees %}
       <tr>
-        <td>{{ e.name or "-" }}</td>
-        <td>{{ e.no_hp or e.phone or e.phone_number or "-" }}</td>
-        <td>{{ e.gender or "-" }}</td>
-        <td>{{ e.email or "-" }}</td>
-        <td>{% if e.is_active %}Active{% else %}Disabled{% endif %}</td>
-          <td>
-            {% if can_actions %}
-            <details class="dropdown">
-              <summary class="btn secondary icon-btn" aria-label="Aksi">
-                <span></span>
-                <span></span>
-                <span></span>
-              </summary>
-              <div class="dropdown-menu">
-                <button class="btn secondary" type="button" data-modal-open="employee-profile-{{ e.id }}">Profile</button>
-                <button class="btn secondary" type="button" data-modal-open="employee-edit-{{ e.id }}">Edit</button>
-                <form class="btn-row" method="post" action="{{ url_for('admin.employees_delete', employee_id=e.id) }}" onsubmit="return confirm('Hapus pegawai ini?');">
+        <td>
+          <div class="attendance-cell-pair">
+            <div class="attendance-cell-main">
+              <strong>{{ e.name or "-" }}</strong>
+            </div>
+            <div class="attendance-cell-sub">
+              <strong>{{ e.nik or "-" }}</strong>
+            </div>
+          </div>
+        </td>
+        <td>
+          <div class="attendance-cell-pair">
+            <div class="attendance-cell-main">
+              <strong>{{ e.email or "-" }}</strong>
+            </div>
+            <div class="attendance-cell-sub">
+              <strong>{{ e.no_hp or e.phone or e.phone_number or "-" }}</strong>
+            </div>
+          </div>
+        </td>
+        <td>
+          <div class="attendance-cell-pair">
+            <div class="attendance-cell-main">
+              <strong>{{ e.gender or "-" }}</strong>
+            </div>
+            <div class="attendance-cell-sub">
+              <strong>{{ e.address or "-" }}</strong>
+            </div>
+          </div>
+        </td>
+        <td>
+          <div class="attendance-cell-pair">
+            <div class="attendance-cell-main">
+              <strong>{% if e.is_active %}Active{% else %}Disabled{% endif %}</strong>
+            </div>
+            <div class="attendance-cell-sub">
+              <strong>{{ e.notes or "-" }}</strong>
+            </div>
+          </div>
+        </td>
+        <td>
+          {% if can_actions %}
+          <details class="dropdown">
+            <summary class="btn secondary icon-btn" aria-label="Aksi">
+              <span></span>
+              <span></span>
+              <span></span>
+            </summary>
+            <div class="dropdown-menu">
+              <button class="btn secondary" type="button" data-modal-open="employee-profile-{{ e.id }}">Profile</button>
+              <button class="btn secondary" type="button" data-modal-open="employee-edit-{{ e.id }}">Edit</button>
+              <form class="btn-row" method="post" action="{{ url_for('admin.employees_delete', employee_id=e.id) }}" onsubmit="return confirm('Hapus pegawai ini?');">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-                  <button class="btn secondary" type="submit">Delete</button>
-                </form>
-              </div>
-            </details>
-            {% else %}
-            <span class="muted">-</span>
-            {% endif %}
-          </td>
+                <button class="btn secondary" type="submit">Delete</button>
+              </form>
+            </div>
+          </details>
+          {% else %}
+          <span class="muted">-</span>
+          {% endif %}
+        </td>
       </tr>
       {% endfor %}
     </tbody>

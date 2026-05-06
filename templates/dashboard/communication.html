@@ -57,7 +57,24 @@
   }
   .comm-main { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:16px; align-items:start; }
   .comm-card { border:1px solid rgba(255,255,255,.14); border-radius:10px; background:rgba(255,255,255,.035); box-shadow:0 10px 24px rgba(0,0,0,.08); padding:16px; display:grid; gap:14px; min-width:0; }
+  html[data-theme="light"] .comm-card{
+    border-color:rgba(15,23,42,.12);
+    background:var(--card-light);
+    box-shadow:0 12px 26px rgba(15,23,42,.08);
+  }
   .comm-subpanel { border:1px solid rgba(255,255,255,.08); border-radius:8px; background:rgba(255,255,255,.02); padding:14px; display:grid; gap:12px; min-width:0; }
+  html[data-theme="light"] .comm-subpanel,
+  html[data-theme="light"] .comm-chat-panel{
+    border-color:rgba(15,23,42,.12);
+    background:var(--card-light);
+    box-shadow:0 10px 22px rgba(15,23,42,.08);
+  }
+  html[data-theme="light"] .comm-room-item,
+  html[data-theme="light"] .comm-feed-item,
+  html[data-theme="light"] .comm-audit-item{
+    border-color:rgba(15,23,42,.12);
+    background:linear-gradient(180deg, rgba(255,255,255,.22), rgba(255,255,255,.08));
+  }
   .comm-head { display:grid; gap:4px; }
   .comm-head h4 { margin:0; font-size:18px; }
   .comm-head p { margin:0; color:var(--muted); font-size:12px; line-height:1.45; }
@@ -66,6 +83,350 @@
   .comm-room-item,
   .comm-feed-item,
   .comm-audit-item { border:1px solid rgba(255,255,255,.08); border-radius:8px; background:rgba(255,255,255,.02); padding:12px; display:grid; gap:6px; min-width:0; }
+  .comm-chat-app{
+    display:grid;
+    grid-template-columns:minmax(240px, 280px) minmax(520px, 1fr);
+    gap:16px;
+    min-height:520px;
+    overflow-x:auto;
+    align-items:stretch;
+  }
+  .comm-chat-panel{
+    border:1px solid rgba(255,255,255,.08);
+    border-radius:12px;
+    background:rgba(255,255,255,.02);
+    min-width:0;
+  }
+  .comm-chat-sidebar,
+  .comm-chat-stage{
+    display:grid;
+    min-height:0;
+  }
+  .comm-chat-sidebar{
+    grid-template-rows:auto auto minmax(0, 1fr);
+    min-width:240px;
+  }
+  .comm-chat-stage{
+    grid-template-rows:auto minmax(0, 1fr) auto;
+    min-width:520px;
+  }
+  .comm-chat-toolbar{
+    display:flex;
+    justify-content:space-between;
+    gap:12px;
+    align-items:center;
+    padding:14px 14px 0;
+    flex-wrap:wrap;
+  }
+  .comm-chat-title{
+    display:grid;
+    gap:2px;
+  }
+  .comm-chat-title strong{
+    font-size:14px;
+    line-height:1.3;
+  }
+  .comm-chat-title span{
+    color:var(--muted);
+    font-size:12px;
+    line-height:1.35;
+  }
+  .comm-chat-filters{
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+    flex-wrap:nowrap;
+    overflow-x:auto;
+    padding-bottom:2px;
+  }
+  .comm-chat-filter{
+    border:1px solid rgba(255,255,255,.1);
+    background:rgba(255,255,255,.03);
+    color:inherit;
+    border-radius:999px;
+    width:36px;
+    height:36px;
+    padding:0;
+    font-size:0;
+    font-weight:700;
+    cursor:pointer;
+    transition:background .18s ease, border-color .18s ease, color .18s ease;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    flex:0 0 auto;
+  }
+  .comm-chat-filter svg{
+    width:16px;
+    height:16px;
+  }
+  .comm-chat-filter.active{
+    background:linear-gradient(135deg, rgba(102,126,234,.24), rgba(118,75,162,.3));
+    border-color:rgba(124,58,237,.4);
+    color:#fff;
+  }
+  .comm-chat-summary{
+    display:none;
+  }
+  .comm-chat-room-list{
+    padding:0 8px 8px;
+    overflow:auto;
+    display:grid;
+    gap:6px;
+    min-height:0;
+  }
+  .comm-chat-room{
+    width:100%;
+    border:0;
+    background:transparent;
+    color:inherit;
+    text-align:left;
+    display:grid;
+    grid-template-columns:52px minmax(0, 1fr);
+    gap:12px;
+    align-items:start;
+    padding:12px;
+    border-radius:12px;
+    cursor:pointer;
+    transition:background .18s ease, box-shadow .18s ease;
+  }
+  .comm-chat-room:hover{
+    background:rgba(255,255,255,.045);
+  }
+  .comm-chat-room.active{
+    background:linear-gradient(135deg, rgba(102,126,234,.2), rgba(118,75,162,.22));
+    box-shadow:0 10px 22px rgba(0,0,0,.12);
+  }
+  .comm-chat-avatar{
+    width:52px;
+    height:52px;
+    border-radius:16px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    position:relative;
+    font-size:16px;
+    font-weight:800;
+    color:#fff;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.18);
+  }
+  .comm-chat-avatar::after{
+    content:attr(data-chip);
+    position:absolute;
+    right:-4px;
+    bottom:-4px;
+    min-width:22px;
+    height:22px;
+    border-radius:999px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:0 6px;
+    border:2px solid rgba(14,18,30,.96);
+    background:rgba(14,18,30,.96);
+    color:#fff;
+    font-size:10px;
+    font-weight:800;
+  }
+  .comm-chat-avatar.private{ background:linear-gradient(135deg, #22c55e, #0f766e); }
+  .comm-chat-avatar.role{ background:linear-gradient(135deg, #8b5cf6, #6366f1); }
+  .comm-chat-avatar.site{ background:linear-gradient(135deg, #3b82f6, #0891b2); }
+  .comm-chat-avatar.shift{ background:linear-gradient(135deg, #f59e0b, #ea580c); }
+  .comm-chat-avatar.incident{ background:linear-gradient(135deg, #ef4444, #dc2626); }
+  .comm-chat-avatar.other{ background:linear-gradient(135deg, #64748b, #475569); }
+  .comm-chat-line-avatar .comm-chat-avatar::after,
+  .comm-chat-avatar[data-chip=""]::after{
+    display:none;
+  }
+  .comm-chat-room-copy{
+    display:grid;
+    gap:6px;
+    min-width:0;
+  }
+  .comm-chat-room-head{
+    display:flex;
+    justify-content:space-between;
+    gap:10px;
+    align-items:flex-start;
+  }
+  .comm-chat-room-name{
+    font-weight:700;
+    line-height:1.35;
+    word-break:break-word;
+  }
+  .comm-chat-room-time{
+    color:var(--muted);
+    font-size:11px;
+    line-height:1.3;
+    white-space:nowrap;
+  }
+  .comm-chat-room-preview{
+    color:var(--muted);
+    font-size:12px;
+    line-height:1.45;
+    display:-webkit-box;
+    -webkit-line-clamp:2;
+    -webkit-box-orient:vertical;
+    overflow:hidden;
+  }
+  .comm-chat-room-meta{
+    display:flex;
+    justify-content:space-between;
+    gap:10px;
+    align-items:center;
+    flex-wrap:wrap;
+  }
+  .comm-chat-room-type{
+    color:var(--muted);
+    font-size:11px;
+    font-weight:700;
+    text-transform:uppercase;
+    letter-spacing:.04em;
+  }
+  .comm-chat-room-unread{
+    min-width:22px;
+    height:22px;
+    border-radius:999px;
+    background:#7c3aed;
+    color:#fff;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    padding:0 7px;
+    font-size:11px;
+    font-weight:800;
+  }
+  .comm-chat-stage-head{
+    display:flex;
+    justify-content:space-between;
+    gap:12px;
+    align-items:center;
+    padding:14px;
+    border-bottom:1px solid rgba(255,255,255,.08);
+    flex-wrap:wrap;
+  }
+  .comm-chat-room-hero{
+    display:grid;
+    grid-template-columns:56px minmax(0, 1fr);
+    gap:12px;
+    align-items:center;
+    min-width:0;
+  }
+  .comm-chat-room-hero .comm-chat-avatar{
+    width:56px;
+    height:56px;
+  }
+  .comm-chat-room-hero-copy{
+    display:grid;
+    gap:4px;
+    min-width:0;
+  }
+  .comm-chat-room-hero-copy strong{
+    font-size:15px;
+    line-height:1.35;
+    word-break:break-word;
+  }
+  .comm-chat-room-hero-copy span{
+    color:var(--muted);
+    font-size:12px;
+    line-height:1.4;
+  }
+  .comm-chat-room-pill{
+    display:inline-flex;
+    align-items:center;
+    min-height:28px;
+    padding:0 12px;
+    border-radius:999px;
+    background:rgba(255,255,255,.05);
+    border:1px solid rgba(255,255,255,.08);
+    color:var(--muted);
+    font-size:11px;
+    font-weight:700;
+    text-transform:uppercase;
+    letter-spacing:.04em;
+  }
+  .comm-chat-messages{
+    min-height:0;
+    overflow:auto;
+    padding:14px;
+    display:grid;
+    gap:12px;
+    align-content:start;
+    background:
+      linear-gradient(180deg, rgba(24, 39, 58, .18) 0%, rgba(24, 39, 58, .05) 34%, rgba(11, 22, 38, .02) 100%),
+      radial-gradient(110% 72% at 18% 100%, rgba(69, 100, 122, .26) 0 36%, transparent 37%),
+      radial-gradient(90% 62% at 62% 100%, rgba(42, 67, 96, .24) 0 34%, transparent 35%),
+      radial-gradient(78% 56% at 100% 100%, rgba(24, 39, 58, .22) 0 32%, transparent 33%),
+      linear-gradient(180deg, rgba(226, 233, 241, .05) 0%, rgba(205, 219, 229, .03) 42%, rgba(11, 22, 38, .03) 100%);
+  }
+  .comm-chat-day{
+    justify-self:center;
+    border-radius:999px;
+    background:rgba(255,255,255,.07);
+    border:1px solid rgba(255,255,255,.08);
+    color:var(--muted);
+    padding:6px 12px;
+    font-size:11px;
+    font-weight:700;
+  }
+  .comm-chat-line{
+    display:grid;
+    grid-template-columns:42px minmax(0, 1fr);
+    gap:10px;
+    align-items:end;
+    max-width:88%;
+  }
+  .comm-chat-line.self{
+    margin-left:auto;
+    grid-template-columns:minmax(0, 1fr) 42px;
+  }
+  .comm-chat-line.self .comm-chat-line-avatar{
+    order:2;
+  }
+  .comm-chat-line.self .comm-chat-message{
+    order:1;
+    justify-self:end;
+    background:linear-gradient(135deg, rgba(102,126,234,.28), rgba(59,130,246,.2));
+    border-color:rgba(124,58,237,.24);
+  }
+  .comm-chat-line-avatar .comm-chat-avatar{
+    width:42px;
+    height:42px;
+    border-radius:14px;
+    font-size:13px;
+  }
+  .comm-chat-message{
+    display:grid;
+    gap:8px;
+    padding:12px 14px;
+    border-radius:18px;
+    border:1px solid rgba(255,255,255,.08);
+    background:rgba(255,255,255,.04);
+    box-shadow:0 8px 18px rgba(0,0,0,.08);
+    min-width:0;
+  }
+  .comm-chat-message-head{
+    display:flex;
+    justify-content:space-between;
+    gap:12px;
+    align-items:flex-start;
+    flex-wrap:wrap;
+    color:var(--muted);
+    font-size:11px;
+    line-height:1.35;
+  }
+  .comm-chat-message-head strong{
+    color:inherit;
+    font-size:12px;
+  }
+  .comm-chat-message-body{
+    line-height:1.55;
+    word-break:break-word;
+    white-space:pre-wrap;
+  }
+  .comm-chat-readonly{
+    display:none;
+  }
   .comm-room-top,
   .comm-feed-top { display:flex; justify-content:space-between; gap:10px; align-items:flex-start; flex-wrap:wrap; }
   .comm-room-title,
@@ -123,22 +484,24 @@
     .comm-filter-fields,
     .comm-control-grid { grid-template-columns:1fr; }
     .comm-announcement-grid { grid-template-columns:1fr; }
+    .comm-chat-app { grid-template-columns:240px minmax(480px, 1fr); }
   }
   @media (max-width: 720px) {
     .comm-kpis { grid-template-columns:1fr 1fr; }
     .comm-hero h3 { font-size:20px; }
+    .comm-chat-line,
+    .comm-chat-line.self { max-width:100%; }
   }
   @media (max-width: 560px) {
     .comm-kpis { grid-template-columns:1fr; }
+    .comm-chat-room,
+    .comm-chat-room-hero { grid-template-columns:44px minmax(0, 1fr); gap:10px; }
+    .comm-chat-avatar { width:44px; height:44px; border-radius:14px; font-size:14px; }
+    .comm-chat-room-hero .comm-chat-avatar { width:44px; height:44px; }
   }
 </style>
 
 <div class="comm-shell">
-  <section class="card comm-hero">
-    <h3>Operational Communication</h3>
-    <p>Halaman ini merangkum pengumuman, visual live chat, feed incident, monitoring percakapan, audit trail, dan control communication per site dalam satu alur yang lebih jelas.</p>
-  </section>
-
   <section class="comm-kpis">
     <article class="comm-kpi" aria-label="Announcement aktif">
       <div class="comm-kpi__icon" aria-hidden="true">
@@ -467,6 +830,416 @@
     const targetSite = document.getElementById("announcement-target-site");
     const expiredAtInput = document.getElementById("announcement-expired-at");
     const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute("content") || "";
+    const currentUserEmail = {{ (user.email or "")|tojson }};
+    const initialRooms = {{ communication_live_rooms|tojson }};
+    const initialMessages = {{ communication_live_messages|tojson }};
+    const roomMessageCache = Object.create(null);
+
+    let currentFilter = "all";
+    let selectedRoomId = 0;
+    let roomListEl = null;
+    let roomHeaderEl = null;
+    let roomMessagesEl = null;
+    let roomSummaryEl = null;
+    let filterButtons = [];
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
+    function trimEmail(email) {
+      return String(email || "").trim().toLowerCase();
+    }
+
+    function formatRoleLabel(value) {
+      return String(value || "")
+        .replace(/_/g, " ")
+        .replace(/\b\w/g, (char) => char.toUpperCase())
+        .trim();
+    }
+
+    function normalizeRoomType(type) {
+      return String(type || "").toLowerCase() === "private" ? "private" : "group";
+    }
+
+    function formatRelativeDate(value) {
+      if (!value) return "-";
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return String(value);
+      return new Intl.DateTimeFormat("id-ID", {
+        day: "2-digit",
+        month: "short",
+        hour: "2-digit",
+        minute: "2-digit",
+      }).format(date);
+    }
+
+    function formatDayDivider(value) {
+      if (!value) return "";
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return "";
+      return new Intl.DateTimeFormat("id-ID", {
+        weekday: "long",
+        day: "numeric",
+        month: "long",
+      }).format(date);
+    }
+
+    function getInitials(value) {
+      const source = String(value || "")
+        .replace(/@.*/, "")
+        .replace(/[_\-.]+/g, " ")
+        .trim();
+      if (!source) return "?";
+      const parts = source.split(/\s+/).filter(Boolean);
+      const letters = parts.slice(0, 2).map((part) => part.charAt(0).toUpperCase()).join("");
+      return letters || source.slice(0, 2).toUpperCase();
+    }
+
+    function roomTypeLabel(room) {
+      const type = String(room?.type || "").toLowerCase();
+      if (type === "private") return "Private";
+      if (type === "role") return "Role";
+      if (type === "site") return "Client";
+      if (type === "shift") return "Shift";
+      if (type === "incident") return "Incident";
+      return "Group";
+    }
+
+    function getPrivatePeer(room) {
+      const left = trimEmail(room?.participant_a);
+      const right = trimEmail(room?.participant_b);
+      const self = trimEmail(currentUserEmail);
+      if (left && left !== self) return left;
+      if (right && right !== self) return right;
+      return left || right || room?.name || "Private chat";
+    }
+
+    function roomMeta(room) {
+      const type = String(room?.type || "").toLowerCase();
+      if (type === "private") {
+        const peer = getPrivatePeer(room);
+        return {
+          title: peer.replace(/@.*/, "") || room?.name || "Private chat",
+          subtitle: "Pegawai / Private room",
+          avatarText: getInitials(peer),
+          avatarClass: "private",
+          chip: "P",
+        };
+      }
+      if (type === "role") {
+        const roleName = formatRoleLabel(room?.role_name || room?.name);
+        return {
+          title: room?.name || roleName,
+          subtitle: `Role ${roleName || "-"}`,
+          avatarText: getInitials(roleName || "Role"),
+          avatarClass: "role",
+          chip: "R",
+        };
+      }
+      if (type === "site") {
+        return {
+          title: room?.name || "Site room",
+          subtitle: room?.site_id ? `Client / Site #${room.site_id}` : "Client / Site room",
+          avatarText: getInitials(room?.name || "Site"),
+          avatarClass: "site",
+          chip: "C",
+        };
+      }
+      if (type === "shift") {
+        return {
+          title: room?.name || "Shift room",
+          subtitle: room?.shift_id ? `Shift #${room.shift_id}` : "Shift discussion",
+          avatarText: getInitials(room?.name || "Shift"),
+          avatarClass: "shift",
+          chip: "S",
+        };
+      }
+      if (type === "incident") {
+        return {
+          title: room?.name || "Incident room",
+          subtitle: "Incident thread",
+          avatarText: getInitials(room?.name || "Incident"),
+          avatarClass: "incident",
+          chip: "!",
+        };
+      }
+      return {
+        title: room?.name || "Room chat",
+        subtitle: roomTypeLabel(room),
+        avatarText: getInitials(room?.name || "Room"),
+        avatarClass: "other",
+        chip: "G",
+      };
+    }
+
+    function senderMeta(message, room) {
+      const sender = trimEmail(message?.sender_email);
+      if (sender && sender === trimEmail(currentUserEmail)) {
+        return { label: "Anda", avatarText: getInitials(sender || "Anda"), avatarClass: "role" };
+      }
+      if (String(room?.type || "").toLowerCase() === "role") {
+        return {
+          label: sender || formatRoleLabel(room?.role_name) || "Role",
+          avatarText: getInitials(formatRoleLabel(room?.role_name) || sender || "Role"),
+          avatarClass: "role",
+        };
+      }
+      if (String(room?.type || "").toLowerCase() === "site") {
+        return {
+          label: sender || "Client room",
+          avatarText: getInitials(sender || room?.name || "Client"),
+          avatarClass: "site",
+        };
+      }
+      return {
+        label: sender || "Pegawai",
+        avatarText: getInitials(sender || "Pegawai"),
+        avatarClass: String(room?.type || "").toLowerCase() === "private" ? "private" : "other",
+      };
+    }
+
+    function filteredRooms() {
+      return initialRooms.filter((room) => currentFilter === "all" || normalizeRoomType(room?.type) === currentFilter);
+    }
+
+    function updateRoomSummary(list) {
+      if (!roomSummaryEl) return;
+      if (!initialRooms.length) {
+        roomSummaryEl.textContent = "Belum ada room chat yang terlihat untuk akun ini.";
+        return;
+      }
+      roomSummaryEl.textContent = "";
+    }
+
+    function renderRoomHeader(room) {
+      if (!roomHeaderEl) return;
+      if (!room) {
+        roomHeaderEl.innerHTML = `
+          <div class="comm-chat-title">
+            <strong>Pilih room chat</strong>
+            <span>Isi percakapan akan tampil di panel ini.</span>
+          </div>
+        `;
+        return;
+      }
+      const meta = roomMeta(room);
+      roomHeaderEl.innerHTML = `
+        <div class="comm-chat-room-hero">
+          <div class="comm-chat-avatar ${meta.avatarClass}" data-chip="${escapeHtml(meta.chip)}">${escapeHtml(meta.avatarText)}</div>
+          <div class="comm-chat-room-hero-copy">
+            <strong>${escapeHtml(meta.title)}</strong>
+            <span>${escapeHtml(meta.subtitle)}</span>
+            <span>Aktif terakhir ${escapeHtml(formatRelativeDate(room.last_message_at))}</span>
+          </div>
+        </div>
+        <div class="comm-chat-room-pill">${escapeHtml(roomTypeLabel(room))}</div>
+      `;
+    }
+
+    function renderMessages(messages, room) {
+      if (!roomMessagesEl) return;
+      if (!room) {
+        roomMessagesEl.innerHTML = '<div class="comm-empty">Pilih salah satu room untuk melihat isi chat.</div>';
+        return;
+      }
+      if (!messages.length) {
+        roomMessagesEl.innerHTML = "";
+        return;
+      }
+      let previousDay = "";
+      roomMessagesEl.innerHTML = messages.map((message) => {
+        const sender = senderMeta(message, room);
+        const isSelf = trimEmail(message?.sender_email) === trimEmail(currentUserEmail);
+        const dayLabel = formatDayDivider(message?.created_at);
+        const showDay = dayLabel && dayLabel !== previousDay;
+        previousDay = dayLabel || previousDay;
+        return `
+          ${showDay ? `<div class="comm-chat-day">${escapeHtml(dayLabel)}</div>` : ""}
+          <div class="comm-chat-line${isSelf ? " self" : ""}">
+            <div class="comm-chat-line-avatar">
+              <div class="comm-chat-avatar ${sender.avatarClass}" data-chip="">${escapeHtml(sender.avatarText)}</div>
+            </div>
+            <div class="comm-chat-message">
+              <div class="comm-chat-message-head">
+                <strong>${escapeHtml(sender.label)}</strong>
+                <span>${escapeHtml(formatRelativeDate(message?.created_at))}</span>
+              </div>
+              <div class="comm-chat-message-body">${escapeHtml(message?.message || "")}</div>
+            </div>
+          </div>
+        `;
+      }).join("");
+      roomMessagesEl.scrollTop = roomMessagesEl.scrollHeight;
+    }
+
+    function renderRoomList() {
+      if (!roomListEl) return;
+      const rooms = filteredRooms();
+      updateRoomSummary(rooms);
+      if (!rooms.length) {
+        selectedRoomId = 0;
+        roomListEl.innerHTML = '<div class="comm-empty">Tidak ada room untuk filter ini.</div>';
+        renderRoomHeader(null);
+        renderMessages([], null);
+        return;
+      }
+      if (!rooms.some((room) => Number(room.id) === Number(selectedRoomId))) {
+        selectedRoomId = Number(rooms[0].id || 0);
+      }
+      roomListEl.innerHTML = rooms.map((room) => {
+        const meta = roomMeta(room);
+        const unread = Number(room.unread_count || 0);
+        const isActive = Number(room.id) === Number(selectedRoomId);
+        return `
+          <button class="comm-chat-room${isActive ? " active" : ""}" type="button" data-room-id="${room.id}">
+            <div class="comm-chat-avatar ${meta.avatarClass}" data-chip="${escapeHtml(meta.chip)}">${escapeHtml(meta.avatarText)}</div>
+            <div class="comm-chat-room-copy">
+              <div class="comm-chat-room-head">
+                <div class="comm-chat-room-name">${escapeHtml(meta.title)}</div>
+                <div class="comm-chat-room-time">${escapeHtml(formatRelativeDate(room.last_message_at))}</div>
+              </div>
+              <div class="comm-chat-room-preview">${escapeHtml(room.last_message_preview || "Belum ada pesan.")}</div>
+              <div class="comm-chat-room-meta">
+                <span class="comm-chat-room-type">${escapeHtml(roomTypeLabel(room))}</span>
+                ${unread > 0 ? `<span class="comm-chat-room-unread">${unread}</span>` : ""}
+              </div>
+            </div>
+          </button>
+        `;
+      }).join("");
+    }
+
+    function bootstrapMessages() {
+      initialMessages.forEach((message) => {
+        const roomId = Number(message.chat_room_id || 0);
+        if (!roomId) return;
+        if (!roomMessageCache[roomId]) roomMessageCache[roomId] = [];
+        roomMessageCache[roomId].push(message);
+      });
+    }
+
+    async function loadRoomMessages(roomId, options = {}) {
+      const numericRoomId = Number(roomId || 0);
+      const room = initialRooms.find((item) => Number(item.id) === numericRoomId) || null;
+      if (!room) {
+        renderRoomHeader(null);
+        renderMessages([], null);
+        return;
+      }
+      renderRoomHeader(room);
+      if (!options.force && Array.isArray(roomMessageCache[numericRoomId]) && roomMessageCache[numericRoomId].length) {
+        renderMessages(roomMessageCache[numericRoomId], room);
+        return;
+      }
+      if (roomMessagesEl) {
+        roomMessagesEl.innerHTML = '<div class="comm-empty">Memuat isi room...</div>';
+      }
+      try {
+        const response = await fetch(`/api/chat/room/${numericRoomId}`, { credentials: "same-origin" });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || payload.ok === false) {
+          throw new Error(payload.message || "Gagal memuat pesan room.");
+        }
+        roomMessageCache[numericRoomId] = Array.isArray(payload.data) ? payload.data : [];
+        renderMessages(roomMessageCache[numericRoomId], room);
+      } catch (error) {
+        if (roomMessagesEl) {
+          roomMessagesEl.innerHTML = `<div class="comm-empty">${escapeHtml(error.message || "Gagal memuat pesan room.")}</div>`;
+        }
+      }
+    }
+
+    function setActiveFilter(nextFilter) {
+      currentFilter = nextFilter;
+      filterButtons.forEach((button) => {
+        button.classList.toggle("active", button.dataset.chatFilter === nextFilter);
+      });
+      renderRoomList();
+      if (selectedRoomId) {
+        loadRoomMessages(selectedRoomId);
+      }
+    }
+
+    function initChatView() {
+      const liveChatHeading = Array.from(document.querySelectorAll(".comm-card .comm-head h4"))
+        .find((node) => node.textContent.trim() === "Live Chat");
+      const liveChatCard = liveChatHeading?.closest(".comm-card");
+      const liveChatHead = liveChatHeading?.closest(".comm-head");
+      const legacyShell = liveChatHead?.nextElementSibling;
+      if (!liveChatCard || !liveChatHead || !legacyShell) return;
+
+      liveChatHead.querySelector("p").textContent = "";
+      legacyShell.outerHTML = `
+        <div class="comm-chat-app" id="commChatApp">
+          <div class="comm-chat-panel comm-chat-sidebar">
+            <div class="comm-chat-toolbar">
+              <div class="comm-chat-title">
+                <strong>Daftar Room</strong>
+                <span></span>
+              </div>
+              <div class="comm-chat-filters">
+                <button class="comm-chat-filter active" type="button" data-chat-filter="all" title="All" aria-label="All">
+                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>
+                </button>
+                <button class="comm-chat-filter" type="button" data-chat-filter="group" title="Group" aria-label="Group">
+                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M8 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm8 1a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5ZM4.5 18.5c0-2.5 2.4-4.5 5.5-4.5s5.5 2 5.5 4.5M14 18.5c.2-1.6 1.6-2.9 3.5-2.9 1 0 1.9.3 2.5.9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
+                <button class="comm-chat-filter" type="button" data-chat-filter="private" title="Private" aria-label="Private">
+                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 8a6 6 0 1 1 12 0v2h1a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2h1V8Zm2 2h8V8a4 4 0 1 0-8 0v2Z" fill="currentColor"/></svg>
+                </button>
+              </div>
+            </div>
+            <div class="comm-chat-summary" id="commChatSummary"></div>
+            <div class="comm-chat-room-list" id="commChatRoomList">
+              <div class="comm-empty">Memuat room chat...</div>
+            </div>
+          </div>
+          <div class="comm-chat-panel comm-chat-stage">
+            <div class="comm-chat-stage-head" id="commChatRoomHeader">
+              <div class="comm-chat-title">
+                <strong>Pilih room chat</strong>
+                <span>Isi percakapan akan tampil di panel ini.</span>
+              </div>
+            </div>
+            <div class="comm-chat-messages" id="commChatMessages">
+              <div class="comm-empty">${initialRooms.length ? "Pilih salah satu room untuk melihat isi chat." : "Belum ada arus pesan yang bisa ditampilkan."}</div>
+            </div>
+            <div class="comm-chat-readonly"></div>
+          </div>
+        </div>
+      `;
+
+      roomListEl = document.getElementById("commChatRoomList");
+      roomHeaderEl = document.getElementById("commChatRoomHeader");
+      roomMessagesEl = document.getElementById("commChatMessages");
+      roomSummaryEl = document.getElementById("commChatSummary");
+      filterButtons = Array.from(document.querySelectorAll("[data-chat-filter]"));
+
+      bootstrapMessages();
+      filterButtons.forEach((button) => {
+        button.addEventListener("click", () => setActiveFilter(button.dataset.chatFilter || "all"));
+      });
+      roomListEl?.addEventListener("click", (event) => {
+        const trigger = event.target.closest("[data-room-id]");
+        if (!trigger) return;
+        const roomId = Number(trigger.dataset.roomId || 0);
+        if (!roomId) return;
+        selectedRoomId = roomId;
+        renderRoomList();
+        loadRoomMessages(roomId);
+      });
+
+      renderRoomList();
+      if (selectedRoomId) {
+        loadRoomMessages(selectedRoomId);
+      }
+    }
 
     function showMessage(message, isError) {
       if (!alertBox) return;
@@ -548,6 +1321,8 @@
         }
       }
     });
+
+    initChatView();
   })();
 </script>
 {% endblock %}

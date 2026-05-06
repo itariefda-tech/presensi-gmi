@@ -62,16 +62,17 @@
       </select>
     </div>
     <div class="form-row full shift-custom-wrap" data-shift-custom hidden>
-      <div class="shift-custom-head">
-        <div class="label">Custom Shift</div>
-      </div>
       <div class="shift-custom-list" data-shift-list>
         <div class="shift-row" data-shift-row>
-          <input class="input" name="shift_name" type="text" placeholder="Nama shift" />
-          <input class="input" name="shift_start" type="time" placeholder="Dari" />
-          <input class="input" name="shift_end" type="time" placeholder="Sampai" />
-          <button class="btn secondary shift-add" type="button" data-shift-add aria-label="Tambah shift">+</button>
-          <button class="btn secondary shift-remove" type="button" data-shift-remove aria-label="Hapus shift">-</button>
+          <input class="input shift-name-input" name="shift_name" type="text" placeholder="Nama shift" />
+          <div class="shift-row-meta">
+            <input class="input" name="shift_start" type="time" placeholder="Dari" />
+            <input class="input" name="shift_end" type="time" placeholder="Sampai" />
+            <div class="shift-row-actions">
+              <button class="btn secondary shift-add" type="button" data-shift-add aria-label="Tambah shift">+</button>
+              <button class="btn secondary shift-remove" type="button" data-shift-remove aria-label="Hapus shift">-</button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -116,47 +117,67 @@
 {% endif %}
 
 <div class="card" style="margin-top:12px;">
-  <div style="font-weight:700; margin-bottom:8px;">Daftar Site</div>
   <div class="table-wrap site-table-wrap">
-    <table class="table" aria-label="Site list">
+    <table class="table site-list-table" aria-label="Site list">
       <thead>
         <tr>
-          <th>Site / Client</th>
-          <th>Timezone</th>
-          <th>Work Mode</th>
-          <th>Koordinat</th>
-          <th>radius (m)</th>
-          <th>PIC</th>
+          <th>Site<br><span class="attendance-head-sub">Client</span></th>
+          <th>Timezone<br><span class="attendance-head-sub">Work mode</span></th>
+          <th>Koordinat<br><span class="attendance-head-sub">Radius (m)</span></th>
+          <th>PIC<br><span class="attendance-head-sub">Email</span></th>
           <th>Compliance</th>
-          <th>Status</th>
+          <th>Jumlah Shift<br><span class="attendance-head-sub">Status</span></th>
           <th>Aksi</th>
         </tr>
       </thead>
       <tbody>
         {% if not sites %}
-        <tr><td colspan="9" class="muted">Belum ada site.</td></tr>
+        <tr><td colspan="7" class="muted">Belum ada site.</td></tr>
         {% endif %}
         {% for s in sites %}
         <tr>
           <td class="site-name-cell">
-            <div class="site-name">{{ s.name }}</div>
-            <div class="site-client muted">
-              {{ s.client_name or "-" }}
-              {% if s.is_orphan %}
-              <span class="badge" style="margin-left:6px;">Orphan</span>
-              {% endif %}
+            <div class="attendance-cell-pair">
+              <div class="attendance-cell-main">
+                <strong>{{ s.name }}</strong>
+              </div>
+              <div class="attendance-cell-sub">
+                <strong>{{ s.client_name or "-" }}</strong>
+                {% if s.is_orphan %}
+                <span>Orphan</span>
+                {% endif %}
+              </div>
             </div>
           </td>
-          <td>{{ s.timezone or '-' }}</td>
-          <td>{{ s.work_mode or '-' }}</td>
-          <td class="site-coord">
-            <div>{{ "%.6f"|format(s.latitude or 0) }}</div>
-            <div class="muted">{{ "%.6f"|format(s.longitude or 0) }}</div>
+          <td>
+            <div class="attendance-cell-pair">
+              <div class="attendance-cell-main">
+                <strong>{{ s.timezone or '-' }}</strong>
+              </div>
+              <div class="attendance-cell-sub">
+                <strong>{{ s.work_mode or '-' }}</strong>
+              </div>
+            </div>
           </td>
-          <td>{{ s.radius_meters or 0 }}</td>
+          <td class="site-coord">
+            <div class="attendance-cell-pair">
+              <div class="attendance-cell-main">
+                <strong>{{ "%.6f"|format(s.latitude or 0) }}, {{ "%.6f"|format(s.longitude or 0) }}</strong>
+              </div>
+              <div class="attendance-cell-sub">
+                <strong>{{ s.radius_meters or 0 }}</strong>
+              </div>
+            </div>
+          </td>
           <td class="site-pic">
-            <div>{{ s.pic_name or "-" }}</div>
-            <div class="muted">{{ s.pic_email or "-" }}</div>
+            <div class="attendance-cell-pair">
+              <div class="attendance-cell-main">
+                <strong>{{ s.pic_name or "-" }}</strong>
+              </div>
+              <div class="attendance-cell-sub">
+                <strong>{{ s.pic_email or "-" }}</strong>
+              </div>
+            </div>
           </td>
           <td>
             <span class="badge {{ s.compliance_class }}">
@@ -164,7 +185,20 @@
             </span>
           </td>
           <td>
-            <span class="badge">{% if s.is_active %}Active{% else %}Disabled{% endif %}</span>
+            <div class="attendance-cell-pair">
+              <div class="attendance-cell-main">
+                <strong>
+                  {% if s.shift_mode == 'custom' %}
+                    {{ s.shift_list|length if s.shift_list else 0 }} shift
+                  {% else %}
+                    {{ s.shift_mode or 2 }} shift
+                  {% endif %}
+                </strong>
+              </div>
+              <div class="attendance-cell-sub">
+                <strong>{% if s.is_active %}Active{% else %}Disabled{% endif %}</strong>
+              </div>
+            </div>
           </td>
           <td>
             <details class="dropdown">
@@ -241,27 +275,32 @@
           </select>
         </div>
         <div class="form-row full shift-custom-wrap" data-shift-custom {% if s.shift_mode != 'custom' %}hidden{% endif %}>
-        <div class="shift-custom-head">
-          <div class="label">Custom Shift</div>
-        </div>
         <div class="shift-custom-list" data-shift-list>
           {% if s.shift_mode == 'custom' and s.shift_list %}
             {% for sh in s.shift_list %}
               <div class="shift-row" data-shift-row>
-                <input class="input" name="shift_name" type="text" placeholder="Nama shift" value="{{ sh.name }}" />
-                <input class="input" name="shift_start" type="time" placeholder="Dari" value="{{ sh.start_time }}" />
-                <input class="input" name="shift_end" type="time" placeholder="Sampai" value="{{ sh.end_time }}" />
-                <button class="btn secondary shift-add" type="button" data-shift-add aria-label="Tambah shift">+</button>
-                <button class="btn secondary shift-remove" type="button" data-shift-remove aria-label="Hapus shift">-</button>
+                <input class="input shift-name-input" name="shift_name" type="text" placeholder="Nama shift" value="{{ sh.name }}" />
+                <div class="shift-row-meta">
+                  <input class="input" name="shift_start" type="time" placeholder="Dari" value="{{ sh.start_time }}" />
+                  <input class="input" name="shift_end" type="time" placeholder="Sampai" value="{{ sh.end_time }}" />
+                  <div class="shift-row-actions">
+                    <button class="btn secondary shift-add" type="button" data-shift-add aria-label="Tambah shift">+</button>
+                    <button class="btn secondary shift-remove" type="button" data-shift-remove aria-label="Hapus shift">-</button>
+                  </div>
+                </div>
               </div>
               {% endfor %}
             {% else %}
               <div class="shift-row" data-shift-row>
-                <input class="input" name="shift_name" type="text" placeholder="Nama shift" />
-                <input class="input" name="shift_start" type="time" placeholder="Dari" />
-                <input class="input" name="shift_end" type="time" placeholder="Sampai" />
-                <button class="btn secondary shift-add" type="button" data-shift-add aria-label="Tambah shift">+</button>
-                <button class="btn secondary shift-remove" type="button" data-shift-remove aria-label="Hapus shift">-</button>
+                <input class="input shift-name-input" name="shift_name" type="text" placeholder="Nama shift" />
+                <div class="shift-row-meta">
+                  <input class="input" name="shift_start" type="time" placeholder="Dari" />
+                  <input class="input" name="shift_end" type="time" placeholder="Sampai" />
+                  <div class="shift-row-actions">
+                    <button class="btn secondary shift-add" type="button" data-shift-add aria-label="Tambah shift">+</button>
+                    <button class="btn secondary shift-remove" type="button" data-shift-remove aria-label="Hapus shift">-</button>
+                  </div>
+                </div>
               </div>
             {% endif %}
           </div>
@@ -424,11 +463,15 @@
           row.className = "shift-row";
           row.dataset.shiftRow = "1";
           row.innerHTML = `
-            <input class="input" name="shift_name" type="text" placeholder="Nama shift" value="${values.name || ""}" />
-            <input class="input" name="shift_start" type="time" placeholder="Dari" value="${values.start_time || ""}" />
-            <input class="input" name="shift_end" type="time" placeholder="Sampai" value="${values.end_time || ""}" />
-            <button class="btn secondary shift-add" type="button" data-shift-add aria-label="Tambah shift">+</button>
-            <button class="btn secondary shift-remove" type="button" data-shift-remove aria-label="Hapus shift">-</button>
+            <input class="input shift-name-input" name="shift_name" type="text" placeholder="Nama shift" value="${values.name || ""}" />
+            <div class="shift-row-meta">
+              <input class="input" name="shift_start" type="time" placeholder="Dari" value="${values.start_time || ""}" />
+              <input class="input" name="shift_end" type="time" placeholder="Sampai" value="${values.end_time || ""}" />
+              <div class="shift-row-actions">
+                <button class="btn secondary shift-add" type="button" data-shift-add aria-label="Tambah shift">+</button>
+                <button class="btn secondary shift-remove" type="button" data-shift-remove aria-label="Hapus shift">-</button>
+              </div>
+            </div>
           `;
           list.appendChild(row);
           bindRemove(row.querySelector("[data-shift-remove]"));

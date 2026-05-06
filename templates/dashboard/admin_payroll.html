@@ -167,24 +167,44 @@
     <div id="payrollAlert" class="alert info" style="display:none;"></div>
     <div class="payroll-kpis" id="payrollKpis">
       <div class="payroll-kpi">
-        <span>Total Net Payroll</span>
-        <strong id="payrollKpiNet">Rp 0</strong>
-        <em id="payrollKpiCount">0 slip</em>
+        <div class="payroll-kpi__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M5 8.5h14v9a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-9Z" stroke="currentColor" stroke-width="1.7"/><path d="M8 12h8M8 15h5M7 5.5h10" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+        </div>
+        <div class="payroll-kpi__copy">
+          <div class="payroll-kpi__label">Total Net Payroll</div>
+          <div class="payroll-kpi__value" id="payrollKpiNet">Rp 0</div>
+        </div>
+        <div class="payroll-kpi__meta" id="payrollKpiCount">0 slip</div>
       </div>
       <div class="payroll-kpi accent">
-        <span>Slip Lengkap</span>
-        <strong id="payrollKpiComplete">0</strong>
-        <em>slip dengan komponen</em>
+        <div class="payroll-kpi__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none"><path d="m7.5 12.5 3 3 6-7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.7"/></svg>
+        </div>
+        <div class="payroll-kpi__copy">
+          <div class="payroll-kpi__label">Slip Lengkap</div>
+          <div class="payroll-kpi__value" id="payrollKpiComplete">0</div>
+        </div>
+        <div class="payroll-kpi__meta">slip dengan komponen</div>
       </div>
       <div class="payroll-kpi">
-        <span>BPJS + PPh21</span>
-        <strong id="payrollKpiStatutory">Rp 0</strong>
-        <em>employee portion</em>
+        <div class="payroll-kpi__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M12 4v16M7 9.5c0-1.7 1.7-3 5-3s5 1.3 5 3-1.4 2.5-5 3-5 1.3-5 3 1.7 3 5 3 5-1.3 5-3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+        </div>
+        <div class="payroll-kpi__copy">
+          <div class="payroll-kpi__label">BPJS + PPh21</div>
+          <div class="payroll-kpi__value" id="payrollKpiStatutory">Rp 0</div>
+        </div>
+        <div class="payroll-kpi__meta">employee portion</div>
       </div>
       <div class="payroll-kpi">
-        <span>THR + Overtime</span>
-        <strong id="payrollKpiExtra">Rp 0</strong>
-        <em>additional earning</em>
+        <div class="payroll-kpi__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M12 5.5v13M6 12h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><rect x="4.5" y="4.5" width="15" height="15" rx="3" stroke="currentColor" stroke-width="1.7"/></svg>
+        </div>
+        <div class="payroll-kpi__copy">
+          <div class="payroll-kpi__label">THR + Overtime</div>
+          <div class="payroll-kpi__value" id="payrollKpiExtra">Rp 0</div>
+        </div>
+        <div class="payroll-kpi__meta">additional earning</div>
       </div>
     </div>
     <!-- Payroll Table -->
@@ -399,36 +419,107 @@
 }
 
 .payroll-kpi {
-  display: grid;
-  gap: 0.35rem;
-  padding: 1rem;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: #fff;
+  display:flex;
+  align-items:center;
+  gap:1rem;
+  justify-content:flex-start;
+  flex-wrap:wrap;
+  border:1px solid var(--border);
+  border-radius:8px;
+  background:rgba(255,255,255,0.04);
+  padding:7px 1rem;
 }
 
-.payroll-kpi span {
-  color: var(--muted);
-  font-size: 0.78rem;
-  font-weight: 700;
-  text-transform: uppercase;
+.payroll-kpi__icon{
+  display:grid;
+  place-items:center;
+  width:50px;
+  height:50px;
+  flex:0 0 50px;
+  border-radius:50%;
+  background:rgba(148,163,184,0.14);
+  color:var(--text);
 }
 
-.payroll-kpi strong {
-  color: #152238;
-  font-size: 1.35rem;
-  line-height: 1.15;
+.payroll-kpi__icon svg{
+  width:24px;
+  height:24px;
 }
 
-.payroll-kpi em {
-  color: var(--muted);
-  font-size: 0.78rem;
-  font-style: normal;
+.payroll-kpi__copy{
+  flex:1;
+  min-width:0;
+  text-align:center;
+}
+
+.payroll-kpi__label{
+  color:var(--muted);
+  font-size:0.78rem;
+  font-weight:800;
+  text-transform:uppercase;
+}
+
+.payroll-kpi__value{
+  font-size:1rem;
+  font-weight:900;
+  line-height:1;
+  margin:0.45rem 0;
+}
+
+.payroll-kpi__meta{
+  flex:0 0 100%;
+  margin-top:0.25rem;
+  text-align:center;
+  color:var(--muted);
+  font-size:0.9rem;
 }
 
 .payroll-kpi.accent {
   border-color: rgba(25, 118, 210, 0.25);
-  background: #eef6ff;
+}
+
+html[data-theme="light"] .payroll-kpi {
+  align-content:center;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border:0;
+  border-radius:12px;
+  box-shadow:0 4px 6px rgba(0,0,0,0.1);
+  color:#fff;
+  min-height:96px;
+  padding:7px 1.5rem;
+  transition: transform 0.2s;
+}
+
+html[data-theme="light"] .payroll-kpi:hover {
+  transform: translateY(-2px);
+}
+
+html[data-theme="light"] .payroll-kpi__label,
+html[data-theme="light"] .payroll-kpi__value,
+html[data-theme="light"] .payroll-kpi__meta {
+  color:#fff;
+}
+
+html[data-theme="light"] .payroll-kpi__icon {
+  background:rgba(255,255,255,0.2);
+  color:#fff;
+}
+
+html[data-theme="light"] .payroll-kpi__label {
+  font-size:0.9rem;
+  font-weight:600;
+  letter-spacing:0;
+  opacity:0.9;
+  text-transform:none;
+}
+
+html[data-theme="light"] .payroll-kpi__value {
+  font-size:1rem;
+  margin:0.25rem 0;
+}
+
+html[data-theme="light"] .payroll-kpi__meta {
+  opacity:0.9;
 }
 
 .payroll-output-card {

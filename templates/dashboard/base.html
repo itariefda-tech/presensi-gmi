@@ -108,6 +108,14 @@
           <span class="nav-label" data-i18n="nav.attendance">Attendance</span>
         </a>
         {% endif %}
+        {% if permissions.get("approve_requests") %}
+        <a href="{{ url_for('admin.approvals') }}" class="{% if active == 'approvals' %}active{% endif %}" title="Approvals" data-i18n-title="nav.approvals">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </span>
+          <span class="nav-label" data-i18n="nav.approvals">Approval</span>
+        </a>
+        {% endif %}
         {% if user.role in ["hr_superadmin", "manager_operational", "supervisor", "admin_asistent"] %}
         <a href="{{ url_for('admin.communication') }}" class="{% if active == 'communication' %}active{% endif %}" title="Communication">
           <span class="nav-icon" aria-hidden="true">
@@ -180,14 +188,6 @@
           <span class="nav-label" data-i18n="nav.manual_attendance">Manual Attendance Request</span>
         </a>
         {% endif %}
-        {% if permissions.get("approve_requests") %}
-        <a href="{{ url_for('admin.approvals') }}" class="{% if active == 'approvals' %}active{% endif %}" title="Approvals" data-i18n-title="nav.approvals">
-          <span class="nav-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          </span>
-          <span class="nav-label" data-i18n="nav.approvals">Approval</span>
-        </a>
-        {% endif %}
         {% if user.role in ["hr_superadmin", "manager_operational", "supervisor", "admin_asistent"] %}
         <a href="{{ url_for('admin.settings') }}" class="{% if active == 'settings' %}active{% endif %}" title="Settings" data-i18n-title="nav.settings">
           <span class="nav-icon" aria-hidden="true">
@@ -226,14 +226,23 @@
               <span data-i18n="common.theme">Ubah tema</span>
             </button>
           </div>
-          {% set pending_total = (pending_leave_count or 0) + (pending_manual_count or 0) %}
-          <button class="btn secondary notify-btn" type="button" aria-label="Notifikasi" data-i18n-aria-label="common.notifications" data-pending-leave="{{ pending_leave_count or 0 }}" data-pending-manual="{{ pending_manual_count or 0 }}">
+          {% if user.role in ["hr_superadmin", "manager_operational", "supervisor", "admin_asistent"] %}
+          <a class="btn secondary notify-btn" href="{{ url_for('admin.communication') }}" aria-label="Communication alert" title="Communication alert">
             <svg class="notify-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <path d="M18 8a6 6 0 1 0-12 0c0 5-2 6-2 6h16s-2-1-2-6Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
               <path d="M9.5 19a2.5 2.5 0 0 0 5 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
             </svg>
-            <span class="notify-badge{% if pending_total > 0 %} is-active{% endif %}" aria-hidden="true"></span>
-          </button>
+            <span class="notify-badge{% if communication_alert_active %} is-active{% endif %}" aria-hidden="true"></span>
+          </a>
+          {% else %}
+          <span class="btn secondary notify-btn" aria-hidden="true">
+            <svg class="notify-icon" viewBox="0 0 24 24" fill="none">
+              <path d="M18 8a6 6 0 1 0-12 0c0 5-2 6-2 6h16s-2-1-2-6Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+              <path d="M9.5 19a2.5 2.5 0 0 0 5 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+            </svg>
+            <span class="notify-badge{% if communication_alert_active %} is-active{% endif %}" aria-hidden="true"></span>
+          </span>
+          {% endif %}
           {% if user.role in ["hr_superadmin", "manager_operational", "supervisor", "admin_asistent"] %}
           <a class="btn secondary settings-btn" href="{{ url_for('admin.settings') }}" aria-label="Settings" data-i18n-aria-label="nav.settings">
   <svg class="settings-gear" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -277,15 +286,6 @@
         </div>
       </form>
       <div class="alert info" id="changePasswordAlert" style="display:none;"></div>
-    </div>
-  </div>
-  <div class="modal" id="notifyModal" aria-hidden="true">
-    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="notifyTitle">
-      <div class="modal-title" id="notifyTitle" data-i18n="modal.notifications">Notifikasi</div>
-      <div id="notifyBody" class="stack"></div>
-      <div class="modal-footer">
-        <button class="btn secondary full" type="button" id="btnCloseNotify" data-i18n="common.close">Tutup</button>
-      </div>
     </div>
   </div>
   <script src="{{ url_for('static', filename='js/i18n.js') }}"></script>
@@ -356,49 +356,6 @@
           }
           collapseCard(card);
         });
-      });
-    })();
-  </script>
-  <script>
-    (function(){
-      const notifyBtn = document.querySelector(".notify-btn");
-      const notifyModal = document.getElementById("notifyModal");
-      const notifyBody = document.getElementById("notifyBody");
-      const btnCloseNotify = document.getElementById("btnCloseNotify");
-      if (!notifyBtn || !notifyModal || !notifyBody || !btnCloseNotify) return;
-      const closeModal = () => {
-        notifyModal.setAttribute("aria-hidden", "true");
-        notifyModal.classList.remove("show");
-      };
-      notifyBtn.addEventListener("click", () => {
-        const leaveCount = Number(notifyBtn.dataset.pendingLeave || 0);
-        const manualCount = Number(notifyBtn.dataset.pendingManual || 0);
-        notifyBody.innerHTML = "";
-        if (!leaveCount && !manualCount) {
-          const empty = document.createElement("div");
-          empty.className = "muted";
-          empty.textContent = "Tidak ada request pending.";
-          notifyBody.appendChild(empty);
-        } else {
-          if (leaveCount) {
-            const item = document.createElement("div");
-            item.textContent = `Leave request pending: ${leaveCount}`;
-            notifyBody.appendChild(item);
-          }
-          if (manualCount) {
-            const item = document.createElement("div");
-            item.textContent = `Manual request pending: ${manualCount}`;
-            notifyBody.appendChild(item);
-          }
-        }
-        notifyModal.setAttribute("aria-hidden", "false");
-        notifyModal.classList.add("show");
-      });
-      btnCloseNotify.addEventListener("click", closeModal);
-      notifyModal.addEventListener("click", (e) => {
-        if (e.target === notifyModal) {
-          closeModal();
-        }
       });
     })();
   </script>

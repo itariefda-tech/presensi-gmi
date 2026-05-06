@@ -99,22 +99,18 @@
       <span class="panel-badge muted" id="guardTourReportTotal">0 scan</span>
     </div>
     <div class="table-wrap">
-      <table class="table" aria-label="Guard tour scan report">
+      <table class="table guard-tour-report-table" aria-label="Guard tour scan report">
         <thead>
           <tr>
-            <th>Tanggal</th>
-            <th>Guard</th>
-            <th>Site</th>
-            <th>Checkpoint</th>
-            <th>Jam Check</th>
-            <th>Metode</th>
-            <th>Progress</th>
-            <th>Status</th>
+            <th>Tanggal<br><span class="attendance-head-sub">Guard</span></th>
+            <th>Site<br><span class="attendance-head-sub">Checkpoint</span></th>
+            <th>Jam Check<br><span class="attendance-head-sub">Metode</span></th>
+            <th>Progress<br><span class="attendance-head-sub">Status</span></th>
             <th>Catatan</th>
           </tr>
         </thead>
         <tbody id="guardTourRows">
-          <tr><td colspan="9" class="muted">Pilih site untuk menampilkan report scan.</td></tr>
+          <tr><td colspan="5" class="muted">Pilih site untuk menampilkan report scan.</td></tr>
         </tbody>
       </table>
     </div>
@@ -179,7 +175,7 @@
   border: 1px solid var(--border);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.04);
-  padding: 1rem;
+  padding: 7px 1rem;
 }
 
 .patrol-hero-card {
@@ -243,8 +239,8 @@ html[data-theme="light"] .patrol-hero-card {
   border-radius: 12px;
   box-shadow: 0 4px 6px rgba(0,0,0,0.1);
   color: #fff;
-  min-height: 118px;
-  padding: 1.5rem;
+  min-height: 96px;
+  padding: 7px 1.5rem;
   transition: transform 0.2s;
 }
 
@@ -360,6 +356,33 @@ html[data-theme="light"] .patrol-hero-meta {
   gap: 1rem;
   flex-wrap: wrap;
   margin-top: 0.45rem;
+}
+.guard-tour-report-table{
+  table-layout:fixed;
+  min-width:860px;
+}
+.guard-tour-report-table td{
+  vertical-align:top;
+}
+.guard-tour-report-table th:nth-child(1),
+.guard-tour-report-table td:nth-child(1){
+  width:20%;
+}
+.guard-tour-report-table th:nth-child(2),
+.guard-tour-report-table td:nth-child(2){
+  width:24%;
+}
+.guard-tour-report-table th:nth-child(3),
+.guard-tour-report-table td:nth-child(3){
+  width:18%;
+}
+.guard-tour-report-table th:nth-child(4),
+.guard-tour-report-table td:nth-child(4){
+  width:16%;
+}
+.guard-tour-report-table th:nth-child(5),
+.guard-tour-report-table td:nth-child(5){
+  width:22%;
 }
 
 </style>
@@ -507,19 +530,51 @@ html[data-theme="light"] .patrol-hero-meta {
       const rows = Array.isArray(records) ? records : [];
       if (reportTotalEl) reportTotalEl.textContent = `${rows.length} scan`;
       if (!rows.length) {
-        reportRowsEl.innerHTML = '<tr><td colspan="9" class="muted">Tidak ada scan checkpoint untuk filter ini.</td></tr>';
+        reportRowsEl.innerHTML = '<tr><td colspan="5" class="muted">Tidak ada scan checkpoint untuk filter ini.</td></tr>';
         return;
       }
       reportRowsEl.innerHTML = rows.map((record) => `
         <tr>
-          <td>${escapeHtml(record.date || "-")}</td>
-          <td>${escapeHtml(record.guard_name || "-")}</td>
-          <td>${escapeHtml(record.site_name || "-")}</td>
-          <td>${escapeHtml(record.checkpoint || "-")}</td>
-          <td>${escapeHtml(record.check_time || "-")}</td>
-          <td>${escapeHtml(record.method || "-")}</td>
-          <td>${escapeHtml(record.progress || "-")}</td>
-          <td>${scanStatusBadge(record.status)}</td>
+          <td>
+            <div class="attendance-cell-pair">
+              <div class="attendance-cell-main">
+                <strong>${escapeHtml(record.date || "-")}</strong>
+              </div>
+              <div class="attendance-cell-sub">
+                <strong>${escapeHtml(record.guard_name || "-")}</strong>
+              </div>
+            </div>
+          </td>
+          <td>
+            <div class="attendance-cell-pair">
+              <div class="attendance-cell-main">
+                <strong>${escapeHtml(record.site_name || "-")}</strong>
+              </div>
+              <div class="attendance-cell-sub">
+                <strong>${escapeHtml(record.checkpoint || "-")}</strong>
+              </div>
+            </div>
+          </td>
+          <td>
+            <div class="attendance-cell-pair">
+              <div class="attendance-cell-main">
+                <strong>${escapeHtml(record.check_time || "-")}</strong>
+              </div>
+              <div class="attendance-cell-sub">
+                <strong>${escapeHtml(record.method || "-")}</strong>
+              </div>
+            </div>
+          </td>
+          <td>
+            <div class="attendance-cell-pair">
+              <div class="attendance-cell-main">
+                <strong>${escapeHtml(record.progress || "-")}</strong>
+              </div>
+              <div class="attendance-cell-sub">
+                ${scanStatusBadge(record.status)}
+              </div>
+            </div>
+          </td>
           <td>${escapeHtml(record.notes || "-")}</td>
         </tr>
       `).join("");

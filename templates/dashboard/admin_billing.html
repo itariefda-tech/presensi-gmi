@@ -13,61 +13,60 @@
   </form>
 </div>
 
-<div class="table-wrap" style="margin-top:12px;">
-  <table class="table billing-table" aria-label="Ringkasan billing client">
-    <colgroup>
-      <col class="billing-col-client" />
-      <col class="billing-col-status" />
-      <col class="billing-col-type" />
-      <col class="billing-col-usage" />
-      <col class="billing-col-estimate" />
-      <col class="billing-col-action" />
-    </colgroup>
-    <thead>
-      <tr>
-        <th>Client</th>
-        <th>Status</th>
-        <th>Billing Type</th>
-        <th>Usage</th>
-        <th>Estimasi</th>
-        <th>Aksi</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% if not rows %}
-      <tr><td colspan="6" class="muted">Belum ada client.</td></tr>
-      {% endif %}
-      {% for row in rows %}
-      {% set summary = row.summary %}
-      <tr>
-        <td>
-          <div style="font-weight:700;">{{ row.client.name }}</div>
-          <div class="muted">{{ row.client.office_email or "-" }}</div>
-        </td>
-        <td>
-          {% if summary.billing_enabled and row.billing_config and row.active_contract %}
-          <span class="badge">Aktif</span>
-          {% else %}
-          <span class="badge pending">Perlu Setup</span>
-          {% endif %}
-          {% if summary.warnings %}
-          <div class="muted">{{ summary.warnings|join(" ") }}</div>
-          {% endif %}
-        </td>
-        <td>{{ summary.billing_type|replace("_", " ")|title }}</td>
-        <td>
-          <div>{{ summary.unit_count }} unit x Rp {{ "{:,.0f}".format(summary.rate or 0).replace(",", ".") }}</div>
-          <div class="muted">Karyawan {{ summary.total_employees }}, site {{ summary.total_sites }}, attendance {{ summary.total_attendance }}</div>
-        </td>
-        <td>
-          <strong>Rp {{ "{:,.0f}".format(summary.calculated_amount or 0).replace(",", ".") }}</strong>
-          <div class="muted">Tax Rp {{ "{:,.0f}".format(summary.tax_amount or 0).replace(",", ".") }}</div>
-        </td>
-        <td><a class="btn secondary" href="{{ url_for('admin.client_profile', client_id=row.client.id) }}#tab-billing">Detail</a></td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+<div class="card" style="margin-top:12px;">
+  <div class="table-wrap">
+    <table class="table billing-table" aria-label="Ringkasan billing client">
+      <thead>
+        <tr>
+          <th>Client<br><span class="attendance-head-sub">Status</span></th>
+          <th>Billing Type<br><span class="attendance-head-sub">Usage</span></th>
+          <th>Estimasi<br><span class="attendance-head-sub">Warnings</span></th>
+          <th>Aksi</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if not rows %}
+        <tr><td colspan="4" class="muted">Belum ada client.</td></tr>
+        {% endif %}
+        {% for row in rows %}
+        {% set summary = row.summary %}
+        <tr>
+          <td>
+            <div class="attendance-cell-pair">
+              <div class="attendance-cell-main">
+                <strong>{{ row.client.name }}</strong>
+              </div>
+              <div class="attendance-cell-sub">
+                <strong>{% if summary.billing_enabled and row.billing_config and row.active_contract %}Aktif{% else %}Perlu Setup{% endif %}</strong>
+              </div>
+            </div>
+          </td>
+          <td>
+            <div class="attendance-cell-pair">
+              <div class="attendance-cell-main">
+                <strong>{{ summary.billing_type|replace("_", " ")|title }}</strong>
+              </div>
+              <div class="attendance-cell-sub">
+                <strong>{{ summary.unit_count }} unit x Rp {{ "{:,.0f}".format(summary.rate or 0).replace(",", ".") }}</strong>
+              </div>
+            </div>
+          </td>
+          <td>
+            <div class="attendance-cell-pair">
+              <div class="attendance-cell-main">
+                <strong>Rp {{ "{:,.0f}".format(summary.calculated_amount or 0).replace(",", ".") }}</strong>
+              </div>
+              <div class="attendance-cell-sub">
+                <strong>{% if summary.warnings %}{{ summary.warnings|join(" ") }}{% else %}Tax Rp {{ "{:,.0f}".format(summary.tax_amount or 0).replace(",", ".") }}{% endif %}</strong>
+              </div>
+            </div>
+          </td>
+          <td><a class="btn secondary" href="{{ url_for('admin.client_profile', client_id=row.client.id) }}#tab-billing">Detail</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>
 
 <div class="alert info" style="margin-top:12px;">

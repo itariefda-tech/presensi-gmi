@@ -118,35 +118,63 @@
 </div>
 
 <div class="card" style="margin-top:12px;">
-  <table class="table table-wide" aria-label="Daftar policy">
+  <table class="table table-wide policy-list-table" aria-label="Daftar policy">
     <thead>
       <tr>
-        <th>Scope</th>
-        <th>Client</th>
-        <th>Site</th>
-        <th>Periode</th>
-        <th>Aturan</th>
+        <th>Scope<br><span class="attendance-head-sub">Client</span></th>
+        <th>Site<br><span class="attendance-head-sub">Periode</span></th>
+        <th>Durasi kerja<br><span class="attendance-head-sub">Toleransi telat</span></th>
+        <th>Aturan<br><span class="attendance-head-sub">Payroll</span></th>
         <th>Aksi</th>
       </tr>
     </thead>
     <tbody>
       {% if not policies %}
-      <tr><td colspan="6" class="muted">Belum ada policy.</td></tr>
+      <tr><td colspan="5" class="muted">Belum ada policy.</td></tr>
       {% endif %}
       {% for p in policies %}
       <tr>
-        <td>{{ p.scope_type }}</td>
-        <td>{{ p.client_name or '-' }}</td>
-        <td>{{ p.site_name or '-' }}</td>
-        <td>{{ p.effective_from|ddmmyyyy }}{% if p.effective_to %} - {{ p.effective_to|ddmmyyyy }}{% endif %}</td>
         <td>
-          GPS: {{ 'Ya' if p.allow_gps else 'Tidak' }},
-          QR: {{ 'Ya' if p.allow_qr else 'Tidak' }},
-          Selfie: {{ 'Ya' if p.require_selfie else 'Tidak' }},
-          Payroll: {{ 'Full Monthly' if p.payroll_scheme == 'FULL_MONTHLY_DEDUCTION' else 'Prorated' }},
-          Schedule: {{ 'Tengah Bulan' if p.payroll_schedule == 'MID_MONTH' else 'Akhir Bulan' }}
+          <div class="attendance-cell-pair">
+            <div class="attendance-cell-main">
+              <strong>{{ p.scope_type }}</strong>
+            </div>
+            <div class="attendance-cell-sub">
+              <strong>{{ p.client_name or '-' }}</strong>
+            </div>
+          </div>
         </td>
-          <td>
+        <td>
+          <div class="attendance-cell-pair">
+            <div class="attendance-cell-main">
+              <strong>{{ p.site_name or '-' }}</strong>
+            </div>
+            <div class="attendance-cell-sub">
+              <strong>{{ p.effective_from|ddmmyyyy }}{% if p.effective_to %} - {{ p.effective_to|ddmmyyyy }}{% endif %}</strong>
+            </div>
+          </div>
+        </td>
+        <td>
+          <div class="attendance-cell-pair">
+            <div class="attendance-cell-main">
+              <strong>{{ p.work_duration_minutes ~ ' menit' if p.work_duration_minutes else '-' }}</strong>
+            </div>
+            <div class="attendance-cell-sub">
+              <strong>{{ p.grace_minutes ~ ' menit' if p.grace_minutes is not none else '-' }}</strong>
+            </div>
+          </div>
+        </td>
+        <td>
+          <div class="attendance-cell-pair">
+            <div class="attendance-cell-main">
+              <strong>GPS {{ 'Ya' if p.allow_gps else 'Tidak' }} • QR {{ 'Ya' if p.allow_qr else 'Tidak' }} • Selfie {{ 'Ya' if p.require_selfie else 'Tidak' }}</strong>
+            </div>
+            <div class="attendance-cell-sub">
+              <strong>{{ 'Full Monthly' if p.payroll_scheme == 'FULL_MONTHLY_DEDUCTION' else 'Prorated' }} • {{ 'Tengah Bulan' if p.payroll_schedule == 'MID_MONTH' else 'Akhir Bulan' }}</strong>
+            </div>
+          </div>
+        </td>
+        <td>
           <details class="dropdown">
             <summary class="btn secondary icon-btn" aria-label="Aksi">
               <span></span>

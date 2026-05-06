@@ -9,51 +9,59 @@
   <div class="muted" style="margin-bottom:12px;">Kontrak aktif dipakai sebagai acuan SLA, payroll cycle, dan billing summary.</div>
 </div>
 
-<div class="table-wrap" style="margin-top:12px;">
-  <table class="table contract-table" aria-label="Kontrak aktif client">
-    <colgroup>
-      <col class="contract-col-client" />
-      <col class="contract-col-number" />
-      <col class="contract-col-period" />
-      <col class="contract-col-notice" />
-      <col class="contract-col-sla" />
-      <col class="contract-col-action" />
-    </colgroup>
-    <thead>
-      <tr>
-        <th>Client</th>
-        <th>Nomor Kontrak</th>
-        <th>Periode</th>
-        <th>Notice</th>
-        <th>SLA</th>
-        <th>Aksi</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% if not rows %}
-      <tr><td colspan="6" class="muted">Belum ada client.</td></tr>
-      {% endif %}
-      {% for row in rows %}
-      {% set contract = row.active_contract %}
-      <tr>
-        <td>
-          <div style="font-weight:700;">{{ row.client.name }}</div>
-          <div class="muted">{{ row.client.office_email or "-" }}</div>
-        </td>
-        <td>{{ contract.contract_no if contract else "-" }}</td>
-        <td>
-          {% if contract %}
-          {{ contract.start_date or "-" }} s/d {{ contract.end_date or "-" }}
-          {% else %}
-          <span class="muted">Kontrak aktif belum tersedia.</span>
-          {% endif %}
-        </td>
-        <td>{{ (contract.notice_period_days ~ " hari") if contract else "-" }}</td>
-        <td>{{ contract.sla_summary if contract and contract.sla_summary else "-" }}</td>
-        <td><a class="btn secondary" href="{{ url_for('admin.client_profile', client_id=row.client.id) }}#tab-billing">Kelola</a></td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+<div class="card" style="margin-top:12px;">
+  <div class="table-wrap">
+    <table class="table contract-table" aria-label="Kontrak aktif client">
+      <thead>
+        <tr>
+          <th>Client<br><span class="attendance-head-sub">Nomor Kontrak</span></th>
+          <th>Periode<br><span class="attendance-head-sub">Notice</span></th>
+          <th>SLA<br><span class="attendance-head-sub">Status</span></th>
+          <th>Aksi</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if not rows %}
+        <tr><td colspan="4" class="muted">Belum ada client.</td></tr>
+        {% endif %}
+        {% for row in rows %}
+        {% set contract = row.active_contract %}
+        <tr>
+          <td>
+            <div class="attendance-cell-pair">
+              <div class="attendance-cell-main">
+                <strong>{{ row.client.name }}</strong>
+              </div>
+              <div class="attendance-cell-sub">
+                <strong>{{ contract.contract_no if contract else "-" }}</strong>
+              </div>
+            </div>
+          </td>
+          <td>
+            <div class="attendance-cell-pair">
+              <div class="attendance-cell-main">
+                <strong>{% if contract %}{{ contract.start_date or "-" }} s/d {{ contract.end_date or "-" }}{% else %}-{% endif %}</strong>
+              </div>
+              <div class="attendance-cell-sub">
+                <strong>{{ (contract.notice_period_days ~ " hari") if contract else "-" }}</strong>
+              </div>
+            </div>
+          </td>
+          <td>
+            <div class="attendance-cell-pair">
+              <div class="attendance-cell-main">
+                <strong>{{ contract.sla_summary if contract and contract.sla_summary else "-" }}</strong>
+              </div>
+              <div class="attendance-cell-sub">
+                <strong>{% if contract %}Aktif{% else %}Belum aktif{% endif %}</strong>
+              </div>
+            </div>
+          </td>
+          <td><a class="btn secondary" href="{{ url_for('admin.client_profile', client_id=row.client.id) }}#tab-billing">Kelola</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>
 {% endblock %}
